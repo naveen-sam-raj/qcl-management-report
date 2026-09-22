@@ -181,27 +181,32 @@ const LandingPage = () => {
               {c.id === 'tfl' ? (
                 <div className="flex-1 flex flex-col justify-between">
                   {/* Top Status Badge */}
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-xs font-bold text-slate-400 font-mono">TFL</span>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                      <span className="text-xs font-bold text-slate-700 font-mono tracking-wide">TFL</span>
+                    </div>
                     <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${c.badgeColor}`}>
                       {c.telemetryStatus}
                     </span>
                   </div>
 
-                  {/* Centered Official TFL Photo / Logo */}
-                  <div className="flex-1 flex items-center justify-center py-8 px-4 my-auto">
-                    <img
-                      src="/tfl-logo.png"
-                      alt="Tuticorin Alkali Chemicals and Fertilizers"
-                      className="max-h-28 w-auto object-contain transition-transform duration-300 hover:scale-105"
-                    />
+                  {/* Official TFL Logo Container */}
+                  <div className="flex-1 flex flex-col items-center justify-center my-3">
+                    <div className="w-full flex-1 min-h-[190px] sm:min-h-[210px] flex items-center justify-center p-5 sm:p-6 bg-gradient-to-b from-slate-50/90 via-slate-50/40 to-white rounded-2xl border border-slate-100 shadow-[inset_0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-300 hover:border-blue-200 group">
+                      <img
+                        src="/tfl-logo.png"
+                        alt="Tuticorin Alkali Chemicals and Fertilizers"
+                        className="w-full max-w-[280px] sm:max-w-[320px] max-h-36 sm:max-h-40 object-contain drop-shadow-xs transition-transform duration-300 group-hover:scale-105"
+                      />
+                    </div>
                   </div>
 
                   {/* Action Button */}
                   <button
                     id={`btn-open-${c.id}`}
                     onClick={() => handleCompanyClick(c)}
-                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition ${c.buttonColor}`}
+                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition shadow-sm hover:shadow-md ${c.buttonColor}`}
                   >
                     <span>Enter TFL Portal</span>
                     <ArrowRight className="w-4 h-4" />
