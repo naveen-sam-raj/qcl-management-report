@@ -102,14 +102,14 @@ const LandingPage = () => {
         <img
           src="/plant-bg.jpg"
           alt="SPIC Plant Background"
-          className="w-full h-full object-cover object-center filter blur-md scale-105 opacity-45 brightness-95"
+          className="w-full h-full object-cover object-center filter blur-[3px] scale-105 opacity-85"
         />
-        {/* Soft Modern Glass Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-slate-50/85 via-slate-50/75 to-slate-100/90" />
+        {/* Subtle Light Glass Overlay for readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-white/50 via-white/35 to-white/60" />
       </div>
 
       {/* Top Corporate Navigation */}
-      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-slate-900 to-blue-700 flex items-center justify-center text-white font-extrabold text-xl shadow-md">
