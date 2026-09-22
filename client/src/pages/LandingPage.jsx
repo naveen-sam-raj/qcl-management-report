@@ -169,9 +169,13 @@ const LandingPage = () => {
             <div
               key={c.id}
               onClick={c.id === 'tfl' ? () => handleCompanyClick(c) : undefined}
-              className={`relative bg-white rounded-2xl border-2 border-slate-200/80 p-6 sm:p-7 flex flex-col justify-between transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover ${c.borderColor} ${
+              className={`relative bg-white rounded-2xl border-2 border-slate-200/80 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover ${c.borderColor} ${
                 c.featured ? 'ring-2 ring-blue-500/20' : ''
-              } ${c.id === 'tfl' ? 'cursor-pointer hover:border-blue-500 group' : ''}`}
+              } ${
+                c.id === 'tfl'
+                  ? 'self-center p-4 sm:p-5 cursor-pointer hover:border-blue-500 group'
+                  : 'p-6 sm:p-7 flex flex-col justify-between'
+              }`}
             >
               {c.featured && (
                 <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full text-[11px] font-bold bg-blue-600 text-white shadow-xs">
@@ -185,13 +189,13 @@ const LandingPage = () => {
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleCompanyClick(c)}
-                  className="flex-1 flex items-center justify-center py-6 px-2"
+                  className="w-full flex items-center justify-center p-2"
                   title="Click to enter TFL Portal"
                 >
                   <img
                     src="/tfl-logo.png"
                     alt="Tuticorin Alkali Chemicals and Fertilizers"
-                    className="w-full max-w-[340px] sm:max-w-[360px] max-h-44 sm:max-h-52 object-contain filter drop-shadow-xs transition-transform duration-300 group-hover:scale-105"
+                    className="w-full max-w-[320px] sm:max-w-[340px] h-auto object-contain filter drop-shadow-xs transition-transform duration-300 group-hover:scale-105"
                   />
                 </div>
               ) : (
