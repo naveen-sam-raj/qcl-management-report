@@ -168,12 +168,12 @@ const LandingPage = () => {
           {companies.map((c) => (
             <div
               key={c.id}
-              onClick={c.id === 'tfl' ? () => handleCompanyClick(c) : undefined}
+              onClick={(c.id === 'tfl' || c.id === 'spic') ? () => handleCompanyClick(c) : undefined}
               className={`relative bg-white rounded-2xl border-2 border-slate-200/80 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover ${c.borderColor} ${
                 c.featured ? 'ring-2 ring-blue-500/20' : ''
               } ${
-                c.id === 'tfl'
-                  ? 'self-center p-4 sm:p-5 cursor-pointer hover:border-blue-500 group'
+                (c.id === 'tfl' || c.id === 'spic')
+                  ? `self-center p-4 sm:p-5 cursor-pointer group ${c.id === 'spic' ? 'hover:border-emerald-500' : 'hover:border-blue-500'}`
                   : 'p-6 sm:p-7 flex flex-col justify-between'
               }`}
             >
@@ -196,6 +196,21 @@ const LandingPage = () => {
                     src="/tfl-logo.png"
                     alt="Tuticorin Alkali Chemicals and Fertilizers"
                     className="w-full max-w-[320px] sm:max-w-[340px] h-auto object-contain filter drop-shadow-xs transition-transform duration-300 group-hover:scale-105"
+                  />
+                </div>
+              ) : c.id === 'spic' ? (
+                <div
+                  id={`btn-open-${c.id}`}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleCompanyClick(c)}
+                  className="w-full flex items-center justify-center p-2"
+                  title="Click to enter SPIC Portal"
+                >
+                  <img
+                    src="/spic-logo.png"
+                    alt="SPIC Nourishing Growth"
+                    className="w-full max-w-[300px] sm:max-w-[320px] h-auto object-contain filter drop-shadow-xs transition-transform duration-300 group-hover:scale-105"
                   />
                 </div>
               ) : (
