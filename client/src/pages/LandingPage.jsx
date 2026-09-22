@@ -153,7 +153,7 @@ const LandingPage = () => {
               QCL
             </span>{' '}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-800">
-              MANAGEMENT REPORTS
+              ANALYSIS REPORTS
             </span>
           </h1>
 
@@ -180,9 +180,8 @@ const LandingPage = () => {
             <div
               key={c.id}
               onClick={() => handleCompanyClick(c)}
-              className={`relative bg-white/95 backdrop-blur-md rounded-2xl border-2 border-slate-200/90 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover self-center p-4 sm:p-5 cursor-pointer group ${c.borderColor} ${
-                c.featured ? 'ring-2 ring-blue-500/20' : ''
-              }`}
+              className={`relative bg-white/95 backdrop-blur-md rounded-2xl border-2 border-slate-200/90 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover self-center p-4 sm:p-5 cursor-pointer group ${c.borderColor} ${c.featured ? 'ring-2 ring-blue-500/20' : ''
+                }`}
             >
               {c.featured && (
                 <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full text-[11px] font-bold bg-blue-600 text-white shadow-xs">
