@@ -178,57 +178,90 @@ const LandingPage = () => {
                 </div>
               )}
 
-              <div>
-                {/* Top card header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-extrabold text-lg shadow-sm ${c.accentBg}`}>
-                      {c.name}
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900 leading-tight">
-                        {c.name}
-                      </h2>
-                      <span className="text-xs text-slate-400 font-medium">
-                        {c.code}
+              {c.id === 'tfl' ? (
+                <div className="flex-1 flex flex-col justify-between">
+                  {/* Top Status Badge */}
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs font-bold text-slate-400 font-mono">TFL</span>
+                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${c.badgeColor}`}>
+                      {c.telemetryStatus}
+                    </span>
+                  </div>
+
+                  {/* Centered Official TFL Photo / Logo */}
+                  <div className="flex-1 flex items-center justify-center py-8 px-4 my-auto">
+                    <img
+                      src="/tfl-logo.png"
+                      alt="Tuticorin Alkali Chemicals and Fertilizers"
+                      className="max-h-28 w-auto object-contain transition-transform duration-300 hover:scale-105"
+                    />
+                  </div>
+
+                  {/* Action Button */}
+                  <button
+                    id={`btn-open-${c.id}`}
+                    onClick={() => handleCompanyClick(c)}
+                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition ${c.buttonColor}`}
+                  >
+                    <span>Enter TFL Portal</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    {/* Top card header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-extrabold text-lg shadow-sm ${c.accentBg}`}>
+                          {c.name}
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-bold text-slate-900 leading-tight">
+                            {c.name}
+                          </h2>
+                          <span className="text-xs text-slate-400 font-medium">
+                            {c.code}
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${c.badgeColor}`}>
+                        {c.telemetryStatus}
                       </span>
                     </div>
+
+                    <div className="text-xs font-semibold text-slate-500 mb-2">
+                      {c.industry}
+                    </div>
+
+                    <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-6">
+                      {c.description}
+                    </p>
+
+                    {/* Status indicator bar */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 mb-6 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">Industrial Units</span>
+                        <span className="font-bold text-slate-800">{c.plantsText}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">Security Scope</span>
+                        <span className="font-bold text-slate-800">Isolated Tenant</span>
+                      </div>
+                    </div>
                   </div>
-                  <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${c.badgeColor}`}>
-                    {c.telemetryStatus}
-                  </span>
-                </div>
 
-                <div className="text-xs font-semibold text-slate-500 mb-2">
-                  {c.industry}
-                </div>
-
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-6">
-                  {c.description}
-                </p>
-
-                {/* Status indicator bar */}
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 mb-6 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-medium">Industrial Units</span>
-                    <span className="font-bold text-slate-800">{c.plantsText}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-medium">Security Scope</span>
-                    <span className="font-bold text-slate-800">Isolated Tenant</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <button
-                id={`btn-open-${c.id}`}
-                onClick={() => handleCompanyClick(c)}
-                className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition ${c.buttonColor}`}
-              >
-                <span>Enter {c.name} Portal</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+                  {/* Action Button */}
+                  <button
+                    id={`btn-open-${c.id}`}
+                    onClick={() => handleCompanyClick(c)}
+                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition ${c.buttonColor}`}
+                  >
+                    <span>Enter {c.name} Portal</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
           ))}
         </div>
