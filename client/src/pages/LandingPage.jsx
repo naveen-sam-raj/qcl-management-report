@@ -96,9 +96,20 @@ const LandingPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen relative flex flex-col selection:bg-blue-600 selection:text-white overflow-x-hidden">
+      {/* Blurred Industrial Ambient Background */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <img
+          src="/plant-bg.jpg"
+          alt="SPIC Plant Background"
+          className="w-full h-full object-cover object-center filter blur-md scale-105 opacity-45 brightness-95"
+        />
+        {/* Soft Modern Glass Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-50/85 via-slate-50/75 to-slate-100/90" />
+      </div>
+
       {/* Top Corporate Navigation */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
+      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-slate-900 to-blue-700 flex items-center justify-center text-white font-extrabold text-xl shadow-md">
@@ -169,7 +180,7 @@ const LandingPage = () => {
             <div
               key={c.id}
               onClick={() => handleCompanyClick(c)}
-              className={`relative bg-white rounded-2xl border-2 border-slate-200/80 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover self-center p-4 sm:p-5 cursor-pointer group ${c.borderColor} ${
+              className={`relative bg-white/95 backdrop-blur-md rounded-2xl border-2 border-slate-200/90 transition-all duration-300 hover-card-lift shadow-card hover:shadow-card-hover self-center p-4 sm:p-5 cursor-pointer group ${c.borderColor} ${
                 c.featured ? 'ring-2 ring-blue-500/20' : ''
               }`}
             >
