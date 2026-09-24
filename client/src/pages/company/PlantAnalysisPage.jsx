@@ -28,6 +28,7 @@ import DistillerWasteAnalysisPage from './DistillerWasteAnalysisPage';
 import VacuumSealWaterAnalysisPage from './VacuumSealWaterAnalysisPage';
 import BicarbonateAnalysisPage from './BicarbonateAnalysisPage';
 import BicarbonateMoistureAnalysisPage from './BicarbonateMoistureAnalysisPage';
+import E501T501AnalysisPage from './E501T501AnalysisPage';
 import ACLPlantReportsPage from './ACLPlantReportsPage';
 
 // 15 ACL Plant analysis options
@@ -49,7 +50,7 @@ const ACL_ANALYSIS_OPTIONS = [
   'Raw salt',
 ];
 
-// 17 SA Plant analysis options requested by user
+// 16 SA Plant analysis options requested by user
 const SA_ANALYSIS_OPTIONS = [
   'TK 401',
   'TK 405',
@@ -63,8 +64,7 @@ const SA_ANALYSIS_OPTIONS = [
   'Bicarbonate Moisture',
   'LSA at 500#',
   'LSA',
-  'E 501',
-  'T 501',
+  'E 501 / T 501',
   'LSA Bagging',
   'LSA Bagging sieve',
   'Gas Conc',
@@ -361,6 +361,22 @@ const PlantAnalysisPage = () => {
       decodedOptionName.toLowerCase().includes('carbonate')
     ) {
       return <BicarbonateAnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── E 501 / T 501 (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'e 501 / t 501' ||
+      decodedOptionName.toLowerCase() === 'e 501/t 501' ||
+      decodedOptionName.toLowerCase() === 'e 501/ t 501' ||
+      decodedOptionName.toLowerCase() === 'e501 / t501' ||
+      decodedOptionName.toLowerCase() === 'e501/t501' ||
+      decodedOptionName.toLowerCase() === 'e 501' ||
+      decodedOptionName.toLowerCase() === 't 501' ||
+      decodedOptionName.toLowerCase() === 'e501' ||
+      decodedOptionName.toLowerCase() === 't501' ||
+      (decodedOptionName.toLowerCase().includes('501') && !decodedOptionName.toLowerCase().includes('500'))
+    ) {
+      return <E501T501AnalysisPage plantId={id || 'sa'} />;
     }
 
     // ── CBD Analysis (OFFSET Plant) → dedicated full-featured module ──
