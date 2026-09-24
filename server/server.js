@@ -39,6 +39,8 @@ const vacuumSealWaterRoutes = require('./routes/vacuumSealWaterRoutes');
 const bicarbonateAnalysisRoutes = require('./routes/bicarbonateAnalysisRoutes');
 const bicarbonateMoistureRoutes = require('./routes/bicarbonateMoistureRoutes');
 const e501T501Routes = require('./routes/e501T501Routes');
+const superAdminRoutes = require('./routes/superAdminRoutes');
+const { initializeDefaultSuperAdmin } = require('./controllers/superAdminController');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -106,6 +108,7 @@ app.use('/api/bi-carbonate-moisture', bicarbonateMoistureRoutes);
 app.use('/api/e501-t501-analysis', e501T501Routes);
 app.use('/api/e501-analysis', e501T501Routes);
 app.use('/api/t501-analysis', e501T501Routes);
+app.use('/api/super-admin', superAdminRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {

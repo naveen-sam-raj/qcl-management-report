@@ -22,7 +22,8 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
 
   const getRoleBadge = () => {
     if (!user) return null;
-    if (user.role === 'super_admin') {
+    const roleLower = (user.role || '').toLowerCase();
+    if (roleLower === 'super_admin') {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
           <Shield className="w-3 h-3 text-purple-600" />

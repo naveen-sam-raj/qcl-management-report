@@ -136,6 +136,11 @@ class MemoryCollection {
         return await bcrypt.compare(enteredPassword, this.password);
       };
     }
+    if (this.name === 'SuperAdmin') {
+      doc.comparePassword = async function (candidatePassword) {
+        return await bcrypt.compare(candidatePassword, this.passwordHash);
+      };
+    }
     doc.save = async () => {
       const idx = this.docs.findIndex((d) => (d._id || d.id).toString() === (doc._id || doc.id).toString());
       if (idx !== -1) {
@@ -260,6 +265,7 @@ const getStore = () => {
       companies: new MemoryCollection('Company'),
       plants: new MemoryCollection('Plant'),
       users: new MemoryCollection('User'),
+      superAdmins: new MemoryCollection('SuperAdmin'),
       reports: new MemoryCollection('Report'),
       logs: new MemoryCollection('ActivityLog'),
     };

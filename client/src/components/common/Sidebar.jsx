@@ -32,10 +32,10 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   // Define navigation based on user role
   const getNavLinks = () => {
-    if (user?.role === 'super_admin') {
-      // Super Admin ONLY manages company admins — nothing else is visible
+    if (user?.role === 'super_admin' || user?.role === 'SUPER_ADMIN') {
       return [
         { label: 'Company Admins', to: '/super-admin', icon: UserCheck, exact: true },
+        { label: 'Account Settings', to: '/super-admin/settings', icon: Settings },
       ];
     }
 

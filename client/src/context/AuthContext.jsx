@@ -51,10 +51,11 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setUser(null);
     localStorage.removeItem('spic_auth_user');
+    localStorage.removeItem('spic_auth_token');
   };
 
   /**
-   * refreshUser — no-op in mock mode, just re-reads from localStorage
+   * refreshUser — re-reads from localStorage
    */
   const refreshUser = () => {
     const storedUser = localStorage.getItem('spic_auth_user');
@@ -71,7 +72,8 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider
       value={{
         user,
-        token: user ? 'mock-token' : null,
+        setUser,
+        token: localStorage.getItem('spic_auth_token') || (user ? 'mock-token' : null),
         isAuthenticated: !!user,
         role: user?.role || null,
         company: user?.company || null,

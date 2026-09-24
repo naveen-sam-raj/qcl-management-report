@@ -7,6 +7,7 @@ import TFLLogin from '../pages/auth/TFLLogin';
 import GreenstarLogin from '../pages/auth/GreenstarLogin';
 import DashboardLayout from '../layouts/DashboardLayout';
 import SuperAdminDashboard from '../pages/superadmin/SuperAdminDashboard';
+import SuperAdminSettings from '../pages/superadmin/SuperAdminSettings';
 import TFLAdminDashboard from '../pages/company/TFLAdminDashboard';
 import PlantAnalysisPage from '../pages/company/PlantAnalysisPage';
 import EmptyCompanyDashboard from '../pages/company/EmptyCompanyDashboard';
@@ -33,10 +34,11 @@ const AppRoutes = () => {
       {/* Legacy shared company login route — redirect to landing */}
       <Route path="/login/company" element={<Navigate to="/" replace />} />
 
-      {/* ── Super Admin Protected Routes (only Company Admin management) ── */}
+      {/* ── Super Admin Protected Routes ── */}
       <Route path="/super-admin" element={<DashboardLayout requiredRole="super_admin" />}>
         <Route index element={<SuperAdminDashboard />} />
-        {/* All sub-routes render same dashboard (company admin management only) */}
+        <Route path="settings" element={<SuperAdminSettings />} />
+        {/* All other sub-routes redirect to dashboard */}
         <Route path="*" element={<SuperAdminDashboard />} />
       </Route>
 

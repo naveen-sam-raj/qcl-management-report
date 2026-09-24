@@ -6,6 +6,7 @@ const MongoosePlant = require('./Plant');
 const MongooseUser = require('./User');
 const MongooseReport = require('./Report');
 const MongooseActivityLog = require('./ActivityLog');
+const MongooseSuperAdmin = require('./SuperAdmin');
 
 const isMongooseConnected = () => {
   return mongoose.connection.readyState === 1;
@@ -35,6 +36,7 @@ module.exports = {
   Company: createModelProxy(MongooseCompany, 'companies'),
   Plant: createModelProxy(MongoosePlant, 'plants'),
   User: createModelProxy(MongooseUser, 'users'),
+  SuperAdmin: createModelProxy(MongooseSuperAdmin, 'superAdmins'),
   Report: createModelProxy(MongooseReport, 'reports'),
   ActivityLog: createModelProxy(MongooseActivityLog, 'logs'),
   isMongooseConnected,

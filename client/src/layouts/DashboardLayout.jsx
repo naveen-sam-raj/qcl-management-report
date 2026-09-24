@@ -32,10 +32,14 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
   }
 
   // Role check
-  if (requiredRole && user?.role !== requiredRole) {
+  const userRole = (user?.role || '').toLowerCase();
+  const reqRole = (requiredRole || '').toLowerCase();
+  const isRoleMatch = !requiredRole || userRole === reqRole;
+
+  if (!isRoleMatch) {
     // Redirect to the correct dashboard based on actual role
-    if (user?.role === 'super_admin') return <Navigate to="/super-admin" replace />;
-    if (user?.role === 'company_admin') {
+    if (userRole === 'super_admin') return <Navigate to="/super-admin" replace />;
+    if (userRole === 'company_admin') {
       const code = user.company?.code?.toLowerCase() || 'tfl';
       return <Navigate to={`/admin/${code}`} replace />;
     }

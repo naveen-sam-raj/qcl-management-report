@@ -7,15 +7,19 @@ const connectDB = async () => {
   try {
     console.log('[Database] Attempting connection to MongoDB at:', uri);
     await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 2000,
+      serverSelectionTimeoutMS: 10000,
     });
-    console.log('[Database] MongoDB Connected Successfully.');
+    console.log('[Database] ✅ MongoDB Atlas Connected Successfully.');
     await seedDatabase();
+    const { initializeDefaultSuperAdmin } = require('../controllers/superAdminController');
+    await initializeDefaultSuperAdmin();
   } catch (error) {
-    console.warn('[Database] Local MongoDB server not reachable (' + error.message + ').');
+    console.warn('[Database] ⚠️ MongoDB Atlas connection error: ' + error.message);
     console.log('[Database] ✨ Activating Resilient In-Memory Multi-Tenant Store.');
     console.log('[Database] Zero configuration required - system is fully operational.');
     await seedDatabase();
+    const { initializeDefaultSuperAdmin } = require('../controllers/superAdminController');
+    await initializeDefaultSuperAdmin();
   }
 };
 

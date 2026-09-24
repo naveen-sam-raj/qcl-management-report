@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import api from '../../services/api';
 import Modal from '../../components/common/Modal';
 import {
   ShieldCheck,
@@ -19,7 +20,7 @@ import {
 
 const SuperAdminLogin = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, setUser } = useAuth();
   const { showToast } = useToast();
 
   const [identifier, setIdentifier] = useState('');
@@ -45,6 +46,36 @@ const SuperAdminLogin = () => {
 
     try {
       setLoading(true);
+
+      // Attempt authenticated Super Admin login via backend API
+      try {
+        const apiRes = await api.post('/super-admin/login', {
+          username: identifier.trim(),
+          password,
+        });
+
+        if (apiRes.data?.success && apiRes.data?.token) {
+          localStorage.setItem('spic_auth_token', apiRes.data.token);
+          const adminUser = {
+            username: apiRes.data.user.username,
+            name: 'Super Admin',
+            role: 'SUPER_ADMIN',
+          };
+          localStorage.setItem('spic_auth_user', JSON.stringify(adminUser));
+          if (setUser) setUser(adminUser);
+          showToast('Super Admin authenticated successfully', 'success');
+          navigate('/super-admin');
+          return;
+        }
+      } catch (backendErr) {
+        if (backendErr.response?.data?.message) {
+          setErrorMsg(backendErr.response.data.message);
+          return;
+        }
+        console.warn('Backend unavailable, trying mock fallback:', backendErr.message);
+      }
+
+      // Fallback to local auth if backend was unreachable
       const res = await login(identifier, password, 'super_admin');
       if (res.success) {
         showToast('Super Admin authenticated successfully', 'success');
@@ -118,7 +149,7 @@ const SuperAdminLogin = () => {
                 htmlFor="identifier"
                 className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5"
               >
-                Username or Corporate Email
+                Username
               </label>
               <div className="relative rounded-xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -130,7 +161,7 @@ const SuperAdminLogin = () => {
                   required
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="superadmin or admin@spicglobal.com"
+                  placeholder="QCL_ADMIN"
                   className="block w-full pl-10 pr-3 py-2.5 text-sm bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
                 />
               </div>
@@ -203,14 +234,14 @@ const SuperAdminLogin = () => {
 
           {/* Demo credentials hint */}
           <div className="mt-6 pt-5 border-t border-slate-700/60">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 text-center">Demo Credentials</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 text-center">Super Admin Credentials</p>
             <button
               type="button"
-              onClick={() => { setIdentifier('superadmin'); setPassword('Admin@123'); }}
+              onClick={() => { setIdentifier('QCL_ADMIN'); setPassword('Admin@QCL2026!'); }}
               className="w-full flex items-center justify-between px-3 py-2 bg-slate-900/60 rounded-xl border border-slate-700 hover:border-purple-500/50 transition cursor-pointer"
             >
-              <span className="text-[11px] text-slate-400">Click to auto-fill</span>
-              <span className="text-[11px] font-mono text-purple-300">superadmin / Admin@123</span>
+              <span className="text-[11px] text-slate-400">Click to auto-fill default</span>
+              <span className="text-[11px] font-mono text-purple-300">QCL_ADMIN / Admin@QCL2026!</span>
             </button>
           </div>
         </div>
