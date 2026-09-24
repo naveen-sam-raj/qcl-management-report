@@ -27,6 +27,7 @@ import CoolingWaterAnalysisPage from './CoolingWaterAnalysisPage';
 import DistillerWasteAnalysisPage from './DistillerWasteAnalysisPage';
 import VacuumSealWaterAnalysisPage from './VacuumSealWaterAnalysisPage';
 import BicarbonateAnalysisPage from './BicarbonateAnalysisPage';
+import BicarbonateMoistureAnalysisPage from './BicarbonateMoistureAnalysisPage';
 import ACLPlantReportsPage from './ACLPlantReportsPage';
 
 // 15 ACL Plant analysis options
@@ -59,7 +60,7 @@ const SA_ANALYSIS_OPTIONS = [
   'T 407',
   'T 401',
   'Bi carbonate',
-  'Bi Carbonate',
+  'Bicarbonate Moisture',
   'LSA at 500#',
   'LSA',
   'E 501',
@@ -341,7 +342,18 @@ const PlantAnalysisPage = () => {
       return <LSABaggingSieveAnalysisPage plantId={id || 'sa'} />;
     }
 
-    // ── Bi Carbonate (SA Plant) → dedicated full-featured module ──
+    // ── Bicarbonate Moisture (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase().includes('moisture') ||
+      decodedOptionName === 'Bi Carbonate' ||
+      decodedOptionName.toLowerCase() === 'bicarbonate moisture' ||
+      decodedOptionName.toLowerCase() === 'bi carbonate moisture' ||
+      decodedOptionName.toLowerCase() === 'bi-carbonate moisture'
+    ) {
+      return <BicarbonateMoistureAnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── Bi Carbonate NaCl/Na2CO3 (SA Plant) → dedicated full-featured module ──
     if (
       decodedOptionName.toLowerCase() === 'bi carbonate' ||
       decodedOptionName.toLowerCase() === 'bi-carbonate' ||

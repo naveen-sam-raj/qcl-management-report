@@ -28,7 +28,7 @@ export const SA_ANALYSIS_OPTIONS = [
   'T 407',
   'T 401',
   'Bi carbonate',
-  'Bi Carbonate',
+  'Bicarbonate Moisture',
   'LSA at 500#',
   'LSA',
   'E 501',
