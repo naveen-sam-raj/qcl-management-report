@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { seedDatabase } = require('./seedData');
 
 const connectDB = async () => {
-  const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/spic_analytics_db';
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/spic_analytics_db';
 
   try {
     console.log('[Database] Attempting connection to MongoDB at:', uri);
