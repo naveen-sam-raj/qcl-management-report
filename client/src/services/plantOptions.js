@@ -40,8 +40,7 @@ export const SA_ANALYSIS_OPTIONS = [
 
 export const OFFSITE_ANALYSIS_OPTIONS = [
   'DM water',
-  'BFW',
-  'SHS',
+  'Boiler Feed Water / Super Heated Steam',
   'Raw Water',
   'CBD',
   'Bottom ash',

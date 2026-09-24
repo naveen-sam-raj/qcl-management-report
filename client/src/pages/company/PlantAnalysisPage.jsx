@@ -1,13 +1,39 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Factory, Flame, Globe, Gauge, Inbox, Layers } from 'lucide-react';
+import { ArrowLeft, Factory, Flame, Globe, Gauge, Inbox, Layers, FileSpreadsheet } from 'lucide-react';
+import PureSaltAnalysisPage from './PureSaltAnalysisPage';
+import BrineAnalysisPage from './BrineAnalysisPage';
+import PureSaltSieveAnalysisPage from './PureSaltSieveAnalysisPage';
+import TK203AnalysisPage from './TK203AnalysisPage';
+import TK205AnalysisPage from './TK205AnalysisPage';
+import TK207AnalysisPage from './TK207AnalysisPage';
+import ACLProductAnalysisPage from './ACLProductAnalysisPage';
+import PclTclAnalysisPage from './PclTclAnalysisPage';
+import CR203AnalysisPage from './CR203AnalysisPage';
+import CR202AnalysisPage from './CR202AnalysisPage';
+import T401AnalysisPage from './T401AnalysisPage';
+import TK419AnalysisPage from './TK419AnalysisPage';
+import LSA500AnalysisPage from './LSA500AnalysisPage';
+import LSAShiftAnalysisPage from './LSAShiftAnalysisPage';
+import LSABaggingSieveAnalysisPage from './LSABaggingSieveAnalysisPage';
+import CBDAnalysisPage from './CBDAnalysisPage';
+import FlyAshAnalysisPage from './FlyAshAnalysisPage';
+import BottomAshAnalysisPage from './BottomAshAnalysisPage';
+import RawWaterAnalysisPage from './RawWaterAnalysisPage';
+import BFWAnalysisPage from './BFWAnalysisPage';
+import SewerWaterAnalysisPage from './SewerWaterAnalysisPage';
+import CoolingWaterAnalysisPage from './CoolingWaterAnalysisPage';
+import DistillerWasteAnalysisPage from './DistillerWasteAnalysisPage';
+import VacuumSealWaterAnalysisPage from './VacuumSealWaterAnalysisPage';
+import BicarbonateAnalysisPage from './BicarbonateAnalysisPage';
+import ACLPlantReportsPage from './ACLPlantReportsPage';
 
 // 15 ACL Plant analysis options
 const ACL_ANALYSIS_OPTIONS = [
   'Pure salt analysis',
-  'Bine analysis',
-  'Pure salt seive analysis',
+  'Brine analysis',
+  'Pure salt sieve analysis',
   'TK 203',
   'TK 204',
   'TK 205',
@@ -46,8 +72,7 @@ const SA_ANALYSIS_OPTIONS = [
 // 12 OFFSITE / OFFSET Plant analysis options requested by user
 const OFFSITE_ANALYSIS_OPTIONS = [
   'DM water',
-  'BFW',
-  'SHS',
+  'Boiler Feed Water / Super Heated Steam',
   'Raw Water',
   'CBD',
   'Bottom ash',
@@ -180,8 +205,253 @@ const PlantAnalysisPage = () => {
     navigate(`${basePath}/plants/${id}/options/${encodeURIComponent(option)}`);
   };
 
-  // ── VIEW 1: Empty state view when inside a clicked option ──
+  // ── VIEW 1: Dedicated module or empty state for a clicked option ──
   if (decodedOptionName) {
+    // ── Reports → dedicated centralized ACL Plant reporting dashboard ──
+    if (decodedOptionName.toLowerCase() === 'reports') {
+      return <ACLPlantReportsPage plantId={id} />;
+    }
+
+    // ── Pure Salt Analysis → dedicated full-featured module ──
+    if (decodedOptionName.toLowerCase() === 'pure salt analysis') {
+      return <PureSaltAnalysisPage plantId={id} />;
+    }
+
+    // ── Brine Analysis → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'brine analysis' ||
+      decodedOptionName.toLowerCase() === 'bine analysis'
+    ) {
+      return <BrineAnalysisPage plantId={id} />;
+    }
+
+    // ── Pure Salt Sieve Analysis → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'pure salt sieve analysis' ||
+      decodedOptionName.toLowerCase() === 'pure salt seive analysis' ||
+      decodedOptionName.toLowerCase() === 'sieve analysis'
+    ) {
+      return <PureSaltSieveAnalysisPage plantId={id} />;
+    }
+
+    // ── TK 203 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'tk 203' ||
+      decodedOptionName.toLowerCase() === 'tk203'
+    ) {
+      return <TK203AnalysisPage plantId={id} />;
+    }
+
+    // ── TK 205 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'tk 205' ||
+      decodedOptionName.toLowerCase() === 'tk205'
+    ) {
+      return <TK205AnalysisPage plantId={id} />;
+    }
+
+    // ── TK 207 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'tk 207' ||
+      decodedOptionName.toLowerCase() === 'tk207'
+    ) {
+      return <TK207AnalysisPage plantId={id} />;
+    }
+
+    // ── ACL Product → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'acl product' ||
+      decodedOptionName.toLowerCase() === 'aclproduct'
+    ) {
+      return <ACLProductAnalysisPage plantId={id} />;
+    }
+
+    // ── PCL/TCL → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'pcl/tcl' ||
+      decodedOptionName.toLowerCase() === 'pcl / tcl' ||
+      decodedOptionName.toLowerCase() === 'pcl-tcl' ||
+      decodedOptionName.toLowerCase() === 'pcl'
+    ) {
+      return <PclTclAnalysisPage plantId={id} />;
+    }
+
+    // ── CR 203 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'cr 203' ||
+      decodedOptionName.toLowerCase() === 'cr203'
+    ) {
+      return <CR203AnalysisPage plantId={id} />;
+    }
+
+    // ── CR 202 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'cr 202' ||
+      decodedOptionName.toLowerCase() === 'cr202'
+    ) {
+      return <CR202AnalysisPage plantId={id} />;
+    }
+
+    // ── T 401 (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 't 401' ||
+      decodedOptionName.toLowerCase() === 't401'
+    ) {
+      return <T401AnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── TK 419 (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'tk 419' ||
+      decodedOptionName.toLowerCase() === 'tk419'
+    ) {
+      return <TK419AnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── LSA at 500# (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'lsa at 500#' ||
+      decodedOptionName.toLowerCase() === 'lsa 500#' ||
+      decodedOptionName.toLowerCase() === 'lsa at 500' ||
+      decodedOptionName.toLowerCase() === 'lsa 500' ||
+      decodedOptionName.toLowerCase().includes('500#')
+    ) {
+      return <LSA500AnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── LSA (LSA Shift Analysis - SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'lsa' ||
+      decodedOptionName.toLowerCase() === 'lsa shift' ||
+      decodedOptionName.toLowerCase() === 'lsa-shift' ||
+      decodedOptionName.toLowerCase() === 'lsa shift analysis'
+    ) {
+      return <LSAShiftAnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── LSA Bagging Sieve (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'lsa bagging sieve' ||
+      decodedOptionName.toLowerCase() === 'lsa bagging seive' ||
+      decodedOptionName.toLowerCase() === 'bagging sieve' ||
+      decodedOptionName.toLowerCase() === 'bagging seive' ||
+      decodedOptionName.toLowerCase().includes('bagging sieve') ||
+      decodedOptionName.toLowerCase().includes('bagging seive')
+    ) {
+      return <LSABaggingSieveAnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── Bi Carbonate (SA Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'bi carbonate' ||
+      decodedOptionName.toLowerCase() === 'bi-carbonate' ||
+      decodedOptionName.toLowerCase() === 'bicarbonate' ||
+      decodedOptionName.toLowerCase().includes('carbonate')
+    ) {
+      return <BicarbonateAnalysisPage plantId={id || 'sa'} />;
+    }
+
+    // ── CBD Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'cbd' ||
+      decodedOptionName.toLowerCase() === 'cbd analysis'
+    ) {
+      return <CBDAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── FLY Ash Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'fly ash' ||
+      decodedOptionName.toLowerCase() === 'flyash' ||
+      decodedOptionName.toLowerCase() === 'fly-ash' ||
+      decodedOptionName.toLowerCase().includes('fly ash')
+    ) {
+      return <FlyAshAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Bottom Ash Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'bottom ash' ||
+      decodedOptionName.toLowerCase() === 'bottomash' ||
+      decodedOptionName.toLowerCase() === 'bottom-ash' ||
+      decodedOptionName.toLowerCase().includes('bottom ash')
+    ) {
+      return <BottomAshAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Raw Water Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'raw water' ||
+      decodedOptionName.toLowerCase() === 'rawwater' ||
+      decodedOptionName.toLowerCase() === 'raw-water' ||
+      decodedOptionName.toLowerCase().includes('raw water')
+    ) {
+      return <RawWaterAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Boiler Feed Water / Super Heated Steam (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'boiler feed water / super heated steam' ||
+      decodedOptionName.toLowerCase() === 'boiler feed water/super heated steam' ||
+      decodedOptionName.toLowerCase().includes('boiler feed water') ||
+      decodedOptionName.toLowerCase().includes('boiled feed water') ||
+      decodedOptionName.toLowerCase().includes('super heated steam') ||
+      decodedOptionName.toLowerCase().includes('super heated system') ||
+      decodedOptionName.toLowerCase() === 'bfw' ||
+      decodedOptionName.toLowerCase() === 'shs'
+    ) {
+      return <BFWAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Sewer / Sewar Water Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'sewar water' ||
+      decodedOptionName.toLowerCase() === 'sewer water' ||
+      decodedOptionName.toLowerCase() === 'sewar' ||
+      decodedOptionName.toLowerCase() === 'sewer' ||
+      decodedOptionName.toLowerCase().includes('sewar') ||
+      decodedOptionName.toLowerCase().includes('sewer')
+    ) {
+      return <SewerWaterAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Cooling Water (C.W Water) & Cooling Water / 200# (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'cooling water' ||
+      decodedOptionName.toLowerCase() === 'cooling water/200#' ||
+      decodedOptionName.toLowerCase() === 'cooling water / 200#' ||
+      decodedOptionName.toLowerCase() === 'c.w water' ||
+      decodedOptionName.toLowerCase() === 'cw water' ||
+      decodedOptionName.toLowerCase().includes('cooling water') ||
+      decodedOptionName.toLowerCase().includes('c.w water')
+    ) {
+      return <CoolingWaterAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Distiller Waste / Distiller Waste Water (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'distiller waste' ||
+      decodedOptionName.toLowerCase() === 'distiller waste water' ||
+      decodedOptionName.toLowerCase() === 'distiller' ||
+      decodedOptionName.toLowerCase() === 'distiller waste' ||
+      decodedOptionName.toLowerCase().includes('distiller')
+    ) {
+      return <DistillerWasteAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── Vacuum / Vaccum Seal Water (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'vaccum seal water' ||
+      decodedOptionName.toLowerCase() === 'vacuum seal water' ||
+      decodedOptionName.toLowerCase() === 'vaccum seal' ||
+      decodedOptionName.toLowerCase() === 'vacuum seal' ||
+      decodedOptionName.toLowerCase().includes('vaccum') ||
+      decodedOptionName.toLowerCase().includes('vacuum')
+    ) {
+      return <VacuumSealWaterAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── All other options → generic empty placeholder ──
     return (
       <div className="space-y-6 animate-fadeIn pb-12">
         {/* Header bar */}
@@ -273,13 +543,28 @@ const PlantAnalysisPage = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => navigate(basePath)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition self-start sm:self-auto"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to Plants</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+          {/* Dedicated Reports button at the ACL Plant level */}
+          {plantKey.includes('acl') && (
+            <button
+              id="btn-acl-header-reports"
+              onClick={() => handleOptionClick('Reports')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 rounded-lg transition shadow-xs"
+              title="ACL Plant Centralized Reports"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
+              <span>Reports</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => navigate(basePath)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to Plants</span>
+          </button>
+        </div>
       </div>
 
       {/* Content Area */}
