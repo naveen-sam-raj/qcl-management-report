@@ -40,6 +40,7 @@ const bicarbonateAnalysisRoutes = require('./routes/bicarbonateAnalysisRoutes');
 const bicarbonateMoistureRoutes = require('./routes/bicarbonateMoistureRoutes');
 const e501T501Routes = require('./routes/e501T501Routes');
 const dmWaterAnalysisRoutes = require('./routes/dmWaterAnalysisRoutes');
+const tk204Tk209Routes = require('./routes/tk204Tk209Routes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const { initializeDefaultSuperAdmin } = require('./controllers/superAdminController');
 
@@ -79,6 +80,9 @@ app.use('/api/pure-salt-analysis', pureSaltAnalysisRoutes);
 app.use('/api/brine-analysis', brineAnalysisRoutes);
 app.use('/api/pure-salt-sieve-analysis', pureSaltSieveAnalysisRoutes);
 app.use('/api/tk-203-analysis', tk203AnalysisRoutes);
+app.use('/api/tk-204-tk-209-analysis', tk204Tk209Routes);
+app.use('/api/tk204-tk209-analysis', tk204Tk209Routes);
+app.use('/api/tk204-209-analysis', tk204Tk209Routes);
 app.use('/api/tk-205-analysis', tk205AnalysisRoutes);
 app.use('/api/tk-207-analysis', tk207AnalysisRoutes);
 app.use('/api/acl-product', aclProductRoutes);

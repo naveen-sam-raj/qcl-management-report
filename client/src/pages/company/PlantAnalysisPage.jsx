@@ -31,17 +31,17 @@ import BicarbonateMoistureAnalysisPage from './BicarbonateMoistureAnalysisPage';
 import E501T501AnalysisPage from './E501T501AnalysisPage';
 import DMWaterAnalysisPage from './DMWaterAnalysisPage';
 import ACLPlantReportsPage from './ACLPlantReportsPage';
+import TK204TK209AnalysisPage from './TK204TK209AnalysisPage';
 
-// 15 ACL Plant analysis options
+// 14 ACL Plant analysis options
 const ACL_ANALYSIS_OPTIONS = [
   'Pure salt analysis',
   'Brine analysis',
   'Pure salt sieve analysis',
   'TK 203',
-  'TK 204',
+  'TK 204 / TK 209',
   'TK 205',
   'TK 207',
-  'TK 209',
   'Cr 202',
   'Cr 203',
   'PCL/TCL',
@@ -109,14 +109,14 @@ const PLANT_CONFIG = {
     title: 'ACL Plant',
     subtitle: 'Ammonium Chloride Production Unit',
     options: ACL_ANALYSIS_OPTIONS,
-    badge: '15 Analysis Options',
+    badge: '14 Analysis Options',
     icon: Factory,
   },
   plant_acl: {
     title: 'ACL Plant',
     subtitle: 'Ammonium Chloride Production Unit',
     options: ACL_ANALYSIS_OPTIONS,
-    badge: '15 Analysis Options',
+    badge: '14 Analysis Options',
     icon: Factory,
   },
   sa: {
@@ -242,6 +242,18 @@ const PlantAnalysisPage = () => {
       decodedOptionName.toLowerCase() === 'tk203'
     ) {
       return <TK203AnalysisPage plantId={id} />;
+    }
+
+    // ── TK 204 / TK 209 → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'tk 204 / tk 209' ||
+      decodedOptionName.toLowerCase() === 'tk 204/tk 209' ||
+      decodedOptionName.toLowerCase() === 'tk 204/ tk 209' ||
+      decodedOptionName.toLowerCase() === 'tk 204' ||
+      decodedOptionName.toLowerCase() === 'tk 209' ||
+      (decodedOptionName.toLowerCase().includes('204') && decodedOptionName.toLowerCase().includes('209'))
+    ) {
+      return <TK204TK209AnalysisPage plantId={id} />;
     }
 
     // ── TK 205 → dedicated full-featured module ──
