@@ -142,6 +142,9 @@ class MemoryCollection {
       };
     }
     doc.save = async () => {
+      if (this.name === 'User' && doc.password && !doc.password.startsWith('$2')) {
+        doc.password = await bcrypt.hash(doc.password, 10);
+      }
       const idx = this.docs.findIndex((d) => (d._id || d.id).toString() === (doc._id || doc.id).toString());
       if (idx !== -1) {
         this.docs[idx] = { ...doc, updatedAt: new Date() };

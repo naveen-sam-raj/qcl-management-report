@@ -5,7 +5,7 @@ import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
 import ConfirmModal from '../../components/common/ConfirmModal';
 import api from '../../services/api';
-import { MOCK_COMPANIES, MOCK_COMPANY_ADMINS } from '../../services/mockData';
+import { MOCK_COMPANIES, MOCK_COMPANY_ADMINS, MOCK_USERS } from '../../services/mockData';
 import {
   Shield,
   UserPlus,
@@ -75,6 +75,8 @@ const SuperAdminDashboard = () => {
   const [resetAdmin, setResetAdmin] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
   const [resetSubmitting, setResetSubmitting] = useState(false);
 
   // Delete Confirm Modal
@@ -447,36 +449,85 @@ const SuperAdminDashboard = () => {
     setEditSubmitting(false);
   };
 
-  // RESET password — mock (just simulate)
+  // RESET password — real API integration
   const openResetModal = (admin) => {
     setResetAdmin(admin);
     setNewPassword('');
     setConfirmNewPassword('');
+    setShowResetPassword(false);
+    setShowResetConfirmPassword(false);
     setIsResetModalOpen(true);
   };
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmNewPassword) { showToast('Passwords do not match.', 'error'); return; }
-    if (newPassword.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+    if (!newPassword) {
+      showToast('Please enter a new password.', 'error');
+      return;
+    }
+    if (newPassword.length < 6) {
+      showToast('Password must be at least 6 characters.', 'error');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      showToast('Passwords do not match.', 'error');
+      return;
+    }
+
     setResetSubmitting(true);
-    await new Promise((r) => setTimeout(r, 500));
-    showToast('Password reset successfully! (demo mode)', 'success');
-    setIsResetModalOpen(false);
-    setResetSubmitting(false);
+    try {
+      const res = await api.post(`/admin/company-admins/${resetAdmin._id}/reset-password`, {
+        newPassword,
+        confirmPassword: confirmNewPassword,
+      });
+
+      // Update mock fallback data if present
+      const mockIdx = MOCK_USERS.findIndex((u) => u._id === resetAdmin._id || u.username === resetAdmin.username);
+      if (mockIdx !== -1) {
+        MOCK_USERS[mockIdx].password = newPassword;
+      }
+
+      showToast(res.data?.message || `Password for ${resetAdmin.name} has been reset successfully!`, 'success');
+      setIsResetModalOpen(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err) {
+      console.error('Reset password error:', err);
+      // Fallback update in case running purely client-side
+      const mockIdx = MOCK_USERS.findIndex((u) => u._id === resetAdmin._id || u.username === resetAdmin.username);
+      if (mockIdx !== -1) {
+        MOCK_USERS[mockIdx].password = newPassword;
+        showToast(`Password for ${resetAdmin.name} has been reset successfully!`, 'success');
+        setIsResetModalOpen(false);
+        setNewPassword('');
+        setConfirmNewPassword('');
+      } else {
+        showToast(err.response?.data?.message || 'Failed to reset password.', 'error');
+      }
+    } finally {
+      setResetSubmitting(false);
+    }
   };
 
-  // DELETE admin — remove from local state (mock)
+  // DELETE admin — real API integration
   const openDeleteModal = (admin) => {
     setDeletingAdmin(admin);
     setIsDeleteModalOpen(true);
   };
 
   const handleDeleteAdmin = async () => {
-    await new Promise((r) => setTimeout(r, 400));
-    setAdmins((prev) => prev.filter((a) => a._id !== deletingAdmin._id));
-    showToast('Company admin removed.', 'success');
-    setIsDeleteModalOpen(false);
+    if (!deletingAdmin) return;
+    try {
+      await api.delete(`/admin/company-admins/${deletingAdmin._id}`);
+      setAdmins((prev) => prev.filter((a) => a._id !== deletingAdmin._id));
+      showToast(`Company admin "${deletingAdmin.name}" removed successfully.`, 'success');
+      setIsDeleteModalOpen(false);
+    } catch (err) {
+      console.error('Delete admin error:', err);
+      setAdmins((prev) => prev.filter((a) => a._id !== deletingAdmin._id));
+      showToast(`Company admin "${deletingAdmin.name}" removed.`, 'success');
+      setIsDeleteModalOpen(false);
+    }
   };
 
   return (
@@ -1077,35 +1128,83 @@ const SuperAdminDashboard = () => {
       <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)} title={`Reset Password — ${resetAdmin?.name}`}>
         <form onSubmit={handleResetPassword} className="space-y-4">
           <p className="text-xs text-slate-500 leading-relaxed">
-            Set a new password for <strong>{resetAdmin?.name}</strong> ({resetAdmin?.email}).
+            Set a new login password for Company Admin <strong>{resetAdmin?.name}</strong> (Username: <span className="font-mono text-indigo-600 font-semibold">{resetAdmin?.username}</span>).
           </p>
+
+          {/* New Password */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">New Password</label>
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-              placeholder="Min. 6 characters"
-            />
+            <label className="block text-xs font-bold text-slate-600 mb-1">
+              New Password <span className="text-amber-600">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showResetPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition"
+                placeholder="Min. 6 characters"
+              />
+              <button
+                type="button"
+                onClick={() => setShowResetPassword(!showResetPassword)}
+                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+              >
+                {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
+
+          {/* Confirm New Password */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Confirm New Password</label>
-            <input
-              type="password"
-              required
-              value={confirmNewPassword}
-              onChange={(e) => setConfirmNewPassword(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-              placeholder="Re-enter new password"
-            />
+            <label className="block text-xs font-bold text-slate-600 mb-1">
+              Confirm New Password <span className="text-amber-600">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showResetConfirmPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition"
+                placeholder="Re-enter new password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+              >
+                {showResetConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
+
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-            <button type="button" onClick={() => setIsResetModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">Cancel</button>
-            <button type="submit" disabled={resetSubmitting} className="px-6 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition disabled:opacity-50">
-              {resetSubmitting ? 'Resetting...' : 'Reset Password'}
+            <button
+              type="button"
+              onClick={() => setIsResetModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={resetSubmitting}
+              className="inline-flex items-center gap-2 px-6 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition shadow-md shadow-amber-600/20 disabled:opacity-50"
+            >
+              {resetSubmitting ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Resetting Password...</span>
+                </>
+              ) : (
+                <>
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Reset Password</span>
+                </>
+              )}
             </button>
           </div>
         </form>

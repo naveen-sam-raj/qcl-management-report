@@ -345,9 +345,120 @@ const getSuperAdminStats = async (req, res) => {
   }
 };
 
+// @desc    Reset Company Admin Password
+// @route   POST /api/admin/company-admins/:id/reset-password
+// @access  Private (Super Admin)
+const resetCompanyAdminPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword, confirmPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password is required.',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters.',
+      });
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match.',
+      });
+    }
+
+    const admin = await User.findById(id).populate('company');
+    if (!admin || admin.role !== 'company_admin') {
+      return res.status(404).json({
+        success: false,
+        message: 'Company Admin not found.',
+      });
+    }
+
+    admin.password = newPassword;
+    await admin.save();
+
+    // Record audit log
+    try {
+      await ActivityLog.create({
+        user: req.user?._id || req.user?.id,
+        userName: req.user?.name || req.user?.username || 'Super Admin',
+        userEmail: req.user?.email || 'admin@spicglobal.com',
+        role: req.user?.role || 'super_admin',
+        company: admin.company?._id || admin.company || null,
+        companyName: admin.company?.name || 'Company',
+        action: 'COMPANY_ADMIN_PASSWORD_RESET',
+        details: `Super Admin reset password for Company Admin "${admin.name}" (${admin.username})`,
+        ipAddress: req.ip || '127.0.0.1',
+      });
+    } catch (e) {
+      console.warn('Audit log error:', e.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Password for ${admin.name} has been reset successfully.`,
+    });
+  } catch (error) {
+    console.error('Error resetting company admin password:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Delete Company Admin
+// @route   DELETE /api/admin/company-admins/:id
+// @access  Private (Super Admin)
+const deleteCompanyAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const admin = await User.findById(id);
+
+    if (!admin || admin.role !== 'company_admin') {
+      return res.status(404).json({
+        success: false,
+        message: 'Company Admin not found.',
+      });
+    }
+
+    await User.findByIdAndDelete(id);
+
+    try {
+      await ActivityLog.create({
+        user: req.user?._id || req.user?.id,
+        userName: req.user?.name || req.user?.username || 'Super Admin',
+        userEmail: req.user?.email || 'admin@spicglobal.com',
+        role: req.user?.role || 'super_admin',
+        company: admin.company?._id || admin.company || null,
+        action: 'COMPANY_ADMIN_DELETED',
+        details: `Deleted Company Admin "${admin.name}" (${admin.username})`,
+        ipAddress: req.ip || '127.0.0.1',
+      });
+    } catch (e) {
+      console.warn('Audit log error:', e.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Company Admin removed successfully.',
+    });
+  } catch (error) {
+    console.error('Error deleting company admin:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createCompanyAdmin,
   getCompanyAdmins,
   updateCompanyAdmin,
   getSuperAdminStats,
+  resetCompanyAdminPassword,
+  deleteCompanyAdmin,
 };
