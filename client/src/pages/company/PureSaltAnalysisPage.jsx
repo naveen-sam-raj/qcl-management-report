@@ -122,7 +122,8 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── State ──
   const [date, setDate] = useState('');
