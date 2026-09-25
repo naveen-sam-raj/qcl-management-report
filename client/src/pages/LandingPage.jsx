@@ -3,16 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   Shield,
-  Building2,
-  Factory,
-  ChevronRight,
-  Lock,
   ArrowRight,
-  Activity,
-  Layers,
   Sparkles,
-  ExternalLink,
-  CheckCircle2,
 } from 'lucide-react';
 
 const LandingPage = () => {
@@ -250,53 +242,7 @@ const LandingPage = () => {
             );
           })}
         </div>
-
-        {/* Super Admin Callout Banner - Sleek & Compact */}
-        <div className="max-w-4xl mx-auto w-full mt-6 bg-slate-900/95 backdrop-blur-xl rounded-2xl p-4 sm:p-5 text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800">
-          <div className="flex items-center gap-3.5 text-left w-full sm:w-auto">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300 shrink-0">
-              <Shield className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/30 text-purple-300 border border-purple-400/30">
-                  HEADQUARTERS
-                </span>
-                <span className="text-xs sm:text-sm font-bold text-white">
-                  Super Administrator Governance Center
-                </span>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-                Manage subsidiaries, configure plant access, provision company admins, and view consolidated logs.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => navigate('/login/super-admin')}
-            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-white text-slate-900 hover:bg-slate-100 transition shadow-sm active:scale-95 cursor-pointer"
-          >
-            <Lock className="w-3.5 h-3.5 text-purple-600" />
-            <span>Open Super Admin</span>
-          </button>
-        </div>
       </main>
-
-      {/* Platform Footer */}
-      <footer className="bg-white/80 backdrop-blur-md border-t border-slate-200/80 py-4 px-4 sm:px-6 text-center text-[11px] text-slate-500">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            © 2026 SPIC Group. Tuticorin Alkali Chemicals & Fertilizers (TFL) • Greenstar (GSFL).
-          </div>
-          <div className="flex items-center gap-4 font-medium text-slate-600">
-            <span>Role-Based Access</span>
-            <span>•</span>
-            <span>Dynamic Reports</span>
-            <span>•</span>
-            <span>Live Plant Telemetry</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };
