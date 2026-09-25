@@ -363,6 +363,22 @@ const deleteUser = async (req, res) => {
 
     await User.findByIdAndDelete(req.params.id);
 
+    try {
+      await ActivityLog.create({
+        user: req.user?._id || req.user?.id,
+        userName: req.user?.name || req.user?.username || 'Admin',
+        userEmail: req.user?.email || 'admin@spicglobal.com',
+        role: req.user?.role || 'company_admin',
+        company: user.company?._id || user.company || null,
+        companyName: user.company?.name || 'Company',
+        action: 'USER_DELETED',
+        details: `Deleted user "${user.name}" (${user.username})`,
+        ipAddress: req.ip || '127.0.0.1',
+      });
+    } catch (e) {
+      console.warn('Audit log error:', e.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: `User ${user.name} (${user.username}) deleted successfully.`,

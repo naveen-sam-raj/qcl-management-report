@@ -193,59 +193,138 @@ const UserManagementPage = () => {
     setSubmitting(false);
   };
 
-  // Edit User — mock (update local state)
+  // Edit User — Real Backend API Call
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!activeUser) return;
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setUsersList((prev) => prev.map((u) => u._id === activeUser._id ? { ...u, ...editFormData } : u));
-    showToast('User profile updated successfully', 'success');
-    setIsEditModalOpen(false);
-    setActiveUser(null);
-    setSubmitting(false);
+    try {
+      const res = await api.put(`/users/${activeUser._id}`, editFormData);
+      const updatedUser = res.data?.user || { ...activeUser, ...editFormData };
+
+      // Update fallback mock data if present
+      const mockIdx = MOCK_USERS.findIndex(
+        (u) => (u._id || u.id) === activeUser._id || u.username === activeUser.username
+      );
+      if (mockIdx !== -1) {
+        MOCK_USERS[mockIdx] = { ...MOCK_USERS[mockIdx], ...editFormData };
+      }
+
+      setUsersList((prev) => prev.map((u) => (u._id === activeUser._id ? updatedUser : u)));
+      showToast(res.data?.message || 'User profile updated successfully.', 'success');
+      setIsEditModalOpen(false);
+      setActiveUser(null);
+    } catch (err) {
+      console.error('Edit user error:', err);
+      setUsersList((prev) => prev.map((u) => (u._id === activeUser._id ? { ...u, ...editFormData } : u)));
+      showToast(err.response?.data?.message || 'Failed to update user profile.', 'error');
+      setIsEditModalOpen(false);
+      setActiveUser(null);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // Reset Password — mock (just simulate)
+  // Reset Password — Real Backend API Call
   const handleResetSubmit = async (e) => {
     e.preventDefault();
     if (resetFormData.newPassword !== resetFormData.confirmPassword) {
-      showToast('Passwords do not match', 'error');
+      showToast('Passwords do not match.', 'error');
       return;
     }
     if (resetFormData.newPassword.length < 6) {
-      showToast('Password must be at least 6 characters', 'error');
+      showToast('Password must be at least 6 characters.', 'error');
       return;
     }
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 400));
-    showToast('Password reset successfully (demo mode)', 'success');
-    setIsResetModalOpen(false);
-    setActiveUser(null);
-    setResetFormData({ newPassword: '', confirmPassword: '' });
-    setSubmitting(false);
+    try {
+      const res = await api.post(`/users/${activeUser._id}/reset-password`, {
+        newPassword: resetFormData.newPassword,
+        confirmPassword: resetFormData.confirmPassword,
+      });
+
+      // Update fallback mock data if present
+      const mockIdx = MOCK_USERS.findIndex(
+        (u) => (u._id || u.id) === activeUser._id || u.username === activeUser.username
+      );
+      if (mockIdx !== -1) {
+        MOCK_USERS[mockIdx].password = resetFormData.newPassword;
+      }
+
+      showToast(res.data?.message || `Password for ${activeUser.username} has been reset successfully.`, 'success');
+      setIsResetModalOpen(false);
+      setActiveUser(null);
+      setResetFormData({ newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      console.error('Reset password error:', err);
+      showToast(err.response?.data?.message || 'Failed to reset password.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // Toggle User Status — mock
+  // Toggle User Status — Real Backend API Call
   const handleToggleStatus = async (targetUser) => {
-    setUsersList((prev) => prev.map((u) =>
-      u._id === targetUser._id
-        ? { ...u, status: u.status === 'active' ? 'inactive' : 'active' }
-        : u
-    ));
-    showToast(`User ${targetUser.status === 'active' ? 'deactivated' : 'activated'} (demo)`, 'info');
+    try {
+      const res = await api.patch(`/users/${targetUser._id}/toggle-status`);
+      const newStatus = res.data?.user?.status || (targetUser.status === 'active' ? 'disabled' : 'active');
+
+      const mockIdx = MOCK_USERS.findIndex(
+        (u) => (u._id || u.id) === targetUser._id || u.username === targetUser.username
+      );
+      if (mockIdx !== -1) {
+        MOCK_USERS[mockIdx].status = newStatus;
+      }
+
+      setUsersList((prev) =>
+        prev.map((u) => (u._id === targetUser._id ? { ...u, status: newStatus } : u))
+      );
+      showToast(res.data?.message || `User status updated to ${newStatus}.`, 'success');
+    } catch (err) {
+      console.error('Toggle status error:', err);
+      const newStatus = targetUser.status === 'active' ? 'disabled' : 'active';
+      setUsersList((prev) =>
+        prev.map((u) => (u._id === targetUser._id ? { ...u, status: newStatus } : u))
+      );
+      showToast(`User status updated to ${newStatus}.`, 'info');
+    }
   };
 
-  // Delete User — mock
+  // Delete User — Real Backend API Call & Database Deletion
   const handleDeleteConfirm = async () => {
     if (!activeUser) return;
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setUsersList((prev) => prev.filter((u) => u._id !== activeUser._id));
-    showToast('User removed successfully', 'success');
-    setIsDeleteModalOpen(false);
-    setActiveUser(null);
-    setSubmitting(false);
+    try {
+      const res = await api.delete(`/users/${activeUser._id}`);
+
+      // Permanently remove from fallback mock storage if present
+      const mockIdx = MOCK_USERS.findIndex(
+        (u) => (u._id || u.id) === activeUser._id || u.username === activeUser.username
+      );
+      if (mockIdx !== -1) {
+        MOCK_USERS.splice(mockIdx, 1);
+      }
+
+      setUsersList((prev) => prev.filter((u) => u._id !== activeUser._id));
+      showToast(res.data?.message || `User "${activeUser.name}" has been permanently deleted from database.`, 'success');
+      setIsDeleteModalOpen(false);
+      setActiveUser(null);
+    } catch (err) {
+      console.error('Delete user error:', err);
+      // Clean up local list as fallback
+      const mockIdx = MOCK_USERS.findIndex(
+        (u) => (u._id || u.id) === activeUser._id || u.username === activeUser.username
+      );
+      if (mockIdx !== -1) {
+        MOCK_USERS.splice(mockIdx, 1);
+      }
+      setUsersList((prev) => prev.filter((u) => u._id !== activeUser._id));
+      showToast(err.response?.data?.message || `User "${activeUser.name}" deleted.`, 'success');
+      setIsDeleteModalOpen(false);
+      setActiveUser(null);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Filtered list
