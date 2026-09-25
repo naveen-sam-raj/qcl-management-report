@@ -243,7 +243,7 @@ const changeUsername = async (req, res) => {
 
 /**
  * @desc    Change Super Admin Password
- * @route   PUT /api/super-admin/change-password
+ * @route   POST /api/super-admin/change-password (also supports PUT)
  * @access  Private (SUPER_ADMIN)
  */
 const changePassword = async (req, res) => {
@@ -251,49 +251,70 @@ const changePassword = async (req, res) => {
     const { currentPassword, newPassword, confirmPassword } = req.body;
     const admin = req.superAdmin;
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Super Admin account not found or has been modified. Please re-authenticate.',
+      });
+    }
+
+    if (!currentPassword) {
       return res.status(400).json({
         success: false,
-        message: 'All fields (Current Password, New Password, Confirm Password) are required.',
+        message: 'Current password is required.',
+      });
+    }
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password is required.',
+      });
+    }
+
+    // Confirm password check if supplied in request
+    if (confirmPassword !== undefined && !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Confirm password is required.',
       });
     }
 
     // Ensure new password and confirm password match
-    if (newPassword !== confirmPassword) {
+    if (confirmPassword && newPassword !== confirmPassword) {
       return res.status(400).json({
         success: false,
-        message: 'New password and confirmation password do not match.',
+        message: 'New password and confirm password do not match',
+      });
+    }
+
+    // Password must contain at least 8 characters
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must contain at least 8 characters',
       });
     }
 
     // Verify current password using bcrypt
     const isPasswordValid = await admin.comparePassword(currentPassword);
     if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: 'Verification failed: Current password is incorrect.',
-      });
-    }
-
-    // Validate new password requirements
-    const passwordError = validatePasswordRequirements(newPassword);
-    if (passwordError) {
       return res.status(400).json({
         success: false,
-        message: passwordError,
+        message: 'Current password is incorrect',
       });
     }
 
-    // Ensure new password is not the same as current
+    // Ensure new password is not the same as current password
     const isSamePassword = await admin.comparePassword(newPassword);
     if (isSamePassword) {
       return res.status(400).json({
         success: false,
-        message: 'New password cannot be the same as your current password.',
+        message: 'New password must be different from your current password',
       });
     }
 
-    // Hash new password using bcrypt
+    // Hash new password using bcrypt (10 rounds)
     const salt = await bcrypt.genSalt(10);
     const newPasswordHash = await bcrypt.hash(newPassword, salt);
 
@@ -301,7 +322,7 @@ const changePassword = async (req, res) => {
     admin.passwordHash = newPasswordHash;
     await admin.save();
 
-    // Log the change
+    // Log the change in ActivityLog
     try {
       await ActivityLog.create({
         userName: admin.username,
@@ -316,14 +337,13 @@ const changePassword = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Password changed successfully.',
+      message: 'Password changed successfully',
     });
   } catch (error) {
     console.error('[Change Password Error]:', error);
     return res.status(500).json({
       success: false,
-      message: 'Server error while updating password.',
-      error: error.message,
+      message: 'Server error while updating password: ' + error.message,
     });
   }
 };

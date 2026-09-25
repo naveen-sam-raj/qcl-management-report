@@ -135,30 +135,33 @@ const SuperAdminSettings = () => {
     setPasswordMsg({ type: '', text: '' });
 
     if (!currPassword) {
-      setPasswordMsg({ type: 'error', text: 'Please enter your current password.' });
+      setPasswordMsg({ type: 'error', text: 'Current password is required.' });
       return;
     }
-    if (!newPassword || !confirmPassword) {
-      setPasswordMsg({ type: 'error', text: 'Please enter and confirm your new password.' });
+    if (!newPassword) {
+      setPasswordMsg({ type: 'error', text: 'New password is required.' });
+      return;
+    }
+    if (!confirmPassword) {
+      setPasswordMsg({ type: 'error', text: 'Confirm password is required.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPasswordMsg({ type: 'error', text: 'Password must contain at least 8 characters' });
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordMsg({ type: 'error', text: 'New password and confirmation password do not match.' });
+      setPasswordMsg({ type: 'error', text: 'New password and confirm password do not match' });
       return;
     }
-
-    // Check strength
-    if (!passwordChecks.length || !passwordChecks.upper || !passwordChecks.lower || !passwordChecks.number || !passwordChecks.special) {
-      setPasswordMsg({
-        type: 'error',
-        text: 'New password does not meet the security requirements listed below.',
-      });
+    if (currPassword === newPassword) {
+      setPasswordMsg({ type: 'error', text: 'New password must be different from your current password' });
       return;
     }
 
     setPasswordLoading(true);
     try {
-      const res = await api.put('/super-admin/change-password', {
+      const res = await api.post('/super-admin/change-password', {
         currentPassword: currPassword,
         newPassword,
         confirmPassword,
@@ -168,13 +171,14 @@ const SuperAdminSettings = () => {
         setCurrPassword('');
         setNewPassword('');
         setConfirmPassword('');
-        setPasswordMsg({ type: 'success', text: 'Super Admin password changed successfully!' });
-        showToast('Password updated securely. Keep your credentials safe.', 'success');
+        setPasswordMsg({ type: 'success', text: 'Password changed successfully' });
+        showToast('Password changed successfully', 'success');
       } else {
-        setPasswordMsg({ type: 'error', text: res.data?.message || 'Failed to update password.' });
+        const errMsg = res.data?.message || 'Failed to update password.';
+        setPasswordMsg({ type: 'error', text: errMsg });
       }
     } catch (err) {
-      const msg = err.response?.data?.message || 'Error updating password. Check your current password.';
+      const msg = err.response?.data?.message || 'Current password is incorrect';
       setPasswordMsg({ type: 'error', text: msg });
       showToast(msg, 'error');
     } finally {
@@ -492,7 +496,7 @@ const SuperAdminSettings = () => {
                   className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50"
                 >
                   <Lock className="w-4 h-4" />
-                  <span>{passwordLoading ? 'Updating Password...' : 'Change Password'}</span>
+                  <span>{passwordLoading ? 'Changing Password...' : 'Change Password'}</span>
                 </button>
               </div>
             </form>
