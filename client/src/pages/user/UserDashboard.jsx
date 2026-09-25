@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { ALL_PLANTS_CONFIG } from '../../services/plantOptions';
 import {
@@ -6,23 +7,24 @@ import {
   Flame,
   Globe,
   Gauge,
-  User,
-  Building2,
   Eye,
-  ArrowLeft,
-  Inbox,
-  CheckCircle2,
+  FileSpreadsheet,
+  ArrowRight,
+  Shield,
+  Activity,
 } from 'lucide-react';
 
 const UserDashboard = () => {
   const { user } = useAuth();
-  const [selectedOption, setSelectedOption] = useState(null);
+  const navigate = useNavigate();
 
   // Determine user's assigned plant strictly from their profile
   const plantStr = (
     user?.plant?.code ||
     user?.plant?.name ||
     user?.plant?._id ||
+    user?.plant?.id ||
+    (typeof user?.plant === 'string' ? user.plant : '') ||
     'acl'
   ).toUpperCase();
 
@@ -40,73 +42,14 @@ const UserDashboard = () => {
 
   const PlantIcon = myPlant.icon;
 
-  // ── VIEW 1: Option clicked -> "Empty" state view ──
-  if (selectedOption) {
-    return (
-      <div className="space-y-6 animate-fadeIn pb-12">
-        {/* Header Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSelectedOption(null)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-              title={`Back to ${myPlant.name}`}
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">
-                  {myPlant.name}
-                </span>
-                <span className="text-xs text-slate-300">/</span>
-                <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                  {selectedOption}
-                </h1>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Tuticorin Alkali Chemicals and Fertilizers Limited • {myPlant.subtitle}
-              </p>
-            </div>
-          </div>
+  const handleOptionClick = (optionName) => {
+    navigate(`/portal/plants/${assignedPlantId}/options/${encodeURIComponent(optionName)}`);
+  };
 
-          <button
-            onClick={() => setSelectedOption(null)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition self-start sm:self-auto"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to {myPlant.name}</span>
-          </button>
-        </div>
+  const handleReportsClick = () => {
+    navigate(`/portal/plants/${assignedPlantId}/options/Reports`);
+  };
 
-        {/* Empty Box State */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-12 sm:p-16 text-center shadow-xs">
-          <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 mb-4">
-            <Inbox className="w-8 h-8" />
-          </div>
-          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-            Empty
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-            No data or parameters have been configured yet for{' '}
-            <span className="font-semibold text-slate-700">{selectedOption}</span>.
-          </p>
-
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <button
-              onClick={() => setSelectedOption(null)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-xs"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back to Options</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── VIEW 2: User Dashboard (Strictly ONLY user's assigned plant & options) ──
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* ── User Header Profile ── */}
@@ -130,15 +73,28 @@ const UserDashboard = () => {
               <span>{user?.company?.name || 'TFL'}</span>
               <span>•</span>
               <span className="font-semibold text-blue-600">
-                Unit: {myPlant.name}
+                Dedicated Unit: {myPlant.name}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold self-start sm:self-auto">
-          <PlantIcon className="w-4 h-4" />
-          <span>Assigned: {myPlant.name}</span>
+        <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+          {/* Centralized Reports button */}
+          <button
+            id="btn-user-acl-reports"
+            onClick={handleReportsClick}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 rounded-lg transition shadow-xs"
+            title={`${myPlant.name} Centralized Quality Control Reports`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
+            <span>Centralized Reports</span>
+          </button>
+
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold">
+            <PlantIcon className="w-4 h-4 text-blue-600" />
+            <span>Assigned: {myPlant.name}</span>
+          </div>
         </div>
       </div>
 
@@ -159,13 +115,13 @@ const UserDashboard = () => {
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                {myPlant.subtitle} • Dedicated Plant Operator Options
+                {myPlant.subtitle} • Authorized Analysis & Quality Control Modules
               </p>
             </div>
           </div>
 
           <span className="text-xs text-slate-400 font-medium">
-            Click any option below to open
+            Select any analysis module below
           </span>
         </div>
 
@@ -174,12 +130,15 @@ const UserDashboard = () => {
           {myPlant.options.map((name, index) => (
             <div
               key={index}
-              onClick={() => setSelectedOption(name)}
-              className="group relative p-3.5 rounded-xl border-2 border-slate-200/90 hover:border-blue-500 hover:shadow-md hover:-translate-y-0.5 bg-white transition-all duration-200 cursor-pointer flex items-center justify-center text-center min-h-[68px] shadow-xs"
+              onClick={() => handleOptionClick(name)}
+              className="group relative p-3.5 rounded-xl border-2 border-slate-200/90 hover:border-blue-500 hover:shadow-md hover:-translate-y-0.5 bg-white transition-all duration-200 cursor-pointer flex flex-col justify-between text-center min-h-[72px] shadow-xs"
             >
               <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors tracking-tight">
                 {name}
               </span>
+              <div className="flex items-center justify-end text-[10px] font-semibold text-slate-400 group-hover:text-blue-600 transition-colors mt-2">
+                <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+              </div>
             </div>
           ))}
         </div>
@@ -189,3 +148,4 @@ const UserDashboard = () => {
 };
 
 export default UserDashboard;
+

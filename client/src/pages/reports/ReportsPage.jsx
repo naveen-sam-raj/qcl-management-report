@@ -58,7 +58,32 @@ const ReportsPage = () => {
       let filtered = companyCode
         ? MOCK_REPORTS.filter((r) => r.company.code === companyCode)
         : MOCK_REPORTS;
-      if (plantId !== 'all') filtered = filtered.filter((r) => r.plant?._id === plantId || r.plant?.code === plantId);
+
+      // Strict Plant Scoping for Normal Plant Operators
+      if (user?.role === 'user') {
+        const assignedCode = (
+          user?.plant?.code ||
+          user?.plant?.name ||
+          user?.plant?._id ||
+          'ACL'
+        ).toUpperCase();
+
+        filtered = filtered.filter((r) => {
+          const rPlant = (r.plant?.code || r.plant?.name || '').toUpperCase();
+          if (assignedCode.includes('ACL')) return rPlant.includes('ACL');
+          if (assignedCode.includes('SA')) return rPlant.includes('SA');
+          if (assignedCode.includes('OFFSET') || assignedCode.includes('OFFSITE')) {
+            return rPlant.includes('OFFSET') || rPlant.includes('OFFSITE');
+          }
+          if (assignedCode.includes('CO2') || assignedCode.includes('C02')) {
+            return rPlant.includes('CO2') || rPlant.includes('C02');
+          }
+          return true;
+        });
+      } else {
+        if (plantId !== 'all') filtered = filtered.filter((r) => r.plant?._id === plantId || r.plant?.code === plantId);
+      }
+
       if (reportType !== 'all' && reportType !== 'All Types') filtered = filtered.filter((r) => r.reportType === reportType);
       if (searchTerm) filtered = filtered.filter((r) => r.title.toLowerCase().includes(searchTerm.toLowerCase()));
       setReports(filtered);
@@ -239,19 +264,33 @@ const ReportsPage = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Plant Filter */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">Select Plant</label>
-            <select
-              value={plantId}
-              onChange={(e) => setPlantId(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Plant Units</option>
-              {plants.map((p) => (
-                <option key={p._id || p.id} value={p._id || p.id}>
-                  {p.name}
+            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+              {user?.role === 'user' ? 'Assigned Plant Unit' : 'Select Plant'}
+            </label>
+            {user?.role === 'user' ? (
+              <select
+                disabled
+                value="assigned"
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-700 font-semibold cursor-not-allowed"
+              >
+                <option value="assigned">
+                  {user?.plant?.name || 'ACL Plant'} (Restricted to Assigned Unit)
                 </option>
-              ))}
-            </select>
+              </select>
+            ) : (
+              <select
+                value={plantId}
+                onChange={(e) => setPlantId(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Plant Units</option>
+                {plants.map((p) => (
+                  <option key={p._id || p.id} value={p._id || p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Report Type Filter */}

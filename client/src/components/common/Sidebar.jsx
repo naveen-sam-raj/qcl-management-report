@@ -51,9 +51,10 @@ const Sidebar = ({ isOpen, onClose }) => {
       ];
     }
 
-    // Normal User (View-Only) — just their assigned plant dashboard
+    // Normal User (View-Only) — strictly their assigned plant dashboard
+    const plantName = user?.plant?.name || 'ACL Plant';
     return [
-      { label: 'My Plant Dashboard', to: '/portal', icon: Factory, exact: true },
+      { label: `${plantName} Dashboard`, to: '/portal', icon: Factory, exact: true },
       { label: 'Reports', to: '/portal/reports', icon: FileSpreadsheet },
     ];
   };

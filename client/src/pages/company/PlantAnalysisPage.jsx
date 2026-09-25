@@ -191,6 +191,41 @@ const PlantAnalysisPage = () => {
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
+  // Extract user's assigned plant identifier
+  const userPlantStr = (
+    user?.plant?.code ||
+    user?.plant?.name ||
+    user?.plant?._id ||
+    user?.plant?.id ||
+    (typeof user?.plant === 'string' ? user.plant : '') ||
+    'acl'
+  ).toUpperCase();
+
+  const userAssignedPlantId = userPlantStr.includes('SA')
+    ? 'sa'
+    : userPlantStr.includes('OFFSET') || userPlantStr.includes('OFFSITE')
+    ? 'offset'
+    : userPlantStr.includes('CO2') || userPlantStr.includes('C02')
+    ? 'co2'
+    : 'acl';
+
+  // Strict Plant Isolation: Normal operators can ONLY access their assigned plant
+  React.useEffect(() => {
+    if (user?.role === 'user') {
+      const currentParamId = (id || '').toLowerCase();
+      const isAllowed =
+        currentParamId === userAssignedPlantId ||
+        currentParamId === `plant_${userAssignedPlantId}`;
+      if (!isAllowed) {
+        if (optionName) {
+          navigate(`/portal/plants/${userAssignedPlantId}/options/${encodeURIComponent(optionName)}`, { replace: true });
+        } else {
+          navigate('/portal', { replace: true });
+        }
+      }
+    }
+  }, [user, id, optionName, navigate, userAssignedPlantId]);
+
   const plantKey = (id || '').toLowerCase();
   const plant = PLANT_CONFIG[plantKey] || {
     title: `${id?.toUpperCase()} Plant`,
@@ -202,7 +237,7 @@ const PlantAnalysisPage = () => {
 
   const decodedOptionName = optionName ? decodeURIComponent(optionName) : null;
 
-  // Handle clicking on an option -> navigate inside to show empty page
+  // Handle clicking on an option -> navigate inside
   const handleOptionClick = (option) => {
     navigate(`${basePath}/plants/${id}/options/${encodeURIComponent(option)}`);
   };
@@ -614,7 +649,7 @@ const PlantAnalysisPage = () => {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to Plants</span>
+            <span>{user?.role === 'user' ? 'Back to Dashboard' : 'Back to Plants'}</span>
           </button>
         </div>
       </div>
@@ -646,20 +681,22 @@ const PlantAnalysisPage = () => {
           <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
             Analysis options for this unit are being configured. Please check ACL Plant or SA Plant.
           </p>
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <button
-              onClick={() => navigate('/admin/tfl/plants/acl')}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-xs"
-            >
-              <span>View ACL Plant</span>
-            </button>
-            <button
-              onClick={() => navigate('/admin/tfl/plants/sa')}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition shadow-xs"
-            >
-              <span>View SA Plant</span>
-            </button>
-          </div>
+          {user?.role !== 'user' && (
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <button
+                onClick={() => navigate('/admin/tfl/plants/acl')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-xs"
+              >
+                <span>View ACL Plant</span>
+              </button>
+              <button
+                onClick={() => navigate('/admin/tfl/plants/sa')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition shadow-xs"
+              >
+                <span>View SA Plant</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
