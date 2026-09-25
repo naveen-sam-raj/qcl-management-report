@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Factory, Flame, Globe, Gauge, ArrowRight } from 'lucide-react';
+import LicenseInfoCard from '../../components/common/LicenseInfoCard';
 
 const TFL_PLANTS = [
   {
@@ -8,7 +9,7 @@ const TFL_PLANTS = [
     name: 'ACL Plant',
     icon: Factory,
     description: 'Ammonium Chloride Unit',
-    badge: '15 Options',
+    badge: '14 Options',
   },
   {
     id: 'sa',
@@ -59,6 +60,9 @@ const TFLAdminDashboard = () => {
           4 Plant Units
         </span>
       </div>
+
+      {/* License Information & Expiry Warning (Requirement 9) */}
+      <LicenseInfoCard />
 
       {/* 4 Compact Plant Option Boxes */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

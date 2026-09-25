@@ -51,6 +51,24 @@ const userSchema = new mongoose.Schema(
       enum: ['active', 'disabled'],
       default: 'active',
     },
+    maxUsers: {
+      type: Number,
+      min: [1, 'Maximum users must be at least 1'],
+      default: null,
+    },
+    licenseFrom: {
+      type: Date,
+      default: null,
+    },
+    licenseTo: {
+      type: Date,
+      default: null,
+    },
+    companyAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     avatar: {
       type: String,
       default: '',
@@ -60,8 +78,16 @@ const userSchema = new mongoose.Schema(
       default: Date.now,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+userSchema.virtual('companyAdminId').get(function () {
+  return this.companyAdmin;
+});
 
 // Hash password before save if modified
 userSchema.pre('save', async function (next) {

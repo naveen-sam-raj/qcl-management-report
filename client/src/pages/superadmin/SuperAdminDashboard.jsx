@@ -46,6 +46,9 @@ const SuperAdminDashboard = () => {
     confirmPassword: '',
     mobile: '',
     status: 'active',
+    maxUsers: '10',
+    licensePeriodFrom: '',
+    licensePeriodTo: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -55,8 +58,17 @@ const SuperAdminDashboard = () => {
   // Edit Admin Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState(null);
-  const [editFormData, setEditFormData] = useState({ name: '', email: '', mobile: '', status: 'active' });
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    email: '',
+    mobile: '',
+    status: 'active',
+    maxUsers: 10,
+    licensePeriodFrom: '',
+    licensePeriodTo: '',
+  });
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editFormError, setEditFormError] = useState('');
 
   // Reset Password Modal
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -141,13 +153,70 @@ const SuperAdminDashboard = () => {
     }
   };
 
+  const formatDateDisplay = (dateVal) => {
+    if (!dateVal) return '—';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      });
+    } catch {
+      return '—';
+    }
+  };
+
+  const toDateInputFormat = (dateVal) => {
+    if (!dateVal) return '';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+    } catch {
+      return '';
+    }
+  };
+
+  const computeClientLicenseStatus = (from, to) => {
+    if (!from || !to) return 'Active';
+    const now = new Date();
+    const fromStr = typeof from === 'string' ? from.substring(0, 10) : toDateInputFormat(from);
+    const toStr = typeof to === 'string' ? to.substring(0, 10) : toDateInputFormat(to);
+    const start = new Date(`${fromStr}T00:00:00+05:30`);
+    const end = new Date(`${toStr}T23:59:59.999+05:30`);
+    if (now < start) return 'Not Started';
+    if (now > end) return 'Expired';
+    return 'Active';
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
-      // Use mock data — no backend required
-      await new Promise((r) => setTimeout(r, 400)); // simulate load
-      setCompanies(MOCK_COMPANIES);
-      setAdmins(MOCK_COMPANY_ADMINS);
+      try {
+        const [compRes, adminRes] = await Promise.all([
+          api.get('/companies'),
+          api.get('/admin/company-admins'),
+        ]);
+
+        if (compRes.data?.success && compRes.data.companies) {
+          setCompanies(compRes.data.companies);
+        } else {
+          setCompanies(MOCK_COMPANIES);
+        }
+
+        if (adminRes.data?.success && adminRes.data.admins) {
+          setAdmins(adminRes.data.admins);
+        } else {
+          setAdmins(MOCK_COMPANY_ADMINS);
+        }
+      } catch (backendErr) {
+        console.warn('Backend unavailable, using mock data:', backendErr.message);
+        setCompanies(MOCK_COMPANIES);
+        setAdmins(MOCK_COMPANY_ADMINS);
+      }
     } catch (err) {
       showToast('Failed to load data.', 'error');
     } finally {
@@ -184,13 +253,25 @@ const SuperAdminDashboard = () => {
   };
 
   const resetCreateForm = () => {
-    setAdminFormData({ companyId: '', name: '', email: '', username: '', password: '', confirmPassword: '', mobile: '', status: 'active' });
+    setAdminFormData({
+      companyId: '',
+      name: '',
+      email: '',
+      username: '',
+      password: '',
+      confirmPassword: '',
+      mobile: '',
+      status: 'active',
+      maxUsers: '10',
+      licensePeriodFrom: '',
+      licensePeriodTo: '',
+    });
     setFormError('');
     setShowPassword(false);
     setShowConfirmPassword(false);
   };
 
-  // CREATE admin — add to local state (mock)
+  // CREATE admin
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
     setFormError('');
@@ -205,8 +286,61 @@ const SuperAdminDashboard = () => {
       setFormError('Password must be at least 6 characters.'); return;
     }
 
+    // ── Maximum Users Validation (Positive whole integer, >= 1) ──
+    const maxUsersNum = Number(adminFormData.maxUsers);
+    if (!adminFormData.maxUsers || isNaN(maxUsersNum) || !Number.isInteger(maxUsersNum) || maxUsersNum < 1) {
+      setFormError('Maximum Users is required and must be a positive whole number (minimum 1).');
+      return;
+    }
+
+    // ── License Period Validation ──
+    if (!adminFormData.licensePeriodFrom) {
+      setFormError('License Period From is required.');
+      return;
+    }
+    if (!adminFormData.licensePeriodTo) {
+      setFormError('License Period To is required.');
+      return;
+    }
+    if (new Date(adminFormData.licensePeriodTo) < new Date(adminFormData.licensePeriodFrom)) {
+      setFormError('License end date must be after the license start date.');
+      return;
+    }
+
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 600));
+    const payload = {
+      companyId: adminFormData.companyId,
+      name: adminFormData.name,
+      email: adminFormData.email,
+      username: adminFormData.username,
+      password: adminFormData.password,
+      confirmPassword: adminFormData.confirmPassword,
+      mobile: adminFormData.mobile,
+      status: adminFormData.status,
+      maxUsers: maxUsersNum,
+      licensePeriodFrom: adminFormData.licensePeriodFrom,
+      licensePeriodTo: adminFormData.licensePeriodTo,
+    };
+
+    try {
+      const res = await api.post('/admin/company-admins', payload);
+      if (res.data?.success && res.data.admin) {
+        setAdmins((prev) => [res.data.admin, ...prev]);
+        showToast('Company admin created successfully!', 'success');
+        setIsCreateModalOpen(false);
+        resetCreateForm();
+        setSubmitting(false);
+        return;
+      }
+    } catch (backendErr) {
+      if (backendErr.response?.data?.message) {
+        setFormError(backendErr.response.data.message);
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // Fallback local update
     const selectedCompany = companies.find((c) => c._id === adminFormData.companyId);
     const newAdmin = {
       _id: 'admin_' + Date.now(),
@@ -215,28 +349,99 @@ const SuperAdminDashboard = () => {
       username: adminFormData.username,
       mobile: adminFormData.mobile,
       status: adminFormData.status,
+      maxUsers: maxUsersNum,
+      licenseFrom: adminFormData.licensePeriodFrom,
+      licenseTo: adminFormData.licensePeriodTo,
+      licenseStatus: computeClientLicenseStatus(adminFormData.licensePeriodFrom, adminFormData.licensePeriodTo),
+      usersCount: 0,
       lastLogin: null,
       company: selectedCompany ? { _id: selectedCompany._id, name: selectedCompany.name, code: selectedCompany.code } : null,
     };
-    setAdmins((prev) => [...prev, newAdmin]);
+    setAdmins((prev) => [newAdmin, ...prev]);
     showToast('Company admin created successfully!', 'success');
     setIsCreateModalOpen(false);
     resetCreateForm();
     setSubmitting(false);
   };
 
-  // EDIT admin — update local state (mock)
+  // EDIT admin
   const openEditModal = (admin) => {
     setEditingAdmin(admin);
-    setEditFormData({ name: admin.name, email: admin.email, mobile: admin.mobile || '', status: admin.status });
+    const fromStr = admin.licenseFrom ? toDateInputFormat(admin.licenseFrom) : '';
+    const toStr = admin.licenseTo ? toDateInputFormat(admin.licenseTo) : '';
+    setEditFormData({
+      name: admin.name || '',
+      email: admin.email || '',
+      mobile: admin.mobile || '',
+      status: admin.status || 'active',
+      maxUsers: admin.maxUsers !== undefined && admin.maxUsers !== null ? admin.maxUsers : 10,
+      licensePeriodFrom: fromStr,
+      licensePeriodTo: toStr,
+    });
+    setEditFormError('');
     setIsEditModalOpen(true);
   };
 
   const handleEditAdmin = async (e) => {
     e.preventDefault();
+    setEditFormError('');
+
+    const maxUsersNum = Number(editFormData.maxUsers);
+    if (!editFormData.maxUsers || isNaN(maxUsersNum) || !Number.isInteger(maxUsersNum) || maxUsersNum < 1) {
+      setEditFormError('Maximum Users must be a positive whole number (minimum 1).');
+      return;
+    }
+
+    if (editFormData.licensePeriodFrom && editFormData.licensePeriodTo) {
+      if (new Date(editFormData.licensePeriodTo) < new Date(editFormData.licensePeriodFrom)) {
+        setEditFormError('License end date must be after the license start date.');
+        return;
+      }
+    }
+
     setEditSubmitting(true);
-    await new Promise((r) => setTimeout(r, 500));
-    setAdmins((prev) => prev.map((a) => a._id === editingAdmin._id ? { ...a, ...editFormData } : a));
+    const payload = {
+      name: editFormData.name,
+      email: editFormData.email,
+      mobile: editFormData.mobile,
+      status: editFormData.status,
+      maxUsers: maxUsersNum,
+      licensePeriodFrom: editFormData.licensePeriodFrom,
+      licensePeriodTo: editFormData.licensePeriodTo,
+    };
+
+    try {
+      const res = await api.put(`/admin/company-admins/${editingAdmin._id}`, payload);
+      if (res.data?.success && res.data.admin) {
+        setAdmins((prev) => prev.map((a) => (a._id === editingAdmin._id ? res.data.admin : a)));
+        showToast('Company admin updated successfully!', 'success');
+        setIsEditModalOpen(false);
+        setEditSubmitting(false);
+        return;
+      }
+    } catch (backendErr) {
+      if (backendErr.response?.data?.message) {
+        setEditFormError(backendErr.response.data.message);
+        setEditSubmitting(false);
+        return;
+      }
+    }
+
+    // Fallback local update
+    setAdmins((prev) =>
+      prev.map((a) =>
+        a._id === editingAdmin._id
+          ? {
+              ...a,
+              ...editFormData,
+              maxUsers: maxUsersNum,
+              licenseFrom: editFormData.licensePeriodFrom,
+              licenseTo: editFormData.licensePeriodTo,
+              licenseStatus: computeClientLicenseStatus(editFormData.licensePeriodFrom, editFormData.licensePeriodTo),
+            }
+          : a
+      )
+    );
     showToast('Admin updated successfully!', 'success');
     setIsEditModalOpen(false);
     setEditSubmitting(false);
@@ -446,83 +651,122 @@ const SuperAdminDashboard = () => {
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Admin</th>
                   <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Company</th>
-                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Contact</th>
-                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Status</th>
-                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Last Login</th>
+                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Users</th>
+                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">License From</th>
+                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">License To</th>
+                  <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">License Status</th>
                   <th className="text-right px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredAdmins.map((admin) => (
-                  <tr key={admin._id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-sm font-bold text-purple-700 shrink-0">
-                          {admin.name?.[0]?.toUpperCase() || 'A'}
+                {filteredAdmins.map((admin) => {
+                  const licStatus = admin.licenseStatus || computeClientLicenseStatus(admin.licenseFrom, admin.licenseTo);
+                  const usersCount = admin.usersCount !== undefined ? admin.usersCount : 0;
+                  const maxUsers = admin.maxUsers !== undefined && admin.maxUsers !== null ? admin.maxUsers : 10;
+                  const isLimitReached = usersCount >= maxUsers;
+
+                  return (
+                    <tr key={admin._id} className="hover:bg-slate-50/60 transition-colors">
+                      {/* Admin */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-sm font-bold text-purple-700 shrink-0">
+                            {admin.name?.[0]?.toUpperCase() || 'A'}
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">{admin.name}</div>
+                            <div className="text-xs text-slate-500">@{admin.username}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">{admin.name}</div>
-                          <div className="text-xs text-slate-500">@{admin.username}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border ${getCompanyColor(admin.company?.code)}`}>
-                        {admin.company?.code || '—'}
-                      </span>
-                      <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[120px]">{admin.company?.name}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-xs text-slate-700 font-medium">{admin.email}</div>
-                      {admin.mobile && <div className="text-xs text-slate-400">{admin.mobile}</div>}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border ${
-                        admin.status === 'active'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-rose-50 text-rose-700 border-rose-200'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${admin.status === 'active' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                        {admin.status === 'active' ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>
-                          {admin.lastLogin
-                            ? new Date(admin.lastLogin).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                            : 'Never'}
+                      </td>
+
+                      {/* Company */}
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border ${getCompanyColor(admin.company?.code)}`}>
+                          {admin.company?.code || '—'}
                         </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => openEditModal(admin)}
-                          title="Edit admin"
-                          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => openResetModal(admin)}
-                          title="Reset password"
-                          className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                        >
-                          <KeyRound className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => openDeleteModal(admin)}
-                          title="Remove admin"
-                          className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[120px]">{admin.company?.name}</div>
+                      </td>
+
+                      {/* Users Count */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-bold ${isLimitReached ? 'text-rose-600' : 'text-slate-800'}`}>
+                            {usersCount} / {maxUsers}
+                          </span>
+                          {isLimitReached && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200">
+                              Limit Reached
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* License From */}
+                      <td className="px-6 py-4">
+                        <div className="text-xs font-medium text-slate-700">
+                          {formatDateDisplay(admin.licenseFrom)}
+                        </div>
+                      </td>
+
+                      {/* License To */}
+                      <td className="px-6 py-4">
+                        <div className="text-xs font-medium text-slate-700">
+                          {formatDateDisplay(admin.licenseTo)}
+                        </div>
+                      </td>
+
+                      {/* License Status */}
+                      <td className="px-6 py-4">
+                        {licStatus === 'Active' && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-emerald-500" />
+                            Active
+                          </span>
+                        )}
+                        {licStatus === 'Not Started' && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border bg-amber-50 text-amber-700 border-amber-200">
+                            <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-amber-500" />
+                            Not Started
+                          </span>
+                        )}
+                        {licStatus === 'Expired' && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold border bg-rose-50 text-rose-700 border-rose-200">
+                            <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-rose-500" />
+                            Expired
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => openEditModal(admin)}
+                            title="Edit admin"
+                            className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openResetModal(admin)}
+                            title="Reset password"
+                            className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(admin)}
+                            title="Remove admin"
+                            className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -543,10 +787,10 @@ const SuperAdminDashboard = () => {
             </div>
           )}
 
-          {/* Company Selection */}
+          {/* Account / Company */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-              Assign to Company <span className="text-rose-500">*</span>
+              Account / Company <span className="text-rose-500">*</span>
             </label>
             <select
               required
@@ -561,8 +805,8 @@ const SuperAdminDashboard = () => {
             </select>
           </div>
 
+          {/* Full Name & Username */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Full Name */}
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">Full Name <span className="text-rose-500">*</span></label>
               <input
@@ -574,7 +818,6 @@ const SuperAdminDashboard = () => {
                 className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
               />
             </div>
-            {/* Username */}
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">Username <span className="text-rose-500">*</span></label>
               <input
@@ -603,7 +846,7 @@ const SuperAdminDashboard = () => {
 
           {/* Mobile */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Mobile (optional)</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1">Mobile</label>
             <input
               type="tel"
               placeholder="+91 XXXXXXXXXX"
@@ -613,8 +856,8 @@ const SuperAdminDashboard = () => {
             />
           </div>
 
+          {/* Password & Confirm Password */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Password */}
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">Password <span className="text-rose-500">*</span></label>
               <div className="relative">
@@ -631,7 +874,6 @@ const SuperAdminDashboard = () => {
                 </button>
               </div>
             </div>
-            {/* Confirm Password */}
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">Confirm Password <span className="text-rose-500">*</span></label>
               <div className="relative">
@@ -650,17 +892,63 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
 
-          {/* Status */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Account Status</label>
-            <select
-              value={adminFormData.status}
-              onChange={(e) => setAdminFormData({ ...adminFormData, status: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+          {/* Maximum Users & Account Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                Maximum Users <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                required
+                placeholder="e.g., 10"
+                value={adminFormData.maxUsers}
+                onChange={(e) => setAdminFormData({ ...adminFormData, maxUsers: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Only positive whole numbers (min: 1)</span>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Account Status</label>
+              <select
+                value={adminFormData.status}
+                onChange={(e) => setAdminFormData({ ...adminFormData, status: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          {/* License Period From & License Period To */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                License Period From <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="date"
+                required
+                value={adminFormData.licensePeriodFrom}
+                onChange={(e) => setAdminFormData({ ...adminFormData, licensePeriodFrom: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                License Period To <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="date"
+                required
+                value={adminFormData.licensePeriodTo}
+                onChange={(e) => setAdminFormData({ ...adminFormData, licensePeriodTo: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
@@ -685,6 +973,13 @@ const SuperAdminDashboard = () => {
       {/* ===================== EDIT ADMIN MODAL ===================== */}
       <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Company Admin">
         <form onSubmit={handleEditAdmin} className="space-y-4">
+          {editFormError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{editFormError}</span>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Full Name</label>
             <input
@@ -714,17 +1009,61 @@ const SuperAdminDashboard = () => {
               className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
             />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Status</label>
-            <select
-              value={editFormData.status}
-              onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                Maximum Users <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                required
+                value={editFormData.maxUsers}
+                onChange={(e) => setEditFormData({ ...editFormData, maxUsers: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Decreasing limit does not delete users</span>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Status</label>
+              <select
+                value={editFormData.status}
+                onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                License Period From
+              </label>
+              <input
+                type="date"
+                value={editFormData.licensePeriodFrom}
+                onChange={(e) => setEditFormData({ ...editFormData, licensePeriodFrom: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                License Period To
+              </label>
+              <input
+                type="date"
+                value={editFormData.licensePeriodTo}
+                onChange={(e) => setEditFormData({ ...editFormData, licensePeriodTo: e.target.value })}
+                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">Cancel</button>
             <button type="submit" disabled={editSubmitting} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition disabled:opacity-50">

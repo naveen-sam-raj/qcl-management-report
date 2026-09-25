@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import EmptyState from '../../components/common/EmptyState';
+import LicenseInfoCard from '../../components/common/LicenseInfoCard';
 import { Building2, Users, FileSpreadsheet, ShieldAlert, Sparkles } from 'lucide-react';
 
 const EmptyCompanyDashboard = ({ companyName = 'SPIC', companyCode = 'SPIC' }) => {
@@ -33,6 +34,9 @@ const EmptyCompanyDashboard = ({ companyName = 'SPIC', companyCode = 'SPIC' }) =
           </button>
         </div>
       </div>
+
+      {/* License Information & Expiry Warning */}
+      <LicenseInfoCard />
 
       {/* Exact Requested Empty State Screen */}
       <EmptyState

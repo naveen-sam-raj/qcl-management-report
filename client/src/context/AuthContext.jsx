@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { MOCK_USERS } from '../services/mockData';
+import api from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -21,24 +22,53 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
-   * Mock login — matches against MOCK_USERS by username OR email + password.
-   * No backend call needed.
+   * Authenticate user with backend API, enforcing License Period and User Limits.
+   * Falls back gracefully if backend is unreachable.
    */
-  const login = async (identifier, password) => {
-    // Simulate a tiny delay so it feels real
-    await new Promise((r) => setTimeout(r, 600));
+  const login = async (identifier, password, expectedRole = null) => {
+    try {
+      // 1. Attempt backend authentication
+      const response = await api.post('/auth/login', {
+        identifier: identifier.trim(),
+        password,
+        expectedRole,
+      });
 
+      if (response.data?.success && response.data?.user) {
+        const safeUser = response.data.user;
+        if (response.data.token) {
+          localStorage.setItem('spic_auth_token', response.data.token);
+        }
+        setUser(safeUser);
+        localStorage.setItem('spic_auth_user', JSON.stringify(safeUser));
+        return { success: true, user: safeUser, token: response.data.token };
+      }
+    } catch (apiErr) {
+      // If backend explicitly rejected (e.g. License not started, License expired, disabled)
+      if (apiErr.response?.data?.message) {
+        return {
+          success: false,
+          status: apiErr.response.status,
+          message: apiErr.response.data.message,
+          licenseStatus: apiErr.response.data.licenseStatus,
+        };
+      }
+      console.warn('Backend login unavailable, checking local records:', apiErr.message);
+    }
+
+    // 2. Fallback to mock data if offline
+    await new Promise((r) => setTimeout(r, 400));
     const matched = MOCK_USERS.find(
       (u) =>
-        (u.username === identifier.trim() || u.email === identifier.trim()) &&
+        (u.username?.toLowerCase() === identifier.trim().toLowerCase() ||
+          u.email?.toLowerCase() === identifier.trim().toLowerCase()) &&
         u.password === password
     );
 
     if (matched) {
-      if (matched.status === 'inactive') {
-        return { success: false, message: 'Your account is inactive. Contact the Super Admin.' };
+      if (matched.status === 'inactive' || matched.status === 'disabled') {
+        return { success: false, message: 'Your account has been disabled. Please contact administrator.' };
       }
-      // Strip password from stored user object
       const { password: _, ...safeUser } = matched;
       setUser(safeUser);
       localStorage.setItem('spic_auth_user', JSON.stringify(safeUser));

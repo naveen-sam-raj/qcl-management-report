@@ -1,5 +1,6 @@
 const { User, ActivityLog } = require('../models');
 const { generateToken } = require('../utils/token');
+const { checkLicenseValidity, getLicenseStatus } = require('../utils/licenseUtils');
 
 // @desc    Authenticate user & get token
 // @route   POST /api/auth/login
@@ -55,6 +56,19 @@ const login = async (req, res) => {
       });
     }
 
+    // ── Requirement 4 & 5: License Expiry & License Start Validation for Company Admin ──
+    let licenseInfo = { valid: true, status: 'Active' };
+    if (user.role === 'company_admin') {
+      licenseInfo = checkLicenseValidity(user);
+      if (!licenseInfo.valid) {
+        return res.status(403).json({
+          success: false,
+          licenseStatus: licenseInfo.status,
+          message: licenseInfo.message,
+        });
+      }
+    }
+
     // Update lastLogin
     user.lastLogin = new Date();
     await user.save();
@@ -78,12 +92,22 @@ const login = async (req, res) => {
 
     const token = generateToken(user);
 
+    // If Company Admin, compute current user count
+    let usersCount = 0;
+    if (user.role === 'company_admin') {
+      const companyId = user.company?._id || user.company;
+      if (companyId) {
+        usersCount = await User.countDocuments({ role: 'user', company: companyId });
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Authentication successful.',
       token,
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         username: user.username,
@@ -93,6 +117,12 @@ const login = async (req, res) => {
         company: user.company,
         plant: user.plant,
         lastLogin: user.lastLogin,
+        maxUsers: user.maxUsers !== undefined && user.maxUsers !== null ? user.maxUsers : 10,
+        licenseFrom: user.licenseFrom,
+        licenseTo: user.licenseTo,
+        licenseStatus: licenseInfo.status,
+        remainingDays: licenseInfo.remainingDays,
+        usersCount,
       },
     });
   } catch (error) {
@@ -113,9 +143,20 @@ const getMe = async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
+    const userObj = user.toObject ? user.toObject() : { ...user };
+    if (user.role === 'company_admin') {
+      const companyId = user.company?._id || user.company;
+      userObj.usersCount = companyId
+        ? await User.countDocuments({ role: 'user', company: companyId })
+        : 0;
+      userObj.maxUsers = user.maxUsers !== undefined && user.maxUsers !== null ? user.maxUsers : 10;
+      userObj.licenseStatus = getLicenseStatus(user.licenseFrom, user.licenseTo);
+    }
+
     return res.status(200).json({
       success: true,
-      user,
+      user: userObj,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

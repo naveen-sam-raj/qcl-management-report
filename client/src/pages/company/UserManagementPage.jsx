@@ -4,6 +4,7 @@ import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
 import ConfirmModal from '../../components/common/ConfirmModal';
 import { MOCK_USERS, MOCK_PLANTS } from '../../services/mockData';
+import api from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -73,23 +74,39 @@ const UserManagementPage = () => {
 
   const [submitting, setSubmitting] = useState(false);
 
-  // Load mock users and plants
+  const [maxUsers, setMaxUsers] = useState(user?.maxUsers || 10);
+
+  // Load users and plants with backend first
   const loadData = async () => {
     try {
       setLoading(true);
-      await new Promise((r) => setTimeout(r, 400));
-      // Filter by company admin's company
-      const companyCode = user?.company?.code || 'TFL';
-      const companyUsers = MOCK_USERS.filter(
-        (u) => u.role === 'user' && u.company?.code === companyCode
-      );
-      const companyPlants = MOCK_PLANTS.filter(
-        (p) => p.company.code === companyCode
-      );
-      setUsersList(companyUsers);
-      setPlants(companyPlants);
-      if (companyPlants.length > 0 && !formData.plantId) {
-        setFormData((prev) => ({ ...prev, plantId: companyPlants[0]._id }));
+      try {
+        const [usersRes, plantsRes] = await Promise.all([
+          api.get('/users'),
+          api.get('/plants'),
+        ]);
+
+        if (usersRes.data?.success && usersRes.data.users) {
+          setUsersList(usersRes.data.users);
+          if (usersRes.data.maxUsers !== undefined && usersRes.data.maxUsers !== null) {
+            setMaxUsers(usersRes.data.maxUsers);
+          }
+        } else {
+          const companyCode = user?.company?.code || 'TFL';
+          setUsersList(MOCK_USERS.filter((u) => u.role === 'user' && u.company?.code === companyCode));
+        }
+
+        if (plantsRes.data?.success && plantsRes.data.plants) {
+          setPlants(plantsRes.data.plants);
+        } else {
+          const companyCode = user?.company?.code || 'TFL';
+          setPlants(MOCK_PLANTS.filter((p) => p.company?.code === companyCode));
+        }
+      } catch (backendErr) {
+        console.warn('Backend users load error, using mock:', backendErr.message);
+        const companyCode = user?.company?.code || 'TFL';
+        setUsersList(MOCK_USERS.filter((u) => u.role === 'user' && u.company?.code === companyCode));
+        setPlants(MOCK_PLANTS.filter((p) => p.company?.code === companyCode));
       }
     } catch (err) {
       showToast('Error loading user directory', 'error');
@@ -102,9 +119,19 @@ const UserManagementPage = () => {
     loadData();
   }, []);
 
-  // Create User — mock (add to local state)
+  const regularUsersCount = usersList.filter((u) => u.role === 'user').length;
+  const isLimitReached = regularUsersCount >= maxUsers;
+
+  // Create User with backend enforcement
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+
+    // Frontend validation
+    if (isLimitReached) {
+      showToast(`User limit reached. Your plan allows a maximum of ${maxUsers} users.`, 'error');
+      return;
+    }
+
     if (formData.password !== formData.confirmPassword) {
       showToast('Passwords do not match', 'error');
       return;
@@ -114,7 +141,38 @@ const UserManagementPage = () => {
       return;
     }
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 500));
+
+    const payload = {
+      name: formData.name,
+      email: formData.email,
+      username: formData.username,
+      password: formData.password,
+      confirmPassword: formData.confirmPassword,
+      mobile: formData.mobile,
+      plantId: formData.plantId,
+      role: formData.role || 'user',
+      status: formData.status || 'active',
+    };
+
+    try {
+      const res = await api.post('/users', payload);
+      if (res.data?.success && res.data.user) {
+        setUsersList((prev) => [res.data.user, ...prev]);
+        showToast('User created successfully', 'success');
+        setIsCreateModalOpen(false);
+        setFormData({ name: '', email: '', username: '', password: '', confirmPassword: '', mobile: '', plantId: plants[0]?._id || '', role: 'user', status: 'active' });
+        setSubmitting(false);
+        return;
+      }
+    } catch (backendErr) {
+      if (backendErr.response?.data?.message) {
+        showToast(backendErr.response.data.message, 'error');
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // Fallback local update
     const selectedPlant = plants.find((p) => p._id === formData.plantId);
     const newUser = {
       _id: 'user_' + Date.now(),
@@ -128,7 +186,7 @@ const UserManagementPage = () => {
       plant: selectedPlant ? { _id: selectedPlant._id, name: selectedPlant.name, code: selectedPlant.code } : null,
       lastLogin: null,
     };
-    setUsersList((prev) => [...prev, newUser]);
+    setUsersList((prev) => [newUser, ...prev]);
     showToast('User created successfully', 'success');
     setIsCreateModalOpen(false);
     setFormData({ name: '', email: '', username: '', password: '', confirmPassword: '', mobile: '', plantId: plants[0]?._id || '', role: 'user', status: 'active' });
@@ -234,13 +292,74 @@ const UserManagementPage = () => {
           </button>
           <button
             id="btn-create-user-modal"
-            onClick={() => setIsCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm shadow-blue-600/20"
+            disabled={isLimitReached}
+            onClick={() => {
+              if (isLimitReached) {
+                showToast(`User limit reached. Your plan allows a maximum of ${maxUsers} users.`, 'error');
+                return;
+              }
+              setIsCreateModalOpen(true);
+            }}
+            title={isLimitReached ? `User limit reached (${regularUsersCount}/${maxUsers})` : 'Create User'}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition shadow-sm ${
+              isLimitReached
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300 shadow-none'
+                : 'text-white bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+            }`}
           >
             <UserPlus className="w-4 h-4" />
             <span>Create User</span>
           </button>
         </div>
+      </div>
+
+      {/* ── User Limit Allocation Banner (Requirement 8) ── */}
+      <div
+        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          isLimitReached
+            ? 'bg-rose-50 border-rose-200 text-rose-800'
+            : regularUsersCount / maxUsers >= 0.8
+            ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : 'bg-blue-50/60 border-blue-200/80 text-blue-900'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm shrink-0 ${
+              isLimitReached ? 'bg-rose-100 text-rose-700' : 'bg-white text-blue-700 shadow-xs'
+            }`}
+          >
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold">
+                {isLimitReached ? 'User limit reached' : 'Company User Allocation'}
+              </span>
+              <span
+                className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${
+                  isLimitReached ? 'bg-rose-200 text-rose-900' : 'bg-blue-200/80 text-blue-900'
+                }`}
+              >
+                {regularUsersCount} / {maxUsers} Users
+              </span>
+            </div>
+            <p className="text-xs opacity-80 mt-0.5">
+              {isLimitReached
+                ? `User limit reached. Your plan allows a maximum of ${maxUsers} users. Contact Super Admin to upgrade your user limit.`
+                : `Users Used: ${regularUsersCount} | Maximum Users: ${maxUsers} (${Math.max(
+                    0,
+                    maxUsers - regularUsersCount
+                  )} slots remaining)`}
+            </p>
+          </div>
+        </div>
+
+        {isLimitReached && (
+          <span className="text-xs font-bold text-rose-700 bg-rose-100 px-3 py-1 rounded-lg border border-rose-200 shrink-0 self-start sm:self-auto">
+            Limit Reached
+          </span>
+        )}
       </div>
 
       {/* Filter and Search Bar */}

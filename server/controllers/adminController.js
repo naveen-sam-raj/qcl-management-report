@@ -1,4 +1,9 @@
 const { User, Company, Plant, Report, ActivityLog } = require('../models');
+const {
+  getISTStartOfDay,
+  getISTEndOfDay,
+  getLicenseStatus,
+} = require('../utils/licenseUtils');
 
 // @desc    Create a new Company Admin
 // @route   POST /api/admin/company-admins
@@ -14,9 +19,14 @@ const createCompanyAdmin = async (req, res) => {
       confirmPassword,
       mobile,
       status = 'active',
+      maxUsers,
+      licensePeriodFrom,
+      licensePeriodTo,
+      licenseFrom,
+      licenseTo,
     } = req.body;
 
-    // Validation
+    // Validation - Required fields
     if (!companyId || !name || !email || !username || !password) {
       return res.status(400).json({
         success: false,
@@ -35,6 +45,64 @@ const createCompanyAdmin = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Password must be at least 6 characters.',
+      });
+    }
+
+    // ── Maximum Users Validation ──
+    const parsedMaxUsers = Number(maxUsers);
+    if (
+      maxUsers === undefined ||
+      maxUsers === null ||
+      maxUsers === '' ||
+      isNaN(parsedMaxUsers) ||
+      !Number.isInteger(parsedMaxUsers) ||
+      parsedMaxUsers < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum Users is required and must be a positive whole number (minimum 1).',
+      });
+    }
+
+    // ── License Dates Validation ──
+    const rawFrom = licensePeriodFrom || licenseFrom;
+    const rawTo = licensePeriodTo || licenseTo;
+
+    if (!rawFrom) {
+      return res.status(400).json({
+        success: false,
+        message: 'License Period From date is required.',
+      });
+    }
+
+    if (!rawTo) {
+      return res.status(400).json({
+        success: false,
+        message: 'License Period To date is required.',
+      });
+    }
+
+    const startIST = getISTStartOfDay(rawFrom);
+    const endIST = getISTEndOfDay(rawTo);
+
+    if (!startIST || isNaN(startIST.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid License Period From date format.',
+      });
+    }
+
+    if (!endIST || isNaN(endIST.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid License Period To date format.',
+      });
+    }
+
+    if (endIST.getTime() < startIST.getTime()) {
+      return res.status(400).json({
+        success: false,
+        message: 'License end date must be after the license start date.',
       });
     }
 
@@ -64,7 +132,7 @@ const createCompanyAdmin = async (req, res) => {
       });
     }
 
-    // Create Company Admin
+    // Create Company Admin with maxUsers and license period
     const newAdmin = await User.create({
       name: name.trim(),
       email: email.trim().toLowerCase(),
@@ -74,19 +142,22 @@ const createCompanyAdmin = async (req, res) => {
       role: 'company_admin',
       company: company._id,
       status: status || 'active',
+      maxUsers: parsedMaxUsers,
+      licenseFrom: startIST,
+      licenseTo: endIST,
     });
 
     // Record audit log
     try {
       await ActivityLog.create({
-        user: req.user._id,
-        userName: req.user.name,
-        userEmail: req.user.email,
-        role: req.user.role,
+        user: req.user?._id || req.user?.id,
+        userName: req.user?.name || req.user?.username || 'Super Admin',
+        userEmail: req.user?.email || 'admin@spicglobal.com',
+        role: req.user?.role || 'super_admin',
         company: company._id,
         companyName: company.name,
         action: 'COMPANY_ADMIN_CREATED',
-        details: `Created new Company Admin "${name}" (${username}) for ${company.name}`,
+        details: `Created Company Admin "${name}" (${username}) for ${company.name} [Max Users: ${parsedMaxUsers}, License: ${rawFrom} to ${rawTo}]`,
         ipAddress: req.ip || '127.0.0.1',
       });
     } catch (e) {
@@ -94,11 +165,14 @@ const createCompanyAdmin = async (req, res) => {
     }
 
     const safeAdmin = await User.findById(newAdmin._id).select('-password').populate('company');
+    const adminObj = safeAdmin.toObject ? safeAdmin.toObject() : { ...safeAdmin };
+    adminObj.usersCount = 0;
+    adminObj.licenseStatus = getLicenseStatus(startIST, endIST);
 
     return res.status(201).json({
       success: true,
       message: `Company Admin for ${company.name} successfully created.`,
-      admin: safeAdmin,
+      admin: adminObj,
     });
   } catch (error) {
     console.error('Error creating company admin:', error);
@@ -106,15 +180,33 @@ const createCompanyAdmin = async (req, res) => {
   }
 };
 
-// @desc    Get all Company Admins
+// @desc    Get all Company Admins with user counts and license statuses
 // @route   GET /api/admin/company-admins
 // @access  Private (Super Admin)
 const getCompanyAdmins = async (req, res) => {
   try {
-    const admins = await User.find({ role: 'company_admin' })
+    const rawAdmins = await User.find({ role: 'company_admin' })
       .select('-password')
       .populate('company')
       .sort({ createdAt: -1 });
+
+    const admins = await Promise.all(
+      rawAdmins.map(async (adminDoc) => {
+        const admin = adminDoc.toObject ? adminDoc.toObject() : { ...adminDoc };
+        const companyId = admin.company?._id || admin.company;
+
+        // Count regular users belonging to this company
+        const usersCount = companyId
+          ? await User.countDocuments({ role: 'user', company: companyId })
+          : 0;
+
+        admin.usersCount = usersCount;
+        admin.maxUsers = admin.maxUsers !== undefined && admin.maxUsers !== null ? admin.maxUsers : 10;
+        admin.licenseStatus = getLicenseStatus(admin.licenseFrom, admin.licenseTo);
+
+        return admin;
+      })
+    );
 
     return res.status(200).json({
       success: true,
@@ -122,6 +214,101 @@ const getCompanyAdmins = async (req, res) => {
       admins,
     });
   } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update an existing Company Admin
+// @route   PUT /api/admin/company-admins/:id
+// @access  Private (Super Admin)
+const updateCompanyAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const admin = await User.findById(id);
+
+    if (!admin || admin.role !== 'company_admin') {
+      return res.status(404).json({ success: false, message: 'Company Admin not found.' });
+    }
+
+    const {
+      name,
+      email,
+      mobile,
+      status,
+      maxUsers,
+      licensePeriodFrom,
+      licensePeriodTo,
+      licenseFrom,
+      licenseTo,
+    } = req.body;
+
+    const updates = {};
+    if (name) updates.name = name.trim();
+    if (email) updates.email = email.trim().toLowerCase();
+    if (mobile !== undefined) updates.mobile = mobile;
+    if (status) updates.status = status;
+
+    // Validate and update Maximum Users if provided
+    if (maxUsers !== undefined && maxUsers !== null && maxUsers !== '') {
+      const parsedMaxUsers = Number(maxUsers);
+      if (isNaN(parsedMaxUsers) || !Number.isInteger(parsedMaxUsers) || parsedMaxUsers < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum Users must be a positive whole number (minimum 1).',
+        });
+      }
+      updates.maxUsers = parsedMaxUsers;
+    }
+
+    // Validate and update License Dates if provided
+    const rawFrom = licensePeriodFrom !== undefined ? licensePeriodFrom : licenseFrom;
+    const rawTo = licensePeriodTo !== undefined ? licensePeriodTo : licenseTo;
+
+    const targetFrom = rawFrom ? getISTStartOfDay(rawFrom) : (admin.licenseFrom ? new Date(admin.licenseFrom) : null);
+    const targetTo = rawTo ? getISTEndOfDay(rawTo) : (admin.licenseTo ? new Date(admin.licenseTo) : null);
+
+    if (rawFrom !== undefined && (!targetFrom || isNaN(targetFrom.getTime()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid License Period From date format.',
+      });
+    }
+
+    if (rawTo !== undefined && (!targetTo || isNaN(targetTo.getTime()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid License Period To date format.',
+      });
+    }
+
+    if (targetFrom && targetTo && targetTo.getTime() < targetFrom.getTime()) {
+      return res.status(400).json({
+        success: false,
+        message: 'License end date must be after the license start date.',
+      });
+    }
+
+    if (rawFrom !== undefined) updates.licenseFrom = targetFrom;
+    if (rawTo !== undefined) updates.licenseTo = targetTo;
+
+    const updatedAdmin = await User.findByIdAndUpdate(id, { $set: updates }, { new: true })
+      .select('-password')
+      .populate('company');
+
+    const adminObj = updatedAdmin.toObject ? updatedAdmin.toObject() : { ...updatedAdmin };
+    const companyId = adminObj.company?._id || adminObj.company;
+    adminObj.usersCount = companyId
+      ? await User.countDocuments({ role: 'user', company: companyId })
+      : 0;
+    adminObj.licenseStatus = getLicenseStatus(adminObj.licenseFrom, adminObj.licenseTo);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Company Admin updated successfully.',
+      admin: adminObj,
+    });
+  } catch (error) {
+    console.error('Error updating company admin:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -161,5 +348,6 @@ const getSuperAdminStats = async (req, res) => {
 module.exports = {
   createCompanyAdmin,
   getCompanyAdmins,
+  updateCompanyAdmin,
   getSuperAdminStats,
 };

@@ -44,10 +44,24 @@ const getUsers = async (req, res) => {
       .populate('plant')
       .sort({ createdAt: -1 });
 
+    let maxUsers = null;
+    let currentUserCount = users.length;
+    if (req.user.role === 'company_admin') {
+      const admin = await User.findById(req.user._id);
+      maxUsers = admin?.maxUsers !== undefined && admin?.maxUsers !== null ? admin.maxUsers : 10;
+      currentUserCount = await User.countDocuments({
+        company: req.user.company?._id || req.user.company,
+        role: 'user',
+      });
+    }
+
     return res.status(200).json({
       success: true,
       count: users.length,
       users,
+      maxUsers,
+      currentUserCount,
+      userLimitReached: maxUsers !== null && currentUserCount >= maxUsers,
     });
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -74,12 +88,41 @@ const createUser = async (req, res) => {
 
     // Company assignment
     let targetCompanyId = null;
+    let targetCompanyAdmin = null;
+
     if (req.user.role === 'company_admin') {
       targetCompanyId = req.user.company?._id || req.user.company;
+      targetCompanyAdmin = req.user;
     } else if (req.user.role === 'super_admin') {
       targetCompanyId = req.body.companyId;
       if (!targetCompanyId) {
         return res.status(400).json({ success: false, message: 'Please select a company for this user.' });
+      }
+      targetCompanyAdmin = await User.findOne({ company: targetCompanyId, role: 'company_admin' });
+    }
+
+    // ── Requirement 6 & 7: Maximum User Limit Validation in Backend ──
+    if (targetCompanyAdmin) {
+      const adminDoc = await User.findById(targetCompanyAdmin._id || targetCompanyAdmin.id);
+      const effectiveMaxUsers = adminDoc?.maxUsers !== undefined && adminDoc?.maxUsers !== null
+        ? adminDoc.maxUsers
+        : targetCompanyAdmin.maxUsers;
+
+      if (effectiveMaxUsers !== undefined && effectiveMaxUsers !== null && effectiveMaxUsers > 0) {
+        const currentUserCount = await User.countDocuments({
+          company: targetCompanyId,
+          role: 'user',
+        });
+
+        if (currentUserCount >= effectiveMaxUsers) {
+          return res.status(403).json({
+            success: false,
+            message: `User limit reached. Your plan allows a maximum of ${effectiveMaxUsers} users.`,
+            userLimitReached: true,
+            currentUserCount,
+            maxUsers: effectiveMaxUsers,
+          });
+        }
       }
     }
 
@@ -139,6 +182,7 @@ const createUser = async (req, res) => {
       mobile: mobile || '',
       role: role || 'user',
       company: targetCompanyId,
+      companyAdmin: targetCompanyAdmin ? (targetCompanyAdmin._id || targetCompanyAdmin.id) : null,
       plant: verifiedPlantId,
       status: status || 'active',
     });
