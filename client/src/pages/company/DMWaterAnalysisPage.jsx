@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -9,20 +9,13 @@ import {
   Save,
   RotateCcw,
   CheckCircle2,
-  AlertCircle,
   ChevronRight,
   Plus,
   Trash2,
   Clock,
-  Droplets,
   FlaskConical,
-  Gauge,
-  Activity,
-  Download,
-  Info,
   Layers,
-  Sparkles,
-  FileSpreadsheet,
+  Droplets,
 } from 'lucide-react';
 
 // Screenshot values for DM Water and Anion Unit (Date: 13/09/2026)
@@ -53,15 +46,6 @@ const DEFAULT_ROWS = [
     isDefault: true,
     accent: 'indigo',
   },
-];
-
-const PARAMETER_INFO = [
-  { key: 'ph',   label: 'pH',           formula: 'pH',      unit: '',        step: '0.1',  placeholder: '7.00', desc: 'Acidity / Basicity', standard: '6.8 – 7.5' },
-  { key: 'cond', label: 'Cond',         formula: 'EC',      unit: 'µS/cm',   step: '0.1',  placeholder: '00.0', desc: 'Electrical Conductivity', standard: '< 25.0 µS/cm' },
-  { key: 'p',    label: 'P (Alk)',      formula: 'P-Alk',   unit: 'ppm',     step: '1',    placeholder: '0',    desc: 'Phenolphthalein Alkalinity', standard: 'Nil (0 ppm)' },
-  { key: 'm',    label: 'M (Alk)',      formula: 'M-Alk',   unit: 'ppm',     step: '1',    placeholder: '0',    desc: 'Methyl Orange Alkalinity', standard: '< 10 ppm' },
-  { key: 'th',   label: 'TH (Hardness)',formula: 'Total H', unit: 'ppm',     step: '1',    placeholder: '0',    desc: 'Total Hardness (as CaCO₃)', standard: 'Nil (0 ppm)' },
-  { key: 'sio2', label: 'SiO₂ (Silica)',formula: 'SiO₂',    unit: 'ppm',     step: '0.01', placeholder: '0.00', desc: 'Reactive Dissolved Silica', standard: '< 0.30 ppm' },
 ];
 
 const NUMERIC_FIELDS = ['ph', 'cond', 'p', 'm', 'th', 'sio2'];
@@ -96,27 +80,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [recentRecords, setRecentRecords] = useState([]);
-  const [loadingRecords, setLoadingRecords] = useState(false);
-
-  // ── Fetch existing records ──
-  const fetchRecords = useCallback(async () => {
-    try {
-      setLoadingRecords(true);
-      const res = await api.get('/api/dm-water-analysis');
-      if (res.data?.success && Array.isArray(res.data.data)) {
-        setRecentRecords(res.data.data);
-      }
-    } catch (err) {
-      console.warn('[DMWaterAnalysis] Error fetching records:', err.message);
-    } finally {
-      setLoadingRecords(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {
@@ -228,7 +191,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       setSaveSuccess(true);
       showToast?.(response.data?.message || 'DM Water & Anion Unit Analysis saved successfully!', 'success');
       setTimeout(() => setSaveSuccess(false), 5000);
-      fetchRecords();
     } catch (err) {
       setSaving(false);
       console.error('[DMWaterAnalysis] Save error:', err);
@@ -236,36 +198,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       showToast?.('Save Error: ' + serverMessage, 'error');
     }
   };
-
-  // ── Export to CSV ──
-  const handleExportCSV = () => {
-    const headers = ['Unit / Stream', 'Sampling Time', 'pH', 'Conductivity (µS/cm)', 'P-Alk (ppm)', 'M-Alk (ppm)', 'TH Hardness (ppm)', 'SiO2 Silica (ppm)', 'Analysis Date'];
-    const rows = readings.map((r) => [
-      `"${r.unit}"`,
-      `"${r.time || '—'}"`,
-      r.ph || '—',
-      r.cond || '—',
-      r.p || '—',
-      r.m || '—',
-      r.th || '—',
-      r.sio2 || '—',
-      date,
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `DM_Water_Anion_Unit_Analysis_${date}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast?.('Analysis report exported to CSV successfully.', 'success');
-  };
-
-  // ── Stat calculations ──
-  const dmRow = useMemo(() => readings.find((r) => r.unit?.toUpperCase().includes('DM WATER')) || readings[0], [readings]);
-  const anionRow = useMemo(() => readings.find((r) => r.unit?.toUpperCase().includes('A.UNIT')) || readings[1], [readings]);
 
   return (
     <div className="space-y-4 animate-fadeIn pb-12">
@@ -301,19 +233,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           {/* Right: Actions */}
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
-              id="btn-dm-export"
-              onClick={handleExportCSV}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Export to CSV"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>Export CSV</span>
-            </button>
-
-            <button
               id="btn-dm-reset"
               onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
               title="Reset to default screenshot values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -403,77 +325,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
       </div>
 
-      {/* ── Quick Analytical Stat Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* pH Card */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex items-center justify-between">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">DM Water pH</div>
-            <div className="text-xl font-extrabold text-slate-800 font-mono mt-0.5">
-              {dmRow?.ph || '—'}
-            </div>
-            <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              Neutral (6.8 – 7.5)
-            </div>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs border border-emerald-100">
-            pH
-          </div>
-        </div>
-
-        {/* Conductivity Card */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex items-center justify-between">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Conductivity</div>
-            <div className="text-xl font-extrabold text-blue-700 font-mono mt-0.5">
-              {dmRow?.cond ? `${dmRow.cond} µS` : '—'}
-            </div>
-            <div className="text-[10px] text-blue-600 font-bold flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-              Normal (&lt; 25.0 µS)
-            </div>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
-            <Gauge className="w-4 h-4" />
-          </div>
-        </div>
-
-        {/* Reactive Silica Card */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex items-center justify-between">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Silica (SiO₂)</div>
-            <div className="text-xl font-extrabold text-indigo-700 font-mono mt-0.5">
-              {dmRow?.sio2 ? `${dmRow.sio2} ppm` : '—'}
-            </div>
-            <div className="text-[10px] text-indigo-600 font-bold flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-              Pass (&lt; 0.30 ppm)
-            </div>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-            <FlaskConical className="w-4 h-4" />
-          </div>
-        </div>
-
-        {/* Anion Unit Hardness (TH) */}
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-3.5 flex items-center justify-between">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Hardness (TH)</div>
-            <div className="text-xl font-extrabold text-teal-700 font-mono mt-0.5">
-              {dmRow?.th ? `${dmRow.th} ppm` : '0 ppm'}
-            </div>
-            <div className="text-[10px] text-teal-600 font-bold flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-              Zero Hardness
-            </div>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100">
-            <Droplets className="w-4 h-4" />
-          </div>
-        </div>
-      </div>
-
       {/* ── Main Analytical Table Matching User Screenshot ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {/* Table Header Bar */}
@@ -536,7 +387,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {readings.map((row, index) => {
+              {readings.map((row) => {
                 const isDM = row.unit?.toUpperCase().includes('DM WATER');
                 const isAnion = row.unit?.toUpperCase().includes('A.UNIT');
 
@@ -744,108 +595,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
-
-      {/* ── Technical Specifications & Operating Guidelines ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Specification Limits Reference */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200/80 shadow-xs p-4">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-2">
-            <Info className="w-4 h-4 text-blue-600" />
-            Demineralized Water (DM) & Anion Unit Laboratory Specifications
-          </h3>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {PARAMETER_INFO.map((param) => (
-              <div
-                key={param.key}
-                className="bg-slate-50/70 border border-slate-200/70 rounded-lg p-2.5 transition hover:bg-slate-50"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-extrabold text-slate-800">{param.label}</span>
-                  <span className="text-[10px] font-mono text-slate-500">{param.unit || 'unitless'}</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{param.desc}</div>
-                <div className="text-[11px] font-bold text-blue-700 mt-1">
-                  Spec: {param.standard}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Operating Protocol Card */}
-        <div className="bg-gradient-to-br from-blue-900 to-slate-900 rounded-xl p-4 text-white shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-blue-300 text-xs font-bold uppercase tracking-wider">
-              <Sparkles className="w-4 h-4" />
-              Demineralization Protocol
-            </div>
-            <h4 className="text-sm font-extrabold mt-1 text-white">Anion Unit Breakthrough Detection</h4>
-            <p className="text-xs text-blue-100/80 leading-relaxed mt-2">
-              Continuous monitoring of conductivity (Cond) and reactive silica (SiO₂) in the Anion Unit outlet guarantees prompt regeneration before silica slippage enters the high-pressure boiler feed streams.
-            </p>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-blue-800/80 flex items-center justify-between text-[11px] text-blue-200">
-            <span>Plant: <strong>OFFSET Utilities</strong></span>
-            <span>Target: <strong>Zero Hardness</strong></span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Saved History Records Log ── */}
-      {recentRecords.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-slate-500" />
-              Recent Saved DM Water Records ({recentRecords.length})
-            </h3>
-            <span className="text-[11px] text-slate-400">Database synchronization active</span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
-                  <th className="py-2 px-3">Date</th>
-                  <th className="py-2 px-3">Submitted By</th>
-                  <th className="py-2 px-3 text-center">DM Water Cond</th>
-                  <th className="py-2 px-3 text-center">DM Water pH</th>
-                  <th className="py-2 px-3 text-center">Silica (SiO₂)</th>
-                  <th className="py-2 px-3 text-right">Timestamp</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {recentRecords.slice(0, 5).map((rec) => {
-                  const dmR = rec.readings?.find((r) => r.unit?.toUpperCase().includes('DM WATER')) || rec.readings?.[0];
-                  return (
-                    <tr key={rec.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-2 px-3 font-bold text-slate-800">{rec.date}</td>
-                      <td className="py-2 px-3 text-slate-600">{rec.submittedBy || 'Plant Operator'}</td>
-                      <td className="py-2 px-3 text-center font-mono font-bold text-blue-600">
-                        {dmR?.cond ? `${dmR.cond} µS/cm` : '—'}
-                      </td>
-                      <td className="py-2 px-3 text-center font-mono font-bold text-slate-800">
-                        {dmR?.ph || '—'}
-                      </td>
-                      <td className="py-2 px-3 text-center font-mono font-bold text-indigo-600">
-                        {dmR?.sio2 ? `${dmR.sio2} ppm` : '—'}
-                      </td>
-                      <td className="py-2 px-3 text-right text-slate-400 text-[11px]">
-                        {new Date(rec.submittedAt || Date.now()).toLocaleTimeString('en-IN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
