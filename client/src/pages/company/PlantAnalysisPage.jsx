@@ -29,6 +29,7 @@ import VacuumSealWaterAnalysisPage from './VacuumSealWaterAnalysisPage';
 import BicarbonateAnalysisPage from './BicarbonateAnalysisPage';
 import BicarbonateMoistureAnalysisPage from './BicarbonateMoistureAnalysisPage';
 import E501T501AnalysisPage from './E501T501AnalysisPage';
+import DMWaterAnalysisPage from './DMWaterAnalysisPage';
 import ACLPlantReportsPage from './ACLPlantReportsPage';
 
 // 15 ACL Plant analysis options
@@ -477,6 +478,17 @@ const PlantAnalysisPage = () => {
       decodedOptionName.toLowerCase().includes('vacuum')
     ) {
       return <VacuumSealWaterAnalysisPage plantId={id || 'offset'} />;
+    }
+
+    // ── DM Water / Anion Unit Analysis (OFFSET Plant) → dedicated full-featured module ──
+    if (
+      decodedOptionName.toLowerCase() === 'dm water' ||
+      decodedOptionName.toLowerCase() === 'dmwater' ||
+      decodedOptionName.toLowerCase() === 'dm-water' ||
+      decodedOptionName.toLowerCase().includes('dm water') ||
+      decodedOptionName.toLowerCase().includes('anion unit')
+    ) {
+      return <DMWaterAnalysisPage plantId={id || 'offset'} />;
     }
 
     // ── All other options → generic empty placeholder ──
