@@ -48,3 +48,32 @@
 .hover-card-lift:hover {
   transform: translateY(-3px);
 }
+
+/* ── View-Only User Portal Rules ─────────────────────────────────────────── */
+/* Automatically hides all save, submit, reset, and edit triggers for view-only operators */
+.portal-view-only button[id*="save"],
+.portal-view-only button[id*="Submit"],
+.portal-view-only button[id*="submit"],
+.portal-view-only button[id*="reset"],
+.portal-view-only button[id*="Reset"],
+.portal-view-only button[id*="edit"],
+.portal-view-only button[id*="Edit"],
+.portal-view-only button[id*="delete"],
+.portal-view-only button[id*="Delete"],
+.portal-view-only button:has(.lucide-save),
+.portal-view-only button:has(.lucide-rotate-ccw),
+.portal-view-only .hide-in-view-only {
+  display: none !important;
+}
+
+/* Prevent editing of analysis data inputs in view-only mode */
+.portal-view-only input:not([type="date"]):not([type="search"]) {
+  pointer-events: none !important;
+  user-select: text !important;
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+  cursor: default !important;
+  box-shadow: none !important;
+}
+
