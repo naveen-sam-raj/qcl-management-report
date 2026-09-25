@@ -231,19 +231,6 @@ const SuperAdminLogin = () => {
               <span>{loading ? 'Authenticating...' : 'Secure Sign In'}</span>
             </button>
           </form>
-
-          {/* Demo credentials hint */}
-          <div className="mt-6 pt-5 border-t border-slate-700/60">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 text-center">Super Admin Credentials</p>
-            <button
-              type="button"
-              onClick={() => { setIdentifier('QCL_ADMIN'); setPassword('Admin@QCL2026!'); }}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-900/60 rounded-xl border border-slate-700 hover:border-purple-500/50 transition cursor-pointer"
-            >
-              <span className="text-[11px] text-slate-400">Click to auto-fill default</span>
-              <span className="text-[11px] font-mono text-purple-300">QCL_ADMIN / Admin@QCL2026!</span>
-            </button>
-          </div>
         </div>
       </div>
 
