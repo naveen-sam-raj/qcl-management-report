@@ -49,6 +49,10 @@ const SuperAdminLogin = () => {
 
       // Attempt authenticated Super Admin login via backend API
       try {
+        const finalSuperAdminUrl = `${api.defaults.baseURL}/super-admin/login`;
+        console.log('Super Admin Login API URL:', finalSuperAdminUrl);
+        console.log('Login method: POST');
+
         const apiRes = await api.post('/super-admin/login', {
           username: identifier.trim(),
           password,
@@ -58,8 +62,8 @@ const SuperAdminLogin = () => {
           localStorage.setItem('spic_auth_token', apiRes.data.token);
           const adminUser = {
             username: apiRes.data.user.username,
-            name: 'Super Admin',
-            role: 'SUPER_ADMIN',
+            name: apiRes.data.user.name || 'Super Admin',
+            role: 'super_admin',
           };
           localStorage.setItem('spic_auth_user', JSON.stringify(adminUser));
           if (setUser) setUser(adminUser);
@@ -68,11 +72,21 @@ const SuperAdminLogin = () => {
           return;
         }
       } catch (backendErr) {
-        if (backendErr.response?.data?.message) {
-          setErrorMsg(backendErr.response.data.message);
+        if (backendErr.response) {
+          const status = backendErr.response.status;
+          const msg =
+            backendErr.response.data?.message ||
+            (status === 405
+              ? 'Super Admin login returned 405 Method Not Allowed. Check API configuration.'
+              : `Super Admin authentication failed (${status}).`);
+          setErrorMsg(msg);
           return;
         }
-        console.warn('Backend unavailable, trying mock fallback:', backendErr.message);
+        if (!import.meta.env.DEV) {
+          setErrorMsg('Unable to connect to authentication server. Please check your network connection.');
+          return;
+        }
+        console.warn('Backend unavailable in local DEV mode, trying mock fallback:', backendErr.message);
       }
 
       // Fallback to local auth if backend was unreachable

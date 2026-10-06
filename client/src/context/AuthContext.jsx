@@ -27,6 +27,10 @@ export const AuthProvider = ({ children }) => {
    */
   const login = async (identifier, password, expectedRole = null, companyCode = null) => {
     try {
+      const finalLoginUrl = `${api.defaults.baseURL}/auth/login`;
+      console.log('Login API URL:', finalLoginUrl);
+      console.log('Login method: POST');
+
       // 1. Attempt backend authentication
       const response = await api.post('/auth/login', {
         identifier: identifier.trim(),
@@ -45,16 +49,31 @@ export const AuthProvider = ({ children }) => {
         return { success: true, user: safeUser, token: response.data.token };
       }
     } catch (apiErr) {
-      // If backend explicitly rejected (e.g. License not started, License expired, disabled, or wrong company 403)
-      if (apiErr.response?.data?.message) {
+      // If backend or proxy responded with an HTTP status code (400, 401, 403, 404, 405, 500, etc.)
+      if (apiErr.response) {
+        const status = apiErr.response.status;
+        const message =
+          apiErr.response.data?.message ||
+          (status === 405
+            ? 'Login API returned 405 Method Not Allowed. Please verify VITE_API_URL and API routing.'
+            : `Authentication failed (${status}).`);
         return {
           success: false,
-          status: apiErr.response.status,
-          message: apiErr.response.data.message,
-          licenseStatus: apiErr.response.data.licenseStatus,
+          status,
+          message,
+          licenseStatus: apiErr.response.data?.licenseStatus,
         };
       }
-      console.warn('Backend login unavailable, checking local records:', apiErr.message);
+
+      // If no response received (network error / offline)
+      if (import.meta.env.DEV) {
+        console.warn('Backend login network error in DEV mode, attempting local fallback:', apiErr.message);
+      } else {
+        return {
+          success: false,
+          message: 'Unable to connect to authentication server. Please check your network connection.',
+        };
+      }
     }
 
     // 2. Fallback to mock data if offline

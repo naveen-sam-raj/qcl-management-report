@@ -154,16 +154,7 @@ const seedDatabase = async () => {
       },
     });
 
-    // 3. Super Admin
-    await User.create({
-      name: 'Super Admin',
-      email: 'superadmin@spicglobal.com',
-      username: 'superadmin',
-      password: 'Admin@123',
-      mobile: '+91 98400 11001',
-      role: 'super_admin',
-      status: 'active',
-    });
+
 
     // 4. Initial System Log
     await ActivityLog.create({

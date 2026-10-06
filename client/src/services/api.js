@@ -1,7 +1,20 @@
 import axios from 'axios';
 
+// Ensure baseURL is formatted cleanly without duplicate /api or trailing slash issues
+const getBaseURL = () => {
+  let envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) {
+    return '/api';
+  }
+  let url = envUrl.trim().replace(/\/+$/, '');
+  if (!url.endsWith('/api')) {
+    url = `${url}/api`;
+  }
+  return url;
+};
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getBaseURL(),
   headers: {
     'Content-Type': 'application/json',
   },
