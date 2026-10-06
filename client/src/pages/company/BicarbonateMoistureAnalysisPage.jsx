@@ -4,7 +4,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
+  getCellLimit,
+  validateCellValue,
+} from '../../services/analysisValidation';
+import {
   ArrowLeft,
+  AlertCircle,
   Calendar,
   Save,
   RotateCcw,
@@ -17,6 +22,68 @@ import {
   Layers,
   TrendingUp,
 } from 'lucide-react';
+
+// ─── SA Plant Bi Carbonate Moisture Parameters & Validation Limits ───────────
+// Plant: SA Plant ONLY (Bi Carbonate Section)
+// Parameter: Moisture
+// Options: A, B, C (Separate options under M 404)
+// Frequency: Once in 4 Hours
+//
+// Moisture:
+// - Reference Value: 20%
+// - Tolerance: ±2.0%
+// - Valid Range: 18% – 22%
+// Applied independently to Options A, B, and C
+export const BICARBONATE_MOISTURE_LIMITS = {
+  m404_a: {
+    key: 'm404_a',
+    option: 'A',
+    paramName: 'Moisture Option A',
+    label: 'Option A',
+    target: 20,
+    tolerance: 2.0,
+    min: 18,
+    max: 22,
+    unit: '%',
+    formattedRange: '18% – 22%',
+    formattedTarget: '20%',
+    formattedTolerance: '±2.0%',
+    frequency: 'Once in 4 Hours',
+    hasLimit: true,
+  },
+  m404_b: {
+    key: 'm404_b',
+    option: 'B',
+    paramName: 'Moisture Option B',
+    label: 'Option B',
+    target: 20,
+    tolerance: 2.0,
+    min: 18,
+    max: 22,
+    unit: '%',
+    formattedRange: '18% – 22%',
+    formattedTarget: '20%',
+    formattedTolerance: '±2.0%',
+    frequency: 'Once in 4 Hours',
+    hasLimit: true,
+  },
+  m404_c: {
+    key: 'm404_c',
+    option: 'C',
+    paramName: 'Moisture Option C',
+    label: 'Option C',
+    target: 20,
+    tolerance: 2.0,
+    min: 18,
+    max: 22,
+    unit: '%',
+    formattedRange: '18% – 22%',
+    formattedTarget: '20%',
+    formattedTolerance: '±2.0%',
+    frequency: 'Once in 4 Hours',
+    hasLimit: true,
+  },
+};
 
 // Default initial readings matching the user's legacy screenshot (Date: 13/09/2026)
 const DEFAULT_READINGS = [
@@ -249,17 +316,18 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn pb-12">
+    <div className="space-y-5 animate-fadeIn">
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-            title="Back to SA Plant"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -272,6 +340,9 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200/60">
                 Bicarbonate Moisture
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: Once in 4 Hours
               </span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
@@ -310,52 +381,47 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       </div>
 
-      {/* ── DATE SELECTION BAR (Full-width row directly below header) ── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Calendar className="w-4 h-4 text-cyan-600" />
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-            Analysis Date :
-          </span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition"
-          />
-          <span className="text-xs font-medium text-slate-500 hidden sm:inline">
-            ({formatDateDisplay(date)})
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDate(new Date().toISOString().split('T')[0])}
-            className="text-xs font-semibold text-slate-600 hover:text-cyan-700 px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50 transition"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => setDate('2026-09-13')}
-            className="text-xs font-semibold text-cyan-700 hover:text-cyan-800 bg-cyan-50 hover:bg-cyan-100/70 px-2.5 py-1 rounded-md border border-cyan-200/60 transition"
-          >
-            13/09/2026 Sample
-          </button>
-        </div>
-      </div>
-
       {/* ── MAIN ANALYSIS TABLE (Clean TK 203 Dark Header Style) ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner */}
-        <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-            <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
-              Bicarbonate Moisture Readings
-            </span>
-            <span className="text-xs text-slate-400 font-medium">
-              ({readings.length} Shift / Sample slots)
-            </span>
+        {/* Table top title banner with Integrated Date Selector */}
+        <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
+                Bicarbonate Moisture Readings
+              </span>
+              <span className="text-[11px] font-bold text-cyan-800 bg-cyan-100/80 px-2 py-0.5 rounded border border-cyan-300">
+                Once in 4 Hours
+              </span>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="moisture-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="moisture-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 transition text-slate-800 bg-white hover:border-slate-400"
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+            </div>
           </div>
 
           <button
@@ -401,7 +467,10 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                   colSpan={3}
                   className="py-2 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-cyan-300 font-extrabold"
                 >
-                  M 404 (Moisture %)
+                  <div className="text-xs font-black tracking-wide">M 404 (Moisture %)</div>
+                  <div className="text-[10px] text-cyan-200 font-medium normal-case tracking-normal">
+                    Limit: 18% – 22% (Target: 20% ±2.0%)
+                  </div>
                 </th>
                 <th
                   rowSpan={2}
@@ -424,9 +493,18 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
               </tr>
               {/* Row 2: Sub-columns */}
               <tr className="bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider text-center">
-                <th className="py-2 px-3 border-r border-slate-700 w-24">A</th>
-                <th className="py-2 px-3 border-r border-slate-700 w-24">B</th>
-                <th className="py-2 px-3 border-r border-slate-700 w-24">C</th>
+                <th className="py-2 px-2 border-r border-slate-700 min-w-[96px] text-center">
+                  <div className="font-extrabold text-cyan-200">A</div>
+                  <div className="text-[9px] text-slate-300 font-medium normal-case">18% – 22%</div>
+                </th>
+                <th className="py-2 px-2 border-r border-slate-700 min-w-[96px] text-center">
+                  <div className="font-extrabold text-cyan-200">B</div>
+                  <div className="text-[9px] text-slate-300 font-medium normal-case">18% – 22%</div>
+                </th>
+                <th className="py-2 px-2 border-r border-slate-700 min-w-[96px] text-center">
+                  <div className="font-extrabold text-cyan-200">C</div>
+                  <div className="text-[9px] text-slate-300 font-medium normal-case">18% – 22%</div>
+                </th>
                 <th className="py-2 px-3 border-r border-slate-700 w-24">TURB</th>
                 <th className="py-2 px-3 border-r border-slate-700 w-24">TURB</th>
               </tr>
@@ -470,60 +548,306 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                     </td>
 
                     {/* M 404 A */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.m404_a}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'm404_a', e.target.value)
-                        }
-                        placeholder="—"
-                        className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_m404_a`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.m404_a !== ''
-                            ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-cyan-500`}
-                      />
+                    <td className="py-2 px-2 border-r border-slate-100 align-top">
+                      {(() => {
+                        const cellVal = reading.m404_a;
+                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_a') || BICARBONATE_MOISTURE_LIMITS.m404_a;
+                        const validation = validateCellValue(cellVal, limit);
+                        const isOutOfLimit = validation.isOutOfLimit;
+                        const isNormal = validation.isNormal;
+                        const isFormatError = !!errors[`${reading.id}_m404_a`];
+
+                        return (
+                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
+                            <div className="relative w-full">
+                              <input
+                                id={`moisture-input-${reading.id}-a`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                onChange={(e) =>
+                                  handleCellChange(reading.id, 'm404_a', e.target.value)
+                                }
+                                placeholder="—"
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange}`
+                                    : 'Option A'
+                                }
+                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
+                                    : isFormatError
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
+                                    : hasValue && isNormal && limit
+                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
+                                    : hasValue
+                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
+                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Error / Validation Status & Range */}
+                            {isFormatError ? (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                                <span>Invalid</span>
+                              </div>
+                            ) : (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isNormal && limit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-a`}
+                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </span>
+                                )}
+                                {hasValue && isOutOfLimit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-a`}
+                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </span>
+                                )}
+                                <span
+                                  id={`moisture-range-${reading.id}-a`}
+                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                    isOutOfLimit
+                                      ? 'text-rose-700 font-bold'
+                                      : hasValue
+                                      ? 'text-slate-600 font-bold'
+                                      : 'text-slate-400'
+                                  }`}
+                                >
+                                  {limit?.formattedRange || '18% – 22%'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* M 404 B */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.m404_b}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'm404_b', e.target.value)
-                        }
-                        placeholder="—"
-                        className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_m404_b`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.m404_b !== ''
-                            ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-cyan-500`}
-                      />
+                    <td className="py-2 px-2 border-r border-slate-100 align-top">
+                      {(() => {
+                        const cellVal = reading.m404_b;
+                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_b') || BICARBONATE_MOISTURE_LIMITS.m404_b;
+                        const validation = validateCellValue(cellVal, limit);
+                        const isOutOfLimit = validation.isOutOfLimit;
+                        const isNormal = validation.isNormal;
+                        const isFormatError = !!errors[`${reading.id}_m404_b`];
+
+                        return (
+                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
+                            <div className="relative w-full">
+                              <input
+                                id={`moisture-input-${reading.id}-b`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                onChange={(e) =>
+                                  handleCellChange(reading.id, 'm404_b', e.target.value)
+                                }
+                                placeholder="—"
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange}`
+                                    : 'Option B'
+                                }
+                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
+                                    : isFormatError
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
+                                    : hasValue && isNormal && limit
+                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
+                                    : hasValue
+                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
+                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Error / Validation Status & Range */}
+                            {isFormatError ? (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                                <span>Invalid</span>
+                              </div>
+                            ) : (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isNormal && limit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-b`}
+                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </span>
+                                )}
+                                {hasValue && isOutOfLimit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-b`}
+                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </span>
+                                )}
+                                <span
+                                  id={`moisture-range-${reading.id}-b`}
+                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                    isOutOfLimit
+                                      ? 'text-rose-700 font-bold'
+                                      : hasValue
+                                      ? 'text-slate-600 font-bold'
+                                      : 'text-slate-400'
+                                  }`}
+                                >
+                                  {limit?.formattedRange || '18% – 22%'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* M 404 C */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.m404_c}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'm404_c', e.target.value)
-                        }
-                        placeholder="—"
-                        className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_m404_c`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.m404_c !== ''
-                            ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-cyan-500`}
-                      />
+                    <td className="py-2 px-2 border-r border-slate-100 align-top">
+                      {(() => {
+                        const cellVal = reading.m404_c;
+                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_c') || BICARBONATE_MOISTURE_LIMITS.m404_c;
+                        const validation = validateCellValue(cellVal, limit);
+                        const isOutOfLimit = validation.isOutOfLimit;
+                        const isNormal = validation.isNormal;
+                        const isFormatError = !!errors[`${reading.id}_m404_c`];
+
+                        return (
+                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
+                            <div className="relative w-full">
+                              <input
+                                id={`moisture-input-${reading.id}-c`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                onChange={(e) =>
+                                  handleCellChange(reading.id, 'm404_c', e.target.value)
+                                }
+                                placeholder="—"
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange}`
+                                    : 'Option C'
+                                }
+                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
+                                    : isFormatError
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
+                                    : hasValue && isNormal && limit
+                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
+                                    : hasValue
+                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
+                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Error / Validation Status & Range */}
+                            {isFormatError ? (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                                <span>Invalid</span>
+                              </div>
+                            ) : (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isNormal && limit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-c`}
+                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </span>
+                                )}
+                                {hasValue && isOutOfLimit && (
+                                  <span
+                                    id={`moisture-status-${reading.id}-c`}
+                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </span>
+                                )}
+                                <span
+                                  id={`moisture-range-${reading.id}-c`}
+                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                    isOutOfLimit
+                                      ? 'text-rose-700 font-bold'
+                                      : hasValue
+                                      ? 'text-slate-600 font-bold'
+                                      : 'text-slate-400'
+                                  }`}
+                                >
+                                  {limit?.formattedRange || '18% – 22%'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* M 405 OUTLET */}

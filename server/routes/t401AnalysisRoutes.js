@@ -65,7 +65,12 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    t401Records.unshift(record);
+    const existingIndex = t401Records.findIndex((r) => r.date === payload.date);
+    if (existingIndex >= 0) {
+      t401Records[existingIndex] = { ...t401Records[existingIndex], ...record };
+    } else {
+      t401Records.unshift(record);
+    }
 
     // Activity log entry
     try {

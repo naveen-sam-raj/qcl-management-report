@@ -5,6 +5,7 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
+  AlertCircle,
   Calendar,
   Save,
   RotateCcw,
@@ -13,23 +14,36 @@ import {
   Plus,
   Trash2,
   Clock,
-  FlaskConical,
   Layers,
   Droplets,
+  HelpCircle,
 } from 'lucide-react';
+import {
+  getCellLimit,
+  validateCellValue,
+  OFFSET_DM_WATER_LIMITS,
+} from '../../services/analysisValidation';
 
-// Screenshot values for DM Water and Anion Unit (Date: 13/09/2026)
+// ─── Centralized Limit Configs for Offset Plant → DM Water (Frequency: Day) ───
+const PH_LIMIT = OFFSET_DM_WATER_LIMITS.ph;
+const COND_LIMIT = OFFSET_DM_WATER_LIMITS.cond;
+const TH_LIMIT = OFFSET_DM_WATER_LIMITS.th;
+const ALK_LIMIT = OFFSET_DM_WATER_LIMITS.alk;
+const SIO2_LIMIT = OFFSET_DM_WATER_LIMITS.sio2;
+
+// Screenshot & Laboratory reference values for DM Water and Anion Unit (Date: 13/09/2026)
 const DEFAULT_ROWS = [
   {
     id: 'r_dm_water',
     unit: 'DM WATER',
     time: '15:00',
     ph: '7.2',
-    cond: '20.7',
-    p: '0',
-    m: '6',
+    cond: '10',
     th: '0',
+    alk: '5',
     sio2: '0.20',
+    p: '0',
+    m: '5',
     isDefault: true,
     accent: 'blue',
   },
@@ -37,20 +51,28 @@ const DEFAULT_ROWS = [
     id: 'r_anion_unit',
     unit: 'A.UNIT',
     time: '',
-    ph: '0',
-    cond: '0',
-    p: '0',
-    m: '0',
-    th: '0',
-    sio2: '0.00',
+    ph: '',
+    cond: '',
+    th: '',
+    alk: '',
+    sio2: '',
+    p: '',
+    m: '',
     isDefault: true,
     accent: 'indigo',
   },
 ];
 
-const NUMERIC_FIELDS = ['ph', 'cond', 'p', 'm', 'th', 'sio2'];
+const NUMERIC_FIELDS = ['ph', 'cond', 'th', 'alk', 'sio2'];
 
-const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
+const isValidInput = (val, field) => {
+  if (val === '' || val === null || val === undefined) return true;
+  if (field === 'th') {
+    const s = String(val).toLowerCase();
+    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-') return true;
+  }
+  return /^-?\d*\.?\d*$/.test(val);
+};
 
 const formatDateDisplay = (isoDate) => {
   if (!isoDate) return '—';
@@ -74,7 +96,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  // Default date matching user's laboratory screenshot (13/09/2026)
+  // Default date matching laboratory reference
   const [date, setDate] = useState('2026-09-13');
   const [readings, setReadings] = useState(DEFAULT_ROWS);
   const [errors, setErrors] = useState({});
@@ -83,7 +105,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {
-    if (NUMERIC_FIELDS.includes(field) && !isValidDecimal(value)) return;
+    if (NUMERIC_FIELDS.includes(field) && !isValidInput(value, field)) return;
 
     setReadings((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: value } : row))
@@ -111,10 +133,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         time: '',
         ph: '',
         cond: '',
+        th: '',
+        alk: '',
+        sio2: '',
         p: '',
         m: '',
-        th: '',
-        sio2: '',
         isDefault: false,
         accent: nextIndex % 2 === 1 ? 'blue' : 'indigo',
       },
@@ -148,9 +171,17 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     readings.forEach((row) => {
       NUMERIC_FIELDS.forEach((field) => {
         const val = row[field];
-        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
-          newErrors[`${row.id}_${field}`] = 'Invalid number';
-          hasError = true;
+        if (val !== '' && val !== null && val !== undefined) {
+          if (field === 'th') {
+            const s = String(val).toLowerCase();
+            if (s === 'nil' || s === 'none' || s === '-' || !isNaN(Number(val))) {
+              return;
+            }
+          }
+          if (isNaN(Number(val))) {
+            newErrors[`${row.id}_${field}`] = 'Invalid number';
+            hasError = true;
+          }
         }
       });
     });
@@ -167,7 +198,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     }
 
     const hasAnyValue = readings.some((row) =>
-      NUMERIC_FIELDS.some((field) => row[field] !== '' && row[field] !== null)
+      NUMERIC_FIELDS.some((field) => row[field] !== '' && row[field] !== null && row[field] !== undefined)
     );
 
     if (!hasAnyValue) {
@@ -181,7 +212,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       date,
       plant: 'OFFSET',
       unit: 'DM Water',
-      readings,
+      readings: readings.map((r) => ({
+        ...r,
+        p: r.p !== undefined && r.p !== '' ? r.p : '0',
+        m: r.alk !== undefined && r.alk !== '' ? r.alk : (r.m || '0'),
+      })),
       submittedBy: user?.name || 'Shift Chemist',
     };
 
@@ -189,7 +224,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       const response = await api.post('/api/dm-water-analysis', payload);
       setSaving(false);
       setSaveSuccess(true);
-      showToast?.(response.data?.message || 'DM Water & Anion Unit Analysis saved successfully!', 'success');
+      showToast?.(response.data?.message || 'DM Water Analysis saved successfully!', 'success');
       setTimeout(() => setSaveSuccess(false), 5000);
     } catch (err) {
       setSaving(false);
@@ -200,19 +235,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-12">
-      {/* ── Breadcrumb & Top Navigation matching TK 203 theme ── */}
+    <div className="space-y-4 animate-fadeIn">
+      {/* ── Breadcrumb & Top Navigation ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back button + Plant Navigation + Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          {/* Left: Plant Navigation + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
-              id="btn-dm-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to OFFSET Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
 
             <div className="min-w-0">
@@ -225,7 +260,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 <span className="text-blue-600 font-semibold">DM Water</span>
               </div>
               <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
-                ANALYSIS FOR DM WATER / ANION UNIT
+                DM WATER ANALYSIS
               </h1>
             </div>
           </div>
@@ -235,8 +270,8 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <button
               id="btn-dm-reset"
               onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Reset to default screenshot values"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
+              title="Reset to default reference values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
@@ -246,7 +281,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               id="btn-dm-save"
               onClick={handleSave}
               disabled={saving}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs ${
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
                 saveSuccess
                   ? 'bg-emerald-600 hover:bg-emerald-700'
                   : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
@@ -273,121 +308,87 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
       </div>
 
-      {/* ── Control Bar: Date Selector & Context ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          {/* Date Picker */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                DATE:
-              </span>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setDate(new Date().toISOString().split('T')[0])}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[11px] font-bold text-slate-600 transition"
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => setDate('2026-09-13')}
-                className="px-2 py-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-[11px] font-bold text-blue-700 transition"
-                title="Date from screenshot"
-              >
-                13/09/2026
-              </button>
-            </div>
-            <span className="text-slate-400 hidden sm:inline">|</span>
-            <span className="text-slate-600 font-semibold">{formatDateDisplay(date)}</span>
-          </div>
-
-          {/* Plant & Operator Badge */}
-          <div className="flex items-center gap-2 text-slate-500">
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              Demineralization & Anion Exchange
-            </span>
-            <span className="hidden md:inline text-slate-400">•</span>
-            <span className="hidden md:inline text-[11px]">
-              Operator: <strong className="text-slate-700">{user?.name || 'Shift Chemist'}</strong>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Main Analytical Table Matching User Screenshot ── */}
+      {/* ── Table Container ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table Header Bar */}
-        <div className="px-5 py-3 bg-slate-50/80 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-              <FlaskConical className="w-4 h-4 text-blue-600" />
-              Sampling Stream & Analytical Measurements
-            </h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Enter laboratory test results for DM Water and Anion Unit (A.UNIT) streams.
-            </p>
+        {/* Table Meta Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 bg-slate-50/50">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">
+              DM Water Observations Table
+            </span>
+            <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+              {readings.length} Stream{readings.length > 1 ? 's' : ''}
+            </span>
+            <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
+              Frequency: Day
+            </span>
+            <div className="flex items-center gap-1.5 ml-1">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="px-2 py-0.5 text-xs font-bold rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleAddRow}
-            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Sampling Stream</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAddRow}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition border border-blue-200 cursor-pointer shadow-2xs"
+              title="Add another sampling stream"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Stream Row</span>
+            </button>
+          </div>
         </div>
 
-        {/* The Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        {/* The Table - Clean proportional widths, inputs centered, no horizontal scrolling */}
+        <div className="overflow-x-auto w-full">
+          <table className="w-full text-center border-collapse">
             <thead>
-              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <th className="py-3 px-4 w-44 border-r border-slate-800">
+              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider border-b border-slate-800">
+                <th className="py-3 px-2 w-10 text-center text-slate-400 font-semibold border-r border-slate-800">
+                  #
+                </th>
+                <th className="py-2.5 px-3 w-[20%] text-center border-r border-slate-800">
                   Unit / Stream
                 </th>
-                <th className="py-3 px-3 w-32 border-r border-slate-800 text-center">
-                  <span className="flex items-center justify-center gap-1">
-                    <Clock className="w-3 h-3 text-amber-400" />
-                    Time
-                  </span>
+                <th className="py-2.5 px-2 w-[11%] text-center border-r border-slate-800">
+                  <div className="flex items-center justify-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Time</span>
+                  </div>
                 </th>
-                <th className="py-3 px-3 w-28 border-r border-slate-800 text-center">
-                  pH
+                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                  <div className="font-extrabold text-blue-300">pH</div>
                 </th>
-                <th className="py-3 px-3 w-32 border-r border-slate-800 text-center">
-                  Cond <span className="text-[9px] text-slate-400 font-normal">(µS/cm)</span>
+                <th className="py-2.5 px-2.5 w-[15%] text-center border-r border-slate-800">
+                  <div className="font-extrabold text-cyan-300">Cond</div>
+                  <div className="text-[10px] text-slate-300 font-normal normal-case">(umho/cm)</div>
                 </th>
-                <th className="py-3 px-3 w-28 border-r border-slate-800 text-center">
-                  P <span className="text-[9px] text-slate-400 font-normal">(Alk)</span>
+                <th className="py-2.5 px-2 w-[12%] text-center border-r border-slate-800">
+                  <div className="font-extrabold text-amber-300">TH</div>
+                  <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-3 px-3 w-28 border-r border-slate-800 text-center">
-                  M <span className="text-[9px] text-slate-400 font-normal">(Alk)</span>
+                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                  <div className="font-extrabold text-emerald-300">Alk</div>
+                  <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-3 px-3 w-28 border-r border-slate-800 text-center">
-                  TH <span className="text-[9px] text-slate-400 font-normal">(ppm)</span>
+                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                  <div className="font-extrabold text-indigo-300">SiO₂</div>
+                  <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-3 px-3 w-32 border-r border-slate-800 text-center">
-                  SiO₂ <span className="text-[9px] text-slate-400 font-normal">(ppm)</span>
-                </th>
-                <th className="py-3 px-3 w-16 text-center">
+                <th className="py-2.5 px-2 w-12 text-center">
                   Action
                 </th>
               </tr>
             </thead>
+
             <tbody className="divide-y divide-slate-100 text-xs">
-              {readings.map((row) => {
+              {readings.map((row, idx) => {
                 const isDM = row.unit?.toUpperCase().includes('DM WATER');
                 const isAnion = row.unit?.toUpperCase().includes('A.UNIT');
 
@@ -402,9 +403,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         : 'hover:bg-slate-50'
                     }`}
                   >
+                    {/* Index */}
+                    <td className="py-2.5 px-2 text-center text-slate-400 font-semibold border-r border-slate-100 text-[11px]">
+                      {idx + 1}
+                    </td>
+
                     {/* Unit / Stream Name */}
-                    <td className="py-3 px-4 border-r border-slate-100">
-                      <div className="flex items-center gap-2">
+                    <td className="py-2.5 px-3 border-r border-slate-100 text-center">
+                      <div className="flex items-center justify-center gap-2">
                         <div
                           className={`w-2.5 h-2.5 rounded-full shrink-0 ${
                             isDM
@@ -415,7 +421,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                           }`}
                         />
                         {row.isDefault ? (
-                          <div className="font-extrabold text-slate-900 tracking-wide text-xs">
+                          <div className="font-extrabold text-slate-900 tracking-wide text-xs text-center">
                             {row.unit}
                             <div className="text-[10px] text-slate-400 font-medium">
                               {isDM ? 'Demineralized Water' : 'Anion Exchange Unit'}
@@ -426,145 +432,357 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                             type="text"
                             value={row.unit}
                             onChange={(e) => handleCellChange(row.id, 'unit', e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 font-bold text-slate-800 text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 font-bold text-slate-800 text-xs text-center focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="Unit Name"
                           />
                         )}
                       </div>
                     </td>
 
-                    {/* Time Input (Highlighted with soft amber/yellow as seen in user's screenshot) */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={row.time}
-                          onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                          placeholder="HH:mm"
-                          className={`w-full text-center font-mono text-xs font-extrabold py-1.5 px-2 rounded-md border transition ${
-                            row.time && isDM
-                              ? 'bg-amber-100 border-amber-300 text-amber-950 font-black shadow-inner ring-1 ring-amber-200'
-                              : 'bg-slate-50 border-slate-200 text-slate-800 focus:bg-white'
-                          } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                        />
-                      </div>
-                    </td>
-
-                    {/* pH */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
+                    {/* Time Input */}
+                    <td className="py-2.5 px-2 border-r border-slate-100 text-center">
                       <input
-                        type="text"
-                        value={row.ph}
-                        onChange={(e) => handleCellChange(row.id, 'ph', e.target.value)}
-                        placeholder="0.0"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_ph`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.ph !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                        type="time"
+                        value={row.time}
+                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
+                        placeholder="HH:mm"
+                        className={`w-full text-center font-bold text-xs py-1 px-1.5 rounded-md border transition ${
+                          row.time && isDM
+                            ? 'bg-amber-50 border-amber-300 text-amber-950 font-black'
+                            : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400'
+                        } focus:outline-none focus:ring-1 focus:ring-blue-500`}
                       />
                     </td>
 
-                    {/* Cond */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.cond}
-                        onChange={(e) => handleCellChange(row.id, 'cond', e.target.value)}
-                        placeholder="0.0"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_cond`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.cond !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                      />
+                    {/* 1. pH: Direct Valid Range 7.0 – 9.5 */}
+                    <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
+                      {(() => {
+                        const valRes = validateCellValue(row.ph, PH_LIMIT);
+                        const hasVal = row.ph !== '' && row.ph !== null && row.ph !== undefined;
+                        const isOutOfLimit = valRes.isOutOfLimit;
+                        const isNormal = valRes.isNormal;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            <div className="relative w-full">
+                              <input
+                                id={`dm-water-input-${row.id}-ph`}
+                                type="text"
+                                inputMode="decimal"
+                                value={row.ph}
+                                onChange={(e) => handleCellChange(row.id, 'ph', e.target.value)}
+                                placeholder="7.0 – 9.5"
+                                title={
+                                  hasVal
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${row.ph} (Direct Valid Range: 7.0 – 9.5)`
+                                      : `NORMAL: ${row.ph} (Direct Valid Range: 7.0 – 9.5)`
+                                    : 'Direct Valid Range: 7.0 – 9.5'
+                                }
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                                  errors[`${row.id}_ph`]
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                    : hasVal && isNormal
+                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit: 7.0 – 9.5"
+                                >
+                                  <AlertCircle className="w-2 h-2 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Range display near input & dynamic status centered */}
+                            <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
+                              <span className="text-slate-400 font-medium">7.0 – 9.5</span>
+                              {hasVal && (
+                                isOutOfLimit ? (
+                                  <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
+                                    OUT OF LIMIT
+                                  </span>
+                                ) : isNormal ? (
+                                  <span className="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded border border-emerald-300 text-[9px] whitespace-nowrap inline-flex items-center gap-0.5">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> NORMAL
+                                  </span>
+                                ) : null
+                              )}
+                            </div>
+                            {errors[`${row.id}_ph`] && (
+                              <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+                                {errors[`${row.id}_ph`]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
-                    {/* P (Alk) */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.p}
-                        onChange={(e) => handleCellChange(row.id, 'p', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_p`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.p !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                      />
+                    {/* 2. Cond: Target 10 umho/cm, Tolerance ±5 -> Valid Range 5 – 15 umho/cm */}
+                    <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
+                      {(() => {
+                        const valRes = validateCellValue(row.cond, COND_LIMIT);
+                        const hasVal = row.cond !== '' && row.cond !== null && row.cond !== undefined;
+                        const isOutOfLimit = valRes.isOutOfLimit;
+                        const isNormal = valRes.isNormal;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            <div className="relative w-full">
+                              <input
+                                id={`dm-water-input-${row.id}-cond`}
+                                type="text"
+                                inputMode="decimal"
+                                value={row.cond}
+                                onChange={(e) => handleCellChange(row.id, 'cond', e.target.value)}
+                                placeholder="5 – 15"
+                                title={
+                                  hasVal
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${row.cond} umho/cm (Valid: 5 – 15 umho/cm)`
+                                      : `NORMAL: ${row.cond} umho/cm (Valid: 5 – 15 umho/cm)`
+                                    : 'Valid Range: 5 – 15 umho/cm'
+                                }
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                                  errors[`${row.id}_cond`]
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                    : hasVal && isNormal
+                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit: 5 – 15 umho/cm"
+                                >
+                                  <AlertCircle className="w-2 h-2 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Range display near input & dynamic status centered */}
+                            <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
+                              <span className="text-slate-400 font-medium">5 – 15 umho/cm</span>
+                              {hasVal && (
+                                isOutOfLimit ? (
+                                  <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
+                                    OUT OF LIMIT
+                                  </span>
+                                ) : isNormal ? (
+                                  <span className="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded border border-emerald-300 text-[9px] whitespace-nowrap inline-flex items-center gap-0.5">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> NORMAL
+                                  </span>
+                                ) : null
+                              )}
+                            </div>
+                            {errors[`${row.id}_cond`] && (
+                              <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+                                {errors[`${row.id}_cond`]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
-                    {/* M (Alk) */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.m}
-                        onChange={(e) => handleCellChange(row.id, 'm', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_m`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.m !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                      />
+                    {/* 3. TH: Limit Nil (Keep input field available, treat Nil exactly as provided) */}
+                    <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
+                      {(() => {
+                        const hasVal = row.th !== '' && row.th !== null && row.th !== undefined;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            <input
+                              id={`dm-water-input-${row.id}-th`}
+                              type="text"
+                              value={row.th}
+                              onChange={(e) => handleCellChange(row.id, 'th', e.target.value)}
+                              placeholder="Nil"
+                              title="Limit: Nil"
+                              className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                                errors[`${row.id}_th`]
+                                  ? 'border-red-400 bg-red-50 text-red-700'
+                                  : hasVal
+                                  ? 'border-slate-300 bg-white text-slate-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
+                                  : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
+                              }`}
+                            />
+                            {/* Display Limit: Nil near input */}
+                            <div className="flex items-center justify-center gap-1 w-full text-[10px] leading-tight">
+                              <span className="text-slate-400 font-medium">Limit: Nil</span>
+                            </div>
+                            {errors[`${row.id}_th`] && (
+                              <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+                                {errors[`${row.id}_th`]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
-                    {/* TH */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.th}
-                        onChange={(e) => handleCellChange(row.id, 'th', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_th`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.th !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                      />
+                    {/* 4. Alk: Target 5 ppm, Tolerance ±4 -> Valid Range 1 – 9 ppm */}
+                    <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
+                      {(() => {
+                        const valRes = validateCellValue(row.alk, ALK_LIMIT);
+                        const hasVal = row.alk !== '' && row.alk !== null && row.alk !== undefined;
+                        const isOutOfLimit = valRes.isOutOfLimit;
+                        const isNormal = valRes.isNormal;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            <div className="relative w-full">
+                              <input
+                                id={`dm-water-input-${row.id}-alk`}
+                                type="text"
+                                inputMode="decimal"
+                                value={row.alk}
+                                onChange={(e) => handleCellChange(row.id, 'alk', e.target.value)}
+                                placeholder="1 – 9"
+                                title={
+                                  hasVal
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${row.alk} ppm (Valid: 1 – 9 ppm)`
+                                      : `NORMAL: ${row.alk} ppm (Valid: 1 – 9 ppm)`
+                                    : 'Valid Range: 1 – 9 ppm'
+                                }
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                                  errors[`${row.id}_alk`]
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                    : hasVal && isNormal
+                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit: 1 – 9 ppm"
+                                >
+                                  <AlertCircle className="w-2 h-2 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Range display near input & dynamic status centered */}
+                            <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
+                              <span className="text-slate-400 font-medium">1 – 9 ppm</span>
+                              {hasVal && (
+                                isOutOfLimit ? (
+                                  <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
+                                    OUT OF LIMIT
+                                  </span>
+                                ) : isNormal ? (
+                                  <span className="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded border border-emerald-300 text-[9px] whitespace-nowrap inline-flex items-center gap-0.5">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> NORMAL
+                                  </span>
+                                ) : null
+                              )}
+                            </div>
+                            {errors[`${row.id}_alk`] && (
+                              <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+                                {errors[`${row.id}_alk`]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
-                    {/* SiO2 */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.sio2}
-                        onChange={(e) => handleCellChange(row.id, 'sio2', e.target.value)}
-                        placeholder="0.00"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${row.id}_sio2`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : row.sio2 !== ''
-                            ? 'border-blue-200 bg-blue-50/30 text-slate-900 font-extrabold'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                      />
+                    {/* 5. SiO2: Reference 0.20 ppm, Tolerance ±5 (Preserved exactly as given) */}
+                    <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
+                      {(() => {
+                        const valRes = validateCellValue(row.sio2, SIO2_LIMIT);
+                        const hasVal = row.sio2 !== '' && row.sio2 !== null && row.sio2 !== undefined;
+                        const isOutOfLimit = valRes.isOutOfLimit;
+                        const isNormal = valRes.isNormal;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            <div className="relative w-full">
+                              <input
+                                id={`dm-water-input-${row.id}-sio2`}
+                                type="text"
+                                inputMode="decimal"
+                                value={row.sio2}
+                                onChange={(e) => handleCellChange(row.id, 'sio2', e.target.value)}
+                                placeholder="0.20 ± 5"
+                                title={
+                                  hasVal
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${row.sio2} ppm (Valid: 0.20 ± 5 ppm)`
+                                      : `NORMAL: ${row.sio2} ppm (Valid: 0.20 ± 5 ppm)`
+                                    : 'Valid Reference: 0.20 ppm ±5'
+                                }
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                                  errors[`${row.id}_sio2`]
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                    : hasVal && isNormal
+                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'
+                                }`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit: 0.20 ± 5 ppm"
+                                >
+                                  <AlertCircle className="w-2 h-2 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Range display near input & dynamic status centered */}
+                            <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
+                              <span className="text-slate-400 font-medium">0.20 ± 5 ppm</span>
+                              {hasVal && (
+                                isOutOfLimit ? (
+                                  <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
+                                    OUT OF LIMIT
+                                  </span>
+                                ) : isNormal ? (
+                                  <span className="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded border border-emerald-300 text-[9px] whitespace-nowrap inline-flex items-center gap-0.5">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> NORMAL
+                                  </span>
+                                ) : null
+                              )}
+                            </div>
+                            {errors[`${row.id}_sio2`] && (
+                              <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+                                {errors[`${row.id}_sio2`]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Action */}
-                    <td className="py-2.5 px-3 text-center">
+                    <td className="py-2.5 px-2 text-center align-top">
                       {!row.isDefault ? (
                         <button
                           type="button"
                           onClick={() => handleRemoveRow(row.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
-                          title="Delete row"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                          title="Delete stream row"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       ) : (
-                        <span className="text-[10px] text-slate-300 font-bold">Standard</span>
+                        <span className="text-[10px] text-slate-300 font-bold block pt-1">Standard</span>
                       )}
                     </td>
                   </tr>
@@ -579,6 +797,8 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">Total Stream Rows: {readings.length}</span>
             <span>•</span>
+            <span className="text-slate-500">Frequency: <strong className="text-slate-700">Day</strong></span>
+            <span>•</span>
             <span>Click any cell to edit numeric values</span>
           </div>
 
@@ -587,7 +807,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50 cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Save Changes</span>

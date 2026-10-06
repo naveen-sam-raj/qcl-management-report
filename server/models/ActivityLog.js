@@ -9,7 +9,7 @@ const activityLogSchema = new mongoose.Schema(
     },
     userName: {
       type: String,
-      required: true,
+      default: 'System',
     },
     userEmail: {
       type: String,
@@ -17,7 +17,7 @@ const activityLogSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      required: true,
+      default: 'admin',
     },
     company: {
       type: mongoose.Schema.Types.ObjectId,

@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
-import { Lock, User, Eye, EyeOff, ArrowLeft, AlertCircle, CheckCircle2, Beaker } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 
 const TFLLogin = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated, user } = useAuth();
+  const { login, logout, isAuthenticated, user } = useAuth();
   const { showToast } = useToast();
 
   const [identifier, setIdentifier] = useState('');
@@ -20,16 +20,17 @@ const TFLLogin = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState('');
 
-  // Redirect if already logged in
+  // Redirect if already logged in for TFL or Super Admin
   useEffect(() => {
     if (isAuthenticated && user) {
       if (user.role === 'super_admin') {
         navigate('/super-admin');
-      } else if (user.role === 'company_admin') {
-        const code = user.company?.code?.toLowerCase() || 'tfl';
-        navigate(`/admin/${code}`);
-      } else {
-        navigate('/portal');
+      } else if (user.company?.code?.toUpperCase() === 'TFL') {
+        if (user.role === 'company_admin') {
+          navigate('/admin/tfl');
+        } else {
+          navigate('/portal');
+        }
       }
     }
   }, [isAuthenticated, user, navigate]);
@@ -43,10 +44,11 @@ const TFLLogin = () => {
     }
     try {
       setLoading(true);
-      const res = await login(identifier, password);
+      const res = await login(identifier, password, null, 'TFL');
       if (res.success) {
         // Enforce company isolation — TFL login only for TFL users
         if (res.user.role !== 'super_admin' && res.user.company?.code?.toUpperCase() !== 'TFL') {
+          logout();
           showToast('Access denied. This login is for TFL users only.', 'error');
           setErrorMsg('Access denied. This portal is for TFL company users only.');
           setLoading(false);
@@ -81,56 +83,69 @@ const TFLLogin = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 40%, #2563eb 70%, #3b82f6 100%)' }}>
+    <div className="h-screen max-h-screen relative flex flex-col font-sans selection:bg-blue-600 selection:text-white overflow-hidden">
+      {/* Blurred Industrial Ambient Background - Identical to Landing Page */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <img
+          src="/plant-bg.jpg"
+          alt="SPIC Plant Background"
+          className="w-full h-full object-cover object-center filter blur-[4px] scale-105 opacity-80"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
+      </div>
+
       {/* Top navigation bar */}
-      <header className="px-6 py-4 flex items-center justify-between">
-        <Link to="/" className="inline-flex items-center gap-2 text-blue-200 hover:text-white transition text-xs font-semibold">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Portal
-        </Link>
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
-            <Beaker className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-white text-xs font-bold tracking-wide">TFL ENTERPRISE</span>
+      <header className="px-6 py-3 flex items-center justify-end z-10 shrink-0">
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/85 border border-slate-200/90 shadow-2xs">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          <span className="text-slate-800 text-xs font-bold tracking-wide">TFL ENTERPRISE</span>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
+      <div className="flex-1 flex items-center justify-center px-4 py-2 z-10 overflow-hidden">
         <div className="w-full max-w-md">
-          {/* Logo & Header */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-white/15 backdrop-blur-sm border border-white/30 shadow-2xl mb-5">
-              <span className="text-3xl font-black text-white tracking-tighter">TFL</span>
-            </div>
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">TFL Portal Login</h1>
-            <p className="mt-2 text-blue-200 text-sm font-medium">
-              Tuticorin Alkali Chemicals and Fertilizers Ltd.
-            </p>
-            <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/30 border border-blue-400/40 text-blue-100 text-xs font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-300 inline-block animate-pulse" />
-              Chemical Synthesis &amp; Carbon Recovery
-            </div>
-          </div>
-
           {/* Login Card */}
-          <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl p-8 shadow-2xl">
+          <div className="bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.12)]">
+            {/* Real TFL Logo & Header */}
+            <div className="text-center mb-6">
+              <div className="h-16 w-full flex items-center justify-center mb-3">
+                <img
+                  src="/tfl-logo.png"
+                  alt="Tuticorin Alkali Chemicals and Fertilizers"
+                  className="max-h-12 max-w-[210px] w-auto object-contain filter drop-shadow-2xs"
+                />
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                TFL Portal Login
+              </h1>
+              <p className="mt-1 text-xs text-slate-500 font-medium">
+                Tuticorin Alkali Chemicals and Fertilizers Ltd.
+              </p>
+              <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 inline-block animate-pulse" />
+                <span>Soda Ash &amp; CCU Carbon Recovery</span>
+              </div>
+            </div>
+
             {errorMsg && (
-              <div className="mb-5 p-3.5 rounded-xl bg-red-500/20 border border-red-400/40 text-red-100 text-xs font-medium flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
+              <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
                 <span>{errorMsg}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4">
               {/* Email / Username */}
               <div>
-                <label htmlFor="tfl-identifier" className="block text-xs font-bold uppercase tracking-wider text-blue-100 mb-2">
+                <label htmlFor="tfl-identifier" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
                   Username or Email
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-blue-300">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <User className="w-4 h-4" />
                   </div>
                   <input
@@ -140,27 +155,27 @@ const TFLLogin = () => {
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     placeholder="admin@tfl.in"
-                    className="w-full pl-11 pr-4 py-3 bg-white/10 border border-white/30 rounded-xl text-white placeholder-blue-300/70 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition shadow-2xs font-medium"
                   />
                 </div>
               </div>
 
               {/* Password */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label htmlFor="tfl-password" className="block text-xs font-bold uppercase tracking-wider text-blue-100">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="tfl-password" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
                     Password
                   </label>
                   <button
                     type="button"
                     onClick={() => { setForgotSuccess(''); setIsForgotModalOpen(true); }}
-                    className="text-xs font-semibold text-blue-200 hover:text-white transition"
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition cursor-pointer"
                   >
                     Forgot Password?
                   </button>
                 </div>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-blue-300">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <Lock className="w-4 h-4" />
                   </div>
                   <input
@@ -170,12 +185,12 @@ const TFLLogin = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full pl-11 pr-12 py-3 bg-white/10 border border-white/30 rounded-xl text-white placeholder-blue-300/70 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition font-mono"
+                    className="w-full pl-10 pr-11 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition shadow-2xs font-mono font-medium"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-blue-300 hover:text-white transition"
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition cursor-pointer"
                     title={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -188,68 +203,18 @@ const TFLLogin = () => {
                 id="btn-tfl-login"
                 type="submit"
                 disabled={loading}
-                className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl text-sm font-bold text-blue-900 bg-white hover:bg-blue-50 transition shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.99] transition shadow-md shadow-blue-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Lock className="w-4 h-4" />
                 <span>{loading ? 'Authenticating...' : 'Sign In to TFL Portal'}</span>
               </button>
             </form>
 
-            {/* Demo Credentials quick-fill */}
-            <div className="mt-5 pt-4 border-t border-white/10 space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400/70 mb-1 text-center">Demo Credentials</p>
-              {/* Admin */}
-              <button
-                type="button"
-                onClick={() => { setIdentifier('tfl.admin'); setPassword('Tfl@1234'); }}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white/10 rounded-xl border border-white/20 hover:border-blue-400/50 transition text-left"
-              >
-                <span className="text-xs text-blue-200">Company Admin</span>
-                <span className="text-xs font-mono text-white">tfl.admin</span>
-              </button>
-              {/* ACL Operator */}
-              <button
-                type="button"
-                onClick={() => { setIdentifier('murugan.tfl'); setPassword('User@1234'); }}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white/10 rounded-xl border border-white/20 hover:border-emerald-400/50 transition text-left"
-              >
-                <span className="text-xs text-emerald-300">ACL Plant User</span>
-                <span className="text-xs font-mono text-white">murugan.tfl</span>
-              </button>
-              {/* SA Operator */}
-              <button
-                type="button"
-                onClick={() => { setIdentifier('suresh.tfl'); setPassword('User@1234'); }}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white/10 rounded-xl border border-white/20 hover:border-amber-400/50 transition text-left"
-              >
-                <span className="text-xs text-amber-300">SA Plant User</span>
-                <span className="text-xs font-mono text-white">suresh.tfl</span>
-              </button>
-              {/* OFFSET Operator */}
-              <button
-                type="button"
-                onClick={() => { setIdentifier('karthik.tfl'); setPassword('User@1234'); }}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white/10 rounded-xl border border-white/20 hover:border-indigo-400/50 transition text-left"
-              >
-                <span className="text-xs text-indigo-300">OFFSET Plant User</span>
-                <span className="text-xs font-mono text-white">karthik.tfl</span>
-              </button>
-              {/* CO2 Operator */}
-              <button
-                type="button"
-                onClick={() => { setIdentifier('praveen.tfl'); setPassword('User@1234'); }}
-                className="w-full flex items-center justify-between px-3 py-2 bg-white/10 rounded-xl border border-white/20 hover:border-cyan-400/50 transition text-left"
-              >
-                <span className="text-xs text-cyan-300">CO2 Plant User</span>
-                <span className="text-xs font-mono text-white">praveen.tfl</span>
-              </button>
-            </div>
-
             {/* Footer links */}
-            <div className="mt-4 text-center">
-              <span className="text-xs text-blue-300">Other company? </span>
-              <Link to="/" className="text-xs font-bold text-white hover:text-blue-200 transition">
-                Return to Landing Page →
+            <div className="mt-5 pt-3 border-t border-slate-100 text-center">
+              <span className="text-xs text-slate-500">Other company? </span>
+              <Link to="/" className="text-xs font-bold text-blue-600 hover:text-blue-800 transition">
+                Return to Landing Page
               </Link>
             </div>
           </div>

@@ -157,17 +157,18 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn pb-12">
+    <div className="space-y-5 animate-fadeIn">
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-            title="Back to OFFSET Plant"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -189,118 +190,105 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
 
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
-          )}
+        {/* Right: Date/Time + Action Buttons */}
+        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+          {/* Integrated Date & Time Section */}
+          <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+            <div className="flex items-center gap-1.5">
+              <label
+                htmlFor="rawwater-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="rawwater-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-7 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
+                  required
+                />
+              </div>
+            </div>
 
-          <button
-            onClick={handleReset}
-            disabled={saving}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
+            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
+              <label
+                htmlFor="rawwater-time-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Time:</span>
+              </label>
+              <input
+                id="rawwater-time-input"
+                type="text"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                placeholder="HH:mm"
+                className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              />
+            </div>
 
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                Save Raw Water Data
-              </>
+            {date && (
+              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                {formatDateDisplay(date)}
+              </span>
             )}
-          </button>
-        </div>
-      </div>
-
-      {/* ── DATE & TIME SELECTION ROW (Full-width row directly under header) ── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Date Picker */}
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-              Date : <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-800 bg-white hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 transition"
-            />
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-              {formatDateDisplay(date)}
-            </span>
           </div>
 
-          {/* Time Input */}
-          <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
-            <Clock className="w-4 h-4 text-sky-600" />
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-              TIME :
-            </label>
-            <input
-              type="text"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              placeholder="HH:mm"
-              className="w-24 text-center font-mono font-bold text-sm bg-white border border-slate-300 rounded-lg py-1 px-2 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
-        </div>
+          {/* Action Buttons: Reset & Save */}
+          <div className="flex items-center gap-2 shrink-0">
+            {lastSaved && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Saved
+              </span>
+            )}
 
-        {/* Quick date presets */}
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-400 font-medium mr-1">Quick:</span>
-          <button
-            onClick={() => {
-              const todayIso = new Date().toISOString().split('T')[0];
-              setDate(todayIso);
-            }}
-            className="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => {
-              setDate('2026-09-14');
-              setTime('08:00');
-            }}
-            className={`px-2.5 py-1 rounded-md font-medium transition ${
-              date === '2026-09-14'
-                ? 'bg-sky-100 text-sky-900 border border-sky-300 font-bold'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            14/09/2026 (Sample)
-          </button>
+            <button
+              onClick={handleReset}
+              disabled={saving}
+              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
+            </button>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
+            >
+              {saving ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  Save
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* ── MAIN CONTENT: 2-Column Chemical Analysis Parameters Card ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {/* Table / Card Header */}
-        <div className="px-5 py-3.5 border-b border-slate-200/80 bg-slate-900 text-white flex items-center justify-between">
+        <div className="px-5 py-2.5 border-b border-slate-200/80 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <FlaskConical className="w-4 h-4 text-sky-400" />
             <h2 className="text-xs font-black tracking-wider uppercase">
               Raw Water Laboratory Quality Parameters
             </h2>
           </div>
+
           <span className="text-[11px] font-mono font-semibold bg-white/10 px-2.5 py-0.5 rounded text-sky-200">
             14 Parameters
           </span>

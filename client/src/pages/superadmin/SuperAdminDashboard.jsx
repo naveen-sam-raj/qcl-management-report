@@ -209,15 +209,15 @@ const SuperAdminDashboard = () => {
           setCompanies(MOCK_COMPANIES);
         }
 
-        if (adminRes.data?.success && adminRes.data.admins) {
+        if (adminRes.data?.success && Array.isArray(adminRes.data.admins)) {
           setAdmins(adminRes.data.admins);
         } else {
-          setAdmins(MOCK_COMPANY_ADMINS);
+          setAdmins([]);
         }
       } catch (backendErr) {
-        console.warn('Backend unavailable, using mock data:', backendErr.message);
+        console.warn('Backend unavailable:', backendErr.message);
         setCompanies(MOCK_COMPANIES);
-        setAdmins(MOCK_COMPANY_ADMINS);
+        setAdmins([]);
       }
     } catch (err) {
       showToast('Failed to load data.', 'error');
@@ -487,6 +487,24 @@ const SuperAdminDashboard = () => {
         MOCK_USERS[mockIdx].password = newPassword;
       }
 
+      // Signal cross-tab revocation
+      try {
+        const syncChannel = new BroadcastChannel('spic_auth_sync');
+        syncChannel.postMessage({
+          type: 'PASSWORD_RESET',
+          targetId: resetAdmin._id,
+          targetUsername: resetAdmin.username,
+        });
+        syncChannel.close();
+      } catch {
+        /* ignore */
+      }
+      localStorage.setItem('spic_password_reset_signal', JSON.stringify({
+        targetId: resetAdmin._id,
+        targetUsername: resetAdmin.username,
+        timestamp: Date.now(),
+      }));
+
       showToast(res.data?.message || `Password for ${resetAdmin.name} has been reset successfully!`, 'success');
       setIsResetModalOpen(false);
       setNewPassword('');
@@ -497,6 +515,25 @@ const SuperAdminDashboard = () => {
       const mockIdx = MOCK_USERS.findIndex((u) => u._id === resetAdmin._id || u.username === resetAdmin.username);
       if (mockIdx !== -1) {
         MOCK_USERS[mockIdx].password = newPassword;
+
+        // Signal cross-tab revocation
+        try {
+          const syncChannel = new BroadcastChannel('spic_auth_sync');
+          syncChannel.postMessage({
+            type: 'PASSWORD_RESET',
+            targetId: resetAdmin._id,
+            targetUsername: resetAdmin.username,
+          });
+          syncChannel.close();
+        } catch {
+          /* ignore */
+        }
+        localStorage.setItem('spic_password_reset_signal', JSON.stringify({
+          targetId: resetAdmin._id,
+          targetUsername: resetAdmin.username,
+          timestamp: Date.now(),
+        }));
+
         showToast(`Password for ${resetAdmin.name} has been reset successfully!`, 'success');
         setIsResetModalOpen(false);
         setNewPassword('');

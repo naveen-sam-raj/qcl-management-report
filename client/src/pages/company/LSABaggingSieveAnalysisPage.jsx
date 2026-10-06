@@ -4,6 +4,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
+  getCellLimit,
+  validateCellValue,
+  SA_LSA_BAGGING_SIEVE_LIMITS,
+} from '../../services/analysisValidation';
+import {
   ArrowLeft,
   Calendar,
   Save,
@@ -17,32 +22,37 @@ import {
   Layers,
 } from 'lucide-react';
 
-// Sieve size parameters matching the user's laboratory screenshot
+// Sieve size parameters: BSS 10, BSS 30 (1.5%–2.0%), -30, BSS 60 (5.5%–6.0%)
+// Keeps legacy keys (p10, p30, p60, m60) alongside modern keys for backward compatibility
 const PARAMETERS = [
-  { key: 'p10', label: '+10 %',    rawLabel: '+10%',    unit: '%', placeholder: '0.0', colClass: 'min-w-[120px]' },
-  { key: 'p30', label: '-10 +30 %', rawLabel: '-10+30%', unit: '%', placeholder: '0.0', colClass: 'min-w-[120px]' },
-  { key: 'p60', label: '-30 +60 %', rawLabel: '-30+60%', unit: '%', placeholder: '0.0', colClass: 'min-w-[120px]' },
-  { key: 'm60', label: '+60 %',    rawLabel: '+60%',    unit: '%', placeholder: '0.0', colClass: 'min-w-[120px]' },
+  { key: 'bss10', legacyKey: 'p10', label: 'BSS 10', unit: '%', placeholder: '0.0', colClass: 'min-w-[125px]' },
+  { key: 'bss30', legacyKey: 'p30', label: 'BSS 30', unit: '%', placeholder: '1.8', colClass: 'min-w-[130px]' },
+  { key: 'm30',   legacyKey: 'p60', label: '-30',    unit: '%', placeholder: '0.0', colClass: 'min-w-[125px]' },
+  { key: 'bss60', legacyKey: 'm60', label: 'BSS 60', unit: '%', placeholder: '5.8', colClass: 'min-w-[130px]' },
 ];
 
-// Pre-configured sampling time slots based on screenshot & standard shift schedule
+// Pre-configured sampling time slots based on laboratory schedule (1 Hour Once frequency)
 const DEFAULT_ROWS = [
-  { id: 'r1',  time: '09:30', p10: '0.1', p30: '0.4', p60: '4.0', m60: '4.5', isDefault: true },
-  { id: 'r2',  time: '10:30', p10: '0.1', p30: '0.4', p60: '4.1', m60: '4.6', isDefault: true },
-  { id: 'r3',  time: '11:30', p10: '0.1', p30: '0.4', p60: '4.0', m60: '4.5', isDefault: true },
-  { id: 'r4',  time: '14:30', p10: '0.1', p30: '0.3', p60: '4.2', m60: '4.6', isDefault: true },
-  { id: 'r5',  time: '16:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r6',  time: '18:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r7',  time: '20:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r8',  time: '22:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r9',  time: '00:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r10', time: '02:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r11', time: '04:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r12', time: '06:30', p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r1',  time: '09:30', bss10: '0.1', bss30: '1.8', m30: '4.0', bss60: '5.8', p10: '0.1', p30: '1.8', p60: '4.0', m60: '5.8', isDefault: true },
+  { id: 'r2',  time: '10:30', bss10: '0.1', bss30: '1.7', m30: '4.1', bss60: '5.7', p10: '0.1', p30: '1.7', p60: '4.1', m60: '5.7', isDefault: true },
+  { id: 'r3',  time: '11:30', bss10: '0.1', bss30: '1.9', m30: '4.0', bss60: '5.9', p10: '0.1', p30: '1.9', p60: '4.0', m60: '5.9', isDefault: true },
+  { id: 'r4',  time: '14:30', bss10: '0.1', bss30: '1.6', m30: '4.2', bss60: '5.6', p10: '0.1', p30: '1.6', p60: '4.2', m60: '5.6', isDefault: true },
+  { id: 'r5',  time: '16:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r6',  time: '18:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r7',  time: '20:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r8',  time: '22:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r9',  time: '00:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r10', time: '02:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r11', time: '04:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r12', time: '06:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
 ];
 
 const buildEmptyRows = () =>
-  DEFAULT_ROWS.map((r) => ({ ...r, p10: '', p30: '', p60: '', m60: '' }));
+  DEFAULT_ROWS.map((r) => ({
+    ...r,
+    bss10: '', bss30: '', m30: '', bss60: '',
+    p10: '', p30: '', p60: '', m60: '',
+  }));
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -83,7 +93,17 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
     if (field !== 'time' && !isValidDecimal(value)) return;
 
     setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const updated = { ...r, [field]: value };
+        // Sync both modern key (bss10, bss30, m30, bss60) and legacy key (p10, p30, p60, m60)
+        const paramDef = PARAMETERS.find((p) => p.key === field || p.legacyKey === field);
+        if (paramDef) {
+          updated[paramDef.key] = value;
+          updated[paramDef.legacyKey] = value;
+        }
+        return updated;
+      })
     );
 
     if (errors[`${id}_${field}`]) {
@@ -102,7 +122,13 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
     const nextId = `r_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
     setRows((prev) => [
       ...prev,
-      { id: nextId, time: '', p10: '', p30: '', p60: '', m60: '', isDefault: false },
+      {
+        id: nextId,
+        time: '',
+        bss10: '', bss30: '', m30: '', bss60: '',
+        p10: '', p30: '', p60: '', m60: '',
+        isDefault: false,
+      },
     ]);
   };
 
@@ -134,10 +160,10 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
 
     const newErrors = {};
     rows.forEach((r) => {
-      ['p10', 'p30', 'p60', 'm60'].forEach((p) => {
-        const val = r[p];
-        if (val !== '' && isNaN(Number(val))) {
-          newErrors[`${r.id}_${p}`] = 'Invalid';
+      PARAMETERS.forEach((p) => {
+        const val = r[p.key] !== undefined && r[p.key] !== '' ? r[p.key] : r[p.legacyKey];
+        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
+          newErrors[`${r.id}_${p.key}`] = 'Invalid';
           hasError = true;
         }
       });
@@ -154,7 +180,10 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
     }
 
     const hasValues = rows.some((r) =>
-      ['p10', 'p30', 'p60', 'm60'].some((p) => r[p] !== '' && r[p] !== null)
+      PARAMETERS.some((p) => {
+        const val = r[p.key] !== undefined && r[p.key] !== '' ? r[p.key] : r[p.legacyKey];
+        return val !== '' && val !== null && val !== undefined;
+      })
     );
 
     if (!hasValues) {
@@ -170,7 +199,12 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
       unit: 'LSA Bagging Sieve',
       analysisType: 'LSA Bagging Sieve Analysis',
       submittedBy: user?.name || 'Plant Operator',
-      rows: rows.filter((r) => r.time || r.p10 || r.p30 || r.p60 || r.m60),
+      rows: rows.filter((r) => {
+        return r.time || PARAMETERS.some((p) => {
+          const val = r[p.key] !== undefined && r[p.key] !== '' ? r[p.key] : r[p.legacyKey];
+          return val !== '' && val !== null && val !== undefined;
+        });
+      }),
     };
 
     try {
@@ -188,21 +222,21 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-10">
+    <div className="space-y-4 animate-fadeIn">
 
       {/* ── Breadcrumb Header matching TK 203 theme ────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
-          {/* Left: Back + Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          {/* Left: Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
-              id="btn-lsa-sieve-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to SA Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
 
             <div className="min-w-0">
@@ -221,7 +255,58 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
           </div>
 
           {/* Right: Actions */}
+          {/* Right: Date Section + Action Buttons */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+              <label
+                htmlFor="lsa-sieve-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="lsa-sieve-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    if (typeof setDateError === 'function') setDateError(false);
+                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    typeof dateError !== 'undefined' && dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {typeof dateError !== 'undefined' && dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
+
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleAddRow}
+              id="btn-add-sieve-row"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-300 text-blue-700 bg-blue-50/80 hover:bg-blue-100 transition shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5 text-blue-600" />
+              <span>Add Time Slot</span>
+            </button>
+
             <button
               id="btn-lsa-sieve-reset"
               onClick={handleReset}
@@ -246,6 +331,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
               )}
               <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
             </button>
+          </div>
           </div>
         </div>
       </div>
@@ -275,98 +361,8 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Row right below Heading Bar ─────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="lsa-sieve-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date :</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="lsa-sieve-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  if (dateError) setDateError(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
-                  dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" /> Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-
-          {/* Quick date picks */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const today = new Date().toISOString().split('T')[0];
-                setDate(today);
-                setDateError(false);
-              }}
-              className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDate('2026-09-13');
-                setDateError(false);
-              }}
-              className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200"
-              title="13/09/2026 as in laboratory screenshot"
-            >
-              13/09/2026
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* ── Main Data Table starting from the Left Side ─────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
-        {/* Table Header Card */}
-        <div className="px-5 py-3.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-              LSA Bagging Sieve Data Entry (+10%, -10 +30%, -30 +60%, +60%)
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={handleAddRow}
-            id="btn-add-sieve-row"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition shadow-2xs self-start sm:self-auto"
-          >
-            <Plus className="w-3.5 h-3.5 text-blue-600" />
-            <span>Add Time Slot</span>
-          </button>
-        </div>
-
         {/* Scrollable table container */}
         <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
           <table className="w-full text-sm border-collapse min-w-[700px]" id="lsa-sieve-table">
@@ -379,16 +375,29 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
                 <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-36 bg-slate-950 text-slate-100 border-r border-slate-800">
                   Time
                 </th>
-                {PARAMETERS.map((p, idx) => (
-                  <th
-                    key={p.key}
-                    className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 border-r border-slate-800/50 ${
-                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
-                    } ${p.colClass}`}
-                  >
-                    <div>{p.label}</div>
-                  </th>
-                ))}
+                {PARAMETERS.map((p, idx) => {
+                  const limit = getCellLimit(plantId, 'lsa-bagging-sieve', 'hourly', p.key);
+                  return (
+                    <th
+                      key={p.key}
+                      className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 border-r border-slate-800/50 ${
+                        idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
+                      } ${p.colClass}`}
+                    >
+                      <div className="font-extrabold text-sm">{p.label}</div>
+                      <div className="text-[10px] font-semibold text-slate-400 mt-0.5">{p.unit}</div>
+                      {limit ? (
+                        <div className="mt-1 inline-block px-1.5 py-0.5 rounded bg-blue-900/60 border border-blue-400/40 text-[9.5px] font-bold text-blue-200">
+                          {limit.formattedRange}
+                        </div>
+                      ) : (
+                        <div className="mt-1 inline-block px-1.5 py-0.5 text-[9.5px] font-medium text-slate-500">
+                          —
+                        </div>
+                      )}
+                    </th>
+                  );
+                })}
                 <th className="px-3 py-3 text-center text-xs font-extrabold uppercase tracking-wider w-16 bg-slate-950 text-slate-100">
                   Action
                 </th>
@@ -398,7 +407,10 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
             {/* Table Body */}
             <tbody className="divide-y divide-slate-200">
               {rows.map((row, index) => {
-                const hasVal = row.p10 || row.p30 || row.p60 || row.m60;
+                const hasVal = PARAMETERS.some((p) => {
+                  const val = row[p.key] !== undefined && row[p.key] !== '' ? row[p.key] : row[p.legacyKey];
+                  return val !== '' && val !== null && val !== undefined;
+                });
 
                 return (
                   <tr
@@ -424,31 +436,105 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
                       />
                     </td>
 
-                    {/* Parameter inputs matching TK 203 style */}
+                    {/* Parameter inputs matching theme and real-time validation */}
                     {PARAMETERS.map((param) => {
-                      const cellVal = row[param.key];
-                      const err = errors[`${row.id}_${param.key}`];
+                      const cellVal = row[param.key] !== undefined && row[param.key] !== '' ? row[param.key] : (row[param.legacyKey] !== undefined ? row[param.legacyKey] : '');
+                      const limit = getCellLimit(plantId, 'lsa-bagging-sieve', 'hourly', param.key);
+                      const validation = validateCellValue(cellVal, limit);
+                      const isOutOfLimit = validation.isOutOfLimit;
+                      const isNormal = validation.isNormal;
+                      const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                      const err = errors[`${row.id}_${param.key}`] || errors[`${row.id}_${param.legacyKey}`];
 
                       return (
-                        <td key={param.key} className="px-3 py-2 text-center align-middle">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={cellVal}
-                            placeholder={param.placeholder}
-                            onChange={(e) =>
-                              handleCellChange(row.id, param.key, e.target.value)
-                            }
-                            className={`w-full max-w-[95px] mx-auto text-center text-xs font-mono font-bold px-2.5 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                              err
-                                ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
-                                : cellVal !== ''
-                                ? 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-950 font-black'
-                                : 'border-2 border-slate-200 bg-white hover:border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-800'
-                            }`}
-                            id={`sieve-input-${index}-${param.key}`}
-                            aria-label={`${row.time} ${param.label}`}
-                          />
+                        <td key={param.key} className="px-3 py-2.5 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[58px]">
+                            <div className="relative inline-block w-full max-w-[105px]">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                placeholder={param.placeholder}
+                                onChange={(e) =>
+                                  handleCellChange(row.id, param.key, e.target.value)
+                                }
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal} % (Valid range: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal} % (Valid range: ${limit.formattedRange})`
+                                      : `Valid range: ${limit.formattedRange}`
+                                    : `${param.label}`
+                                }
+                                className={`w-full max-w-[105px] mx-auto text-center text-xs font-mono font-bold px-2.5 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                    : err
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                    : hasValue && isNormal && limit
+                                    ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                    : cellVal !== ''
+                                    ? 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-950 font-black'
+                                    : 'border-2 border-slate-200 bg-white hover:border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-800'
+                                }`}
+                                id={`sieve-input-${index}-${param.key}`}
+                                aria-label={`${row.time} ${param.label}`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Status & Limit Display */}
+                            {err ? (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                <span>Invalid</span>
+                              </div>
+                            ) : limit ? (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isOutOfLimit && (
+                                  <div
+                                    id={`sieve-limit-badge-${row.id}-${param.key}`}
+                                    className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                    title={`OUT OF LIMIT: ${cellVal} % (Valid range: ${limit.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </div>
+                                )}
+                                {hasValue && isNormal && (
+                                  <div
+                                    id={`sieve-status-${row.id}-${param.key}`}
+                                    className="text-[9px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </div>
+                                )}
+                                <span
+                                  id={`sieve-range-${row.id}-${param.key}`}
+                                  className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                    isOutOfLimit
+                                      ? 'text-rose-700 font-bold'
+                                      : hasValue && isNormal
+                                      ? 'text-emerald-700/80 font-semibold'
+                                      : 'text-slate-400'
+                                  }`}
+                                  title={`Valid range: ${limit.formattedRange}`}
+                                >
+                                  {limit.formattedRange}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
                         </td>
                       );
                     })}
@@ -476,7 +562,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
         {/* Bottom helper bar */}
         <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
-            Values for <strong>LSA Bagging Sieve</strong> (+10%, -10 +30%, -30 +60%, +60%). Numeric decimal values only.
+            Frequency: <strong>1 Hour Once</strong> &bull; Parameters: <strong>BSS 10</strong>, <strong>BSS 30</strong> (1.5% – 2.0%), <strong>-30</strong>, <strong>BSS 60</strong> (5.5% – 6.0%). Numeric decimal values only.
           </p>
           <div className="flex items-center gap-2">
             <button

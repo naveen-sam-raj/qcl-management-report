@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
 
     if (Array.isArray(rows)) {
       rows.forEach((row, index) => {
-        ['p10', 'p30', 'p60', 'm60'].forEach((field) => {
+        ['p10', 'p30', 'p60', 'm60', 'bss10', 'bss30', 'm30', 'bss60'].forEach((field) => {
           const val = row[field];
           if (val !== '' && val !== null && val !== undefined) {
             if (isNaN(Number(val))) {

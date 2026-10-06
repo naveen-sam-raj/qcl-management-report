@@ -22,16 +22,17 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
-   * Authenticate user with backend API, enforcing License Period and User Limits.
+   * Authenticate user with backend API, enforcing License Period, User Limits, and Multi-Tenant Company Isolation.
    * Falls back gracefully if backend is unreachable.
    */
-  const login = async (identifier, password, expectedRole = null) => {
+  const login = async (identifier, password, expectedRole = null, companyCode = null) => {
     try {
       // 1. Attempt backend authentication
       const response = await api.post('/auth/login', {
         identifier: identifier.trim(),
         password,
         expectedRole,
+        companyCode,
       });
 
       if (response.data?.success && response.data?.user) {
@@ -44,7 +45,7 @@ export const AuthProvider = ({ children }) => {
         return { success: true, user: safeUser, token: response.data.token };
       }
     } catch (apiErr) {
-      // If backend explicitly rejected (e.g. License not started, License expired, disabled)
+      // If backend explicitly rejected (e.g. License not started, License expired, disabled, or wrong company 403)
       if (apiErr.response?.data?.message) {
         return {
           success: false,
@@ -69,6 +70,28 @@ export const AuthProvider = ({ children }) => {
       if (matched.status === 'inactive' || matched.status === 'disabled') {
         return { success: false, message: 'Your account has been disabled. Please contact administrator.' };
       }
+
+      // Role check
+      if (expectedRole && matched.role !== expectedRole) {
+        return {
+          success: false,
+          message: `Unauthorized portal. This portal requires ${expectedRole.replace('_', ' ')} privileges.`,
+        };
+      }
+
+      // Company isolation check
+      if (companyCode && matched.role !== 'super_admin') {
+        const userCompanyCode = (matched.company?.code || matched.company || '').toString().toUpperCase();
+        const reqCompanyCode = companyCode.trim().toUpperCase();
+        if (userCompanyCode !== reqCompanyCode) {
+          const compName = matched.company?.name || userCompanyCode || 'another company';
+          return {
+            success: false,
+            message: `Access denied. This account is registered under ${compName}. You cannot log in to the ${reqCompanyCode} portal.`,
+          };
+        }
+      }
+
       const { password: _, ...safeUser } = matched;
       setUser(safeUser);
       localStorage.setItem('spic_auth_user', JSON.stringify(safeUser));
@@ -83,6 +106,31 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('spic_auth_user');
     localStorage.removeItem('spic_auth_token');
   };
+
+  // Real-time session verification heartbeat (detects remote password reset by Super Admin)
+  useEffect(() => {
+    if (!user || user.role === 'super_admin') return;
+
+    let isSubscribed = true;
+    const verifySession = async () => {
+      const token = localStorage.getItem('spic_auth_token');
+      if (!token) return;
+      try {
+        await api.get('/auth/me');
+      } catch (err) {
+        // api.js response interceptor automatically handles PASSWORD_CHANGED and fires custom event
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      if (isSubscribed) verifySession();
+    }, 3500);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(intervalId);
+    };
+  }, [user]);
 
   /**
    * refreshUser — re-reads from localStorage

@@ -4,6 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
+  getCellLimit,
+  validateCellValue,
+} from '../../services/analysisValidation';
+import {
   ArrowLeft,
   Calendar,
   Save,
@@ -15,11 +19,52 @@ import {
   Database,
 } from 'lucide-react';
 
+// ─── SA Plant TK 419 Parameters & Validation Limits ──────────────────────────
+// Plant: SA Plant
+// Analysis: TK419
+// Parameters: FNH3, CNH3
+// Frequency: Once in a Shift
+
+export const SA_TK419_LIMITS = {
+  fnh3: {
+    key: "fnh3",
+    paramName: "FNH3",
+    label: "FNH₃",
+    formula: "Free Ammonia (FNH₃)",
+    target: 2.08,
+    tolerance: 0.10,
+    min: 1.98,
+    max: 2.18,
+    unit: "Kgm/m³",
+    formattedRange: "1.98–2.18 Kgm/m³",
+    formattedTarget: "2.08 Kgm/m³",
+    formattedTolerance: "±0.10 Kgm/m³",
+    placeholder: "2.08",
+    hasLimit: true,
+  },
+  cnh3: {
+    key: "cnh3",
+    paramName: "CNH3",
+    label: "CNH₃",
+    formula: "Combined Ammonia (CNH₃)",
+    target: 4.06,
+    tolerance: 0.10,
+    min: 3.96,
+    max: 4.16,
+    unit: "Kgm/m³",
+    formattedRange: "3.96–4.16 Kgm/m³",
+    formattedTarget: "4.06 Kgm/m³",
+    formattedTolerance: "±0.10 Kgm/m³",
+    placeholder: "4.06",
+    hasLimit: true,
+  },
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PARAMETERS = [
-  { key: 'fnh3', label: 'FNH₃', colClass: 'min-w-[130px] border-r border-slate-800/50' },
-  { key: 'cnh3', label: 'CNH₃', colClass: 'min-w-[130px]' },
+  { key: 'fnh3', label: 'FNH₃', placeholder: '2.08', colClass: 'min-w-[130px] border-r border-slate-800/50' },
+  { key: 'cnh3', label: 'CNH₃', placeholder: '4.06', colClass: 'min-w-[130px]' },
 ];
 
 const TIME_SLOTS = [
@@ -198,22 +243,21 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-14">
+    <div className="space-y-4 animate-fadeIn">
 
       {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
       <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back + Titles */}
+          {/* Left: Titles */}
           <div className="flex items-center gap-3">
             <button
-              id="btn-tk419-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to SA Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
-
             <div className="min-w-0">
               {/* Breadcrumb */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
@@ -230,6 +274,47 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
           </div>
 
           {/* Right: Actions */}
+          {/* Right: Date Section + Action Buttons */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+              <label
+                htmlFor="tk419-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="tk419-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    if (typeof setDateError === 'function') setDateError(false);
+                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    typeof dateError !== 'undefined' && dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {typeof dateError !== 'undefined' && dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
+
           <div className="flex items-center gap-2 shrink-0">
             <button
               id="btn-tk419-reset"
@@ -255,6 +340,7 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
               )}
               <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
             </button>
+          </div>
           </div>
         </div>
       </div>
@@ -284,67 +370,58 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="tk419-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date :</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="tk419-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  setDateError(false);
-                  setSaveSuccess(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
-                  dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" />
-                Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-          <div className="text-xs font-semibold text-slate-500">
-            Soda Ash Plant · TK 419 (FNH₃ &amp; CNH₃ Monitoring)
-          </div>
-        </div>
-      </div>
-
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden max-w-2xl mx-auto lg:mx-0">
 
-        {/* Table header label */}
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-              TK 419 Analysis Data Entry (2-Hourly Intervals)
-            </span>
+        {/* Table header with Integrated Date Selector */}
+        <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-4 rounded-full bg-blue-600" />
+              <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+                TK 419 Analysis Data Entry
+              </span>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="tk419-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="tk419-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    setDateError(false);
+                    setSaveSuccess(false);
+                  }}
+                  className={`pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
+                    dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 bg-white hover:border-slate-400'
+                  }`}
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {dateError && (
+                <span className="text-[11px] text-red-500 font-medium">Date required</span>
+              )}
+            </div>
           </div>
+
           <span className="text-[11px] font-bold text-slate-500">
             12 Time Slots
           </span>
@@ -359,16 +436,22 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
                 <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-28 sm:w-32 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
                   Time
                 </th>
-                {PARAMETERS.map((p, idx) => (
-                  <th
-                    key={p.key}
-                    className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
-                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
-                    } ${p.colClass}`}
-                  >
-                    {p.label}
-                  </th>
-                ))}
+                {PARAMETERS.map((p, idx) => {
+                  const limit = SA_TK419_LIMITS[p.key];
+                  return (
+                    <th
+                      key={p.key}
+                      className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
+                        idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
+                      } ${p.colClass}`}
+                    >
+                      <div className="font-extrabold text-blue-200">{p.label}</div>
+                      <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal mt-0.5">
+                        {limit?.formattedRange || 'Kgm/m³'}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
 
@@ -392,35 +475,111 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
                       const cellVal = data[row.key][param.key];
+                      const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
                       const isInvalid = !!errors[fieldKey];
                       const errorMessage = errors[fieldKey];
 
+                      const limit = getCellLimit('sa', 'tk419', row.shiftId, param.key) || SA_TK419_LIMITS[param.key];
+                      const validation = validateCellValue(cellVal, limit);
+                      const isOutOfLimit = validation.isOutOfLimit;
+                      const isNormal = validation.isNormal;
+
                       return (
-                        <td key={param.key} className="px-4 py-2.5 text-center align-middle">
-                          <input
-                            id={`tk419-input-${row.key}-${param.key}`}
-                            type="text"
-                            inputMode="decimal"
-                            value={cellVal}
-                            placeholder="0.00"
-                            onChange={(e) =>
-                              handleChange(row.key, param.key, e.target.value)
-                            }
-                            className={`w-full max-w-[125px] mx-auto px-3 py-1.5 text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                              isInvalid
-                                ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
-                                : cellVal !== ''
-                                ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
-                                : styles.inputFocus
-                            }`}
-                            aria-label={`${param.label} at ${row.time}`}
-                            title={isInvalid ? errorMessage : `${param.label} at ${row.time}`}
-                          />
-                          {isInvalid && (
-                            <p className="text-[10px] text-red-600 font-bold mt-1 text-center animate-fadeIn">
-                              {errorMessage}
-                            </p>
-                          )}
+                        <td key={param.key} className="px-4 py-2.5 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[58px] max-w-[130px] mx-auto">
+                            <div className="relative w-full">
+                              <input
+                                id={`tk419-input-${row.key}-${param.key}`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                placeholder={param.placeholder || "0.00"}
+                                onChange={(e) =>
+                                  handleChange(row.key, param.key, e.target.value)
+                                }
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange}`
+                                    : param.label
+                                }
+                                className={`w-full max-w-[125px] mx-auto px-3 py-1.5 text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
+                                  isOutOfLimit
+                                    ? "border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200"
+                                    : isInvalid
+                                    ? "border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200"
+                                    : hasValue && isNormal && limit
+                                    ? "border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200"
+                                    : cellVal !== ""
+                                    ? "border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200"
+                                    : styles.inputFocus
+                                }`}
+                                aria-label={`${param.label} at ${row.time}`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Format Error */}
+                            {isInvalid && (
+                              <p className="text-[10px] text-red-600 font-bold mt-1 text-center animate-fadeIn">
+                                {errorMessage}
+                              </p>
+                            )}
+
+                            {/* Status & Allowed Range Display */}
+                            {!isInvalid && (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isNormal && limit && (
+                                  <span
+                                    id={`tk419-status-${row.key}-${param.key}`}
+                                    className="text-[9.5px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </span>
+                                )}
+
+                                {hasValue && isOutOfLimit && (
+                                  <span
+                                    id={`tk419-status-${row.key}-${param.key}`}
+                                    className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9px] font-black tracking-tight whitespace-nowrap flex items-center justify-center gap-0.5 shadow-2xs"
+                                    title={`OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2 h-2 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </span>
+                                )}
+
+                                {/* Allowed range displayed near each input field */}
+                                {limit?.formattedRange && (
+                                  <span
+                                    id={`tk419-range-${row.key}-${param.key}`}
+                                    className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                      isOutOfLimit
+                                        ? "text-rose-700 font-bold"
+                                        : hasValue
+                                        ? "text-slate-600 font-bold"
+                                        : "text-slate-400"
+                                    }`}
+                                    title={`Target: ${limit.formattedTarget} (${limit.formattedTolerance})`}
+                                  >
+                                    {limit.formattedRange}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </td>
                       );
                     })}

@@ -77,6 +77,14 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -95,6 +103,10 @@ userSchema.pre('save', async function (next) {
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    if (!this.isNew) {
+      this.passwordChangedAt = new Date();
+      this.tokenVersion = (this.tokenVersion || 0) + 1;
+    }
     next();
   } catch (err) {
     next(err);

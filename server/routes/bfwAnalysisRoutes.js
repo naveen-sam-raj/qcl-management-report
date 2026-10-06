@@ -61,10 +61,18 @@ router.post('/', async (req, res) => {
 
     const readings = Array.isArray(payload.readings) ? payload.readings : [];
     const errors = [];
-    const numericFields = ['ph', 'cond', 'tAlk', 'sio2', 'fe2o3', 'th'];
+    const numericFields = ['ph', 'cond', 'tAlk', 'alk', 'sio2', 'fe2o3'];
 
     readings.forEach((reading, idx) => {
       const rowNum = idx + 1;
+      // Allow 'Nil' or numeric for TH
+      if (reading.th !== '' && reading.th !== null && reading.th !== undefined) {
+        const thStr = String(reading.th).trim().toLowerCase();
+        if (thStr !== 'nil' && thStr !== 'n' && thStr !== 'none' && thStr !== '-' && isNaN(Number(reading.th))) {
+          errors.push(`Row #${rowNum} (${reading.stream || 'Reading'}): TH must be a valid number or 'Nil'.`);
+        }
+      }
+
       numericFields.forEach((field) => {
         const val = reading[field];
         if (val !== '' && val !== null && val !== undefined) {
@@ -73,6 +81,13 @@ router.post('/', async (req, res) => {
           }
         }
       });
+
+      // Synchronize alk and tAlk
+      if (reading.alk !== undefined && reading.tAlk === undefined) {
+        reading.tAlk = reading.alk;
+      } else if (reading.tAlk !== undefined && reading.alk === undefined) {
+        reading.alk = reading.tAlk;
+      }
     });
 
     if (errors.length > 0) {

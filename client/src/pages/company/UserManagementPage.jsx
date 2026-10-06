@@ -86,26 +86,25 @@ const UserManagementPage = () => {
           api.get('/plants'),
         ]);
 
-        if (usersRes.data?.success && usersRes.data.users) {
+        if (usersRes.data?.success && Array.isArray(usersRes.data.users)) {
           setUsersList(usersRes.data.users);
           if (usersRes.data.maxUsers !== undefined && usersRes.data.maxUsers !== null) {
             setMaxUsers(usersRes.data.maxUsers);
           }
         } else {
-          const companyCode = user?.company?.code || 'TFL';
-          setUsersList(MOCK_USERS.filter((u) => u.role === 'user' && u.company?.code === companyCode));
+          setUsersList([]);
         }
 
-        if (plantsRes.data?.success && plantsRes.data.plants) {
+        if (plantsRes.data?.success && Array.isArray(plantsRes.data.plants)) {
           setPlants(plantsRes.data.plants);
         } else {
           const companyCode = user?.company?.code || 'TFL';
           setPlants(MOCK_PLANTS.filter((p) => p.company?.code === companyCode));
         }
       } catch (backendErr) {
-        console.warn('Backend users load error, using mock:', backendErr.message);
+        console.warn('Backend users load error:', backendErr.message);
+        setUsersList([]);
         const companyCode = user?.company?.code || 'TFL';
-        setUsersList(MOCK_USERS.filter((u) => u.role === 'user' && u.company?.code === companyCode));
         setPlants(MOCK_PLANTS.filter((p) => p.company?.code === companyCode));
       }
     } catch (err) {

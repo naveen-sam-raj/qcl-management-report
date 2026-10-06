@@ -32,6 +32,23 @@ api.interceptors.response.use(
             (error.response.data.message.toLowerCase().includes('license') ||
               error.response.data.message.toLowerCase().includes('disabled'))));
 
+      // Specifically intercept PASSWORD_CHANGED so we can display the requested alert modal
+      if (
+        error.response.data?.code === 'PASSWORD_CHANGED' ||
+        error.response.data?.passwordChanged ||
+        (typeof error.response.data?.message === 'string' &&
+          error.response.data.message.toLowerCase().includes('password has been changed'))
+      ) {
+        window.dispatchEvent(
+          new CustomEvent('auth:password-changed', {
+            detail: {
+              message: error.response.data?.message || 'Your password has been changed. Please contact admin.',
+            },
+          })
+        );
+        return Promise.reject(error);
+      }
+
       if (is401 || is403LicenseOrDisabled) {
         const currentPath = window.location.pathname;
         if (currentPath !== '/' && !currentPath.includes('/login')) {

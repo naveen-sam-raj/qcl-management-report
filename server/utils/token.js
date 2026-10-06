@@ -11,6 +11,7 @@ const generateToken = (user) => {
       role: user.role,
       company: user.company,
       plant: user.plant,
+      tokenVersion: user.tokenVersion || 0,
     },
     JWT_SECRET,
     { expiresIn: '7d' }

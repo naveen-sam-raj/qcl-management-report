@@ -271,6 +271,7 @@ const getStore = () => {
       superAdmins: new MemoryCollection('SuperAdmin'),
       reports: new MemoryCollection('Report'),
       logs: new MemoryCollection('ActivityLog'),
+      pureSaltAnalyses: new MemoryCollection('PureSaltAnalysis'),
     };
   }
   return global.inMemoryStore;

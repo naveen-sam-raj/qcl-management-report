@@ -76,13 +76,13 @@ const AppRoutes = () => {
 
       {/* ── Normal User (View-Only Plant Portal) ── */}
       <Route path="/portal" element={<DashboardLayout requiredRole="user" />}>
-        <Route index element={<UserDashboard />} />
-        <Route path="plants" element={<UserDashboard />} />
+        <Route index element={<PlantAnalysisPage />} />
+        <Route path="plants" element={<PlantAnalysisPage />} />
         <Route path="plants/:id" element={<PlantAnalysisPage />} />
         <Route path="plants/:id/options/:optionName" element={<PlantAnalysisPage />} />
         <Route path="reports" element={<ReportsPage />} />
         {/* Redirect any other portal sub-routes back to dashboard */}
-        <Route path="*" element={<UserDashboard />} />
+        <Route path="*" element={<PlantAnalysisPage />} />
       </Route>
 
       {/* ── Fallback ── */}

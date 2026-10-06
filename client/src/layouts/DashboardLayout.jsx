@@ -17,7 +17,7 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+      <div className="flex items-center justify-center h-screen w-screen overflow-hidden bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
           <p className="text-sm font-semibold text-slate-600">Verifying session...</p>
@@ -57,17 +57,17 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex">
+    <div className="h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 flex">
       {/* Sidebar */}
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Container */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'lg:pl-64' : 'pl-0'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden transition-all duration-300 ${isSidebarOpen ? 'lg:pl-64' : 'pl-0'}`}>
         <Navbar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} isSidebarOpen={isSidebarOpen} />
 
         {/* View-Only Banner for Normal Users */}
         {user?.role === 'user' && (
-          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 sm:px-6 flex items-center justify-between">
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 sm:px-6 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
               <Eye className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
@@ -81,7 +81,7 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${user?.role === 'user' ? 'portal-view-only' : ''}`}>
+        <main className={`flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-2 sm:px-4 sm:py-2.5 max-w-7xl w-full mx-auto ${user?.role === 'user' ? 'portal-view-only' : ''}`}>
           <Outlet />
         </main>
       </div>

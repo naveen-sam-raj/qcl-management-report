@@ -39,7 +39,7 @@ const superAdminAuth = async (req, res, next) => {
     }
 
     // Role check in JWT
-    if (decoded.role !== 'SUPER_ADMIN') {
+    if (decoded.role !== 'SUPER_ADMIN' && decoded.role !== 'super_admin') {
       return res.status(403).json({
         success: false,
         message: 'Access denied. Requires SUPER_ADMIN privileges.',

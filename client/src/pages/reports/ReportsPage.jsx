@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
-import { MOCK_REPORTS, MOCK_PLANTS, MOCK_USERS } from '../../services/mockData';
+import { MOCK_REPORTS, MOCK_PLANTS } from '../../services/mockData';
+import api from '../../services/api';
 import {
   FileSpreadsheet,
   Download,
@@ -95,16 +96,26 @@ const ReportsPage = () => {
   };
 
   useEffect(() => {
-    // Load filter metadata from mock data
-    const companyCode = user?.company?.code;
-    const companyPlants = companyCode
-      ? MOCK_PLANTS.filter((p) => p.company.code === companyCode)
-      : MOCK_PLANTS;
-    const companyUsers = companyCode
-      ? MOCK_USERS.filter((u) => u.company?.code === companyCode && u.role === 'user')
-      : MOCK_USERS.filter((u) => u.role === 'user');
-    setPlants(companyPlants);
-    setUsersList(companyUsers);
+    // Load filter metadata from backend
+    const loadMetadata = async () => {
+      const companyCode = user?.company?.code;
+      const companyPlants = companyCode
+        ? MOCK_PLANTS.filter((p) => p.company.code === companyCode)
+        : MOCK_PLANTS;
+      setPlants(companyPlants);
+
+      try {
+        const usersRes = await api.get('/users');
+        if (usersRes.data?.success && Array.isArray(usersRes.data.users)) {
+          setUsersList(usersRes.data.users.filter((u) => u.role === 'user'));
+        } else {
+          setUsersList([]);
+        }
+      } catch (err) {
+        setUsersList([]);
+      }
+    };
+    loadMetadata();
   }, [user]);
 
   useEffect(() => {

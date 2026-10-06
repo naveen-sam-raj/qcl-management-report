@@ -77,21 +77,26 @@ const Sidebar = ({ isOpen, onClose }) => {
         }`}
       >
         {/* Brand Header */}
-        <div className="flex items-center justify-between h-16 px-6 bg-slate-950/60 border-b border-slate-800/80">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
-              S
-            </div>
-            <div>
-              <div className="font-extrabold text-white text-sm tracking-wide">SPIC GROUP</div>
-              <div className="text-[10px] text-blue-400 font-medium tracking-wider uppercase">
+        <div className="flex items-center justify-between h-16 px-5 bg-slate-950/60 border-b border-slate-800/80">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {/* FG Monogram Badge */}
+            <img
+              src="/fg-badge.svg"
+              alt="FG Emblem"
+              className="w-8 h-8 rounded-lg shrink-0 object-contain shadow-xs"
+            />
+            <div className="min-w-0">
+              <div className="font-extrabold text-white text-xs sm:text-sm tracking-wide truncate">
+                FERTILIZER GROUP
+              </div>
+              <div className="text-[10px] text-emerald-400 font-medium tracking-wider uppercase truncate">
                 Enterprise Analytics
               </div>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition shrink-0 ml-1"
             title="Collapse Sidebar"
           >
             <X className="w-5 h-5" />

@@ -42,7 +42,7 @@ const TFLAdminDashboard = () => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn pb-8">
+    <div className="space-y-3.5 animate-fadeIn">
       {/* Compact Header Banner */}
       <div className="bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>

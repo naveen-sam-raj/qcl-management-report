@@ -48,7 +48,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 sm:px-6 bg-white border-b border-slate-200/80 shadow-xs">
+    <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-4 sm:px-6 bg-white border-b border-slate-200/80 shadow-xs">
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}
@@ -62,12 +62,14 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
         {/* Brand / Context Title */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-              {user?.company?.name?.slice(0, 2) || 'SP'}
-            </div>
+            <img
+              src="/fg-badge.svg"
+              alt="FG Emblem"
+              className="w-8 h-8 rounded-lg shrink-0 object-contain shadow-2xs border border-slate-200"
+            />
             <div className="hidden sm:block">
               <span className="font-bold text-slate-900 tracking-tight text-sm">
-                {user?.company?.name || 'SPIC • TFL • Greenstar'}
+                {user?.company?.name || 'Fertilizer Group'}
               </span>
               <span className="text-slate-400 mx-1.5 text-xs">/</span>
               <span className="text-xs font-medium text-slate-500">

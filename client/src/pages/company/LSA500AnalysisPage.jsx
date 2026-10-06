@@ -179,18 +179,18 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="space-y-6 animate-fadeIn">
       {/* ── Breadcrumb & Top Bar ────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-            title="Back to Soda Ash Plant Options"
-            id="btn-lsa500-back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -206,32 +206,84 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <button
-            onClick={handleReset}
-            id="btn-lsa500-reset"
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 active:scale-95 transition shadow-xs disabled:opacity-50"
-            title="Clear all fields"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
-          <button
-            onClick={handleSave}
-            id="btn-lsa500-save"
-            disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition shadow-sm disabled:opacity-50"
-            title="Save LSA AT 500# data"
-          >
-            {saving ? (
-              <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
+        {/* Right: Date Section + Action Buttons */}
+        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+          {/* Integrated Date Section */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+            <label
+              htmlFor="lsa500-date-input"
+              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+            >
+              <span>Date:</span>
+              <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="lsa500-date-input"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  if (dateError) setDateError(false);
+                }}
+                className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-slate-800 bg-white ${
+                  dateError
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-slate-300 hover:border-slate-400'
+                }`}
+                required
+              />
+            </div>
+            {date && (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-200 hidden sm:inline-block">
+                {formatDateDisplay(date)}
+              </span>
             )}
-            {saving ? 'Saving...' : 'Save Analysis'}
-          </button>
+            {dateError && (
+              <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                <AlertCircle className="w-3 h-3" /> Required
+              </span>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleAddRow}
+              id="btn-add-lsa500-row"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50/80 hover:bg-emerald-100 transition shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Add Time Slot</span>
+            </button>
+
+            <button
+              onClick={handleReset}
+              id="btn-lsa500-reset"
+              disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 active:scale-95 transition shadow-xs disabled:opacity-50"
+              title="Clear all fields"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
+            </button>
+            <button
+              onClick={handleSave}
+              id="btn-lsa500-save"
+              disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition shadow-sm disabled:opacity-50"
+              title="Save LSA AT 500# data"
+            >
+              {saving ? (
+                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              {saving ? 'Saving...' : 'Save Analysis'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -259,102 +311,8 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Row right below Heading Bar ─────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="lsa500-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date :</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="lsa500-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  if (dateError) setDateError(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-slate-800 ${
-                  dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-emerald-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" /> Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-
-          {/* Quick date picks */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const today = new Date().toISOString().split('T')[0];
-                setDate(today);
-                setDateError(false);
-              }}
-              className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const d = new Date();
-                d.setDate(d.getDate() - 1);
-                setDate(d.toISOString().split('T')[0]);
-                setDateError(false);
-              }}
-              className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition border border-slate-200"
-            >
-              Yesterday
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* ── Main Data Table starting from the Left Side ─────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
-          {/* Table Header Card */}
-          <div className="px-5 py-3.5 bg-gradient-to-r from-slate-50 to-emerald-50/30 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-                LSA AT 500# — NaCl % Data Entry
-              </h2>
-              <p className="text-xs text-slate-500">
-                Enter NaCl % for each sampling time slot (e.g. 0.80, 0.74).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleAddRow}
-              id="btn-add-lsa500-row"
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 transition shadow-2xs self-start sm:self-auto"
-            >
-              <Plus className="w-3.5 h-3.5 text-emerald-600" />
-              Add Time Slot
-            </button>
-          </div>
-
           {/* Grid Container */}
           <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
             <table className="w-full text-left border-collapse" id="lsa500-table">

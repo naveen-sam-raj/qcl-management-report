@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { timeRows = {}, pclRow = {} } = payload;
+    const { timeRows = {}, pclRow = {}, fnh3Row = {} } = payload;
     const errors = [];
 
     // Validate time row values
@@ -38,6 +38,15 @@ router.post('/', async (req, res) => {
           errors.push(`Time '${timeKey}', Parameter '${paramKey.toUpperCase()}' must be a valid number.`);
         }
       });
+    });
+
+    // Validate FNH3 row values
+    Object.entries(fnh3Row).forEach(([streamKey, val]) => {
+      if (val === '' || val === null || val === undefined) return;
+      const num = Number(val);
+      if (isNaN(num)) {
+        errors.push(`Row 'FNH3', Stream '${streamKey.toUpperCase()}' must be a valid number.`);
+      }
     });
 
     // Validate PCl row values
@@ -65,6 +74,7 @@ router.post('/', async (req, res) => {
       analysisType: payload.analysisType || 'CR 203 Analysis',
       crystallizer: 'CR 203',
       timeRows,
+      fnh3Row,
       pclRow,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,

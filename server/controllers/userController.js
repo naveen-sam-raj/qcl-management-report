@@ -1,4 +1,5 @@
 const { User, Plant, ActivityLog } = require('../models');
+const { sendUserWelcomeEmail } = require('../services/emailService');
 
 // @desc    Get users (scoped to company for Company Admin, universal for Super Admin)
 // @route   GET /api/users
@@ -206,6 +207,22 @@ const createUser = async (req, res) => {
 
     const safeUser = await User.findById(newUser._id).select('-password').populate('company').populate('plant');
 
+    // Send welcome email with login credentials to the user's personal email
+    try {
+      sendUserWelcomeEmail({
+        to: newUser.email,
+        name: newUser.name,
+        username: newUser.username,
+        password: password,
+        role: newUser.role,
+        companyName: safeUser?.company?.name || 'SPIC Group',
+      }).catch((emailErr) => {
+        console.warn('[User Controller] Email delivery error:', emailErr.message);
+      });
+    } catch (emailErr) {
+      console.warn('[User Controller] Email dispatch warning:', emailErr.message);
+    }
+
     return res.status(201).json({
       success: true,
       message: 'User created successfully.',
@@ -388,8 +405,29 @@ const deleteUser = async (req, res) => {
   }
 };
 
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private (Super Admin, Company Admin)
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('-password')
+      .populate('company')
+      .populate('plant');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.status(200).json({ success: true, user });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getUsers,
+  getUserById,
   createUser,
   updateUser,
   toggleUserStatus,

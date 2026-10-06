@@ -5,6 +5,7 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
+  AlertCircle,
   Calendar,
   Save,
   RotateCcw,
@@ -17,6 +18,11 @@ import {
   Activity,
   TrendingUp,
 } from 'lucide-react';
+import {
+  validateCellValue,
+  SA_E501_LIMITS,
+  SA_T501_LIMITS,
+} from '../../services/analysisValidation';
 
 // Default initial readings matching the user's legacy screenshot (Date: 13/09/2026)
 const DEFAULT_READINGS = [
@@ -69,12 +75,20 @@ const formatDateDisplay = (isoDate) => {
   }
 };
 
-const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
+const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+
+  // Option selection: 'all' | 'e501' | 't501'
+  const [selectedOption, setSelectedOption] = useState(() => {
+    const opt = (optionName || '').toLowerCase();
+    if (opt.includes('e') && !opt.includes('t')) return 'e501';
+    if (opt.includes('t') && !opt.includes('e')) return 't501';
+    return 'all';
+  });
 
   // ── States ──
   const [date, setDate] = useState('2026-09-13');
@@ -204,17 +218,18 @@ const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn pb-12">
+    <div className="space-y-5 animate-fadeIn">
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-            title="Back to SA Plant"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -265,61 +280,101 @@ const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       </div>
 
-      {/* ── DATE SELECTION BAR (Full-width row directly below header) ── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Calendar className="w-4 h-4 text-indigo-600" />
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-            Analysis Date :
-          </span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-          />
-          <span className="text-xs font-medium text-slate-500 hidden sm:inline">
-            ({formatDateDisplay(date)})
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDate(new Date().toISOString().split('T')[0])}
-            className="text-xs font-semibold text-slate-600 hover:text-indigo-700 px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50 transition"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => setDate('2026-09-13')}
-            className="text-xs font-semibold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/70 px-2.5 py-1 rounded-md border border-indigo-200/60 transition"
-          >
-            13/09/2026 Sample
-          </button>
-        </div>
-      </div>
-
       {/* ── MAIN ANALYSIS TABLE (Clean TK 203 Dark Header Style) ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner */}
-        <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
-            <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
-              E 501 / T 501 Chemical Concentration Table
-            </span>
-            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200/60">
-              Units: g/l
-            </span>
+        {/* Table top title banner with Integrated Date Selector */}
+        <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
+                E 501 / T 501 Chemical Concentration
+              </span>
+              <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200/60">
+                Units: g/l
+              </span>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="e501-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="e501-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition text-slate-800 bg-white hover:border-slate-400"
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+            </div>
           </div>
 
-          <button
-            onClick={handleAddRow}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 px-3 py-1.5 rounded-lg transition shadow-2xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Shift Row
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Option Selection Toggle */}
+            <div className="flex items-center bg-slate-200/80 p-0.5 rounded-lg border border-slate-300 shadow-2xs">
+              <button
+                type="button"
+                id="btn-option-all"
+                onClick={() => setSelectedOption('all')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  selectedOption === 'all'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="View and enter both E 501 and T 501"
+              >
+                All (E 501 &amp; T 501)
+              </button>
+              <button
+                type="button"
+                id="btn-option-e501"
+                onClick={() => setSelectedOption('e501')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  selectedOption === 'e501'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Select E 501 only (Limits: FNH₃ 10–40 g/L, Na₂CO₃ 2–10 g/L)"
+              >
+                E 501
+              </button>
+              <button
+                type="button"
+                id="btn-option-t501"
+                onClick={() => setSelectedOption('t501')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  selectedOption === 't501'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Select T 501 only (Limits: FNH₃ 1–5 g/L, Na₂CO₃ 20–60 g/L)"
+              >
+                T 501
+              </button>
+            </div>
+
+            <button
+              onClick={handleAddRow}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 px-3 py-1.5 rounded-lg transition shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Shift Row
+            </button>
+          </div>
         </div>
 
         {/* Data Table */}
@@ -343,18 +398,22 @@ const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
                     <span>Shift</span>
                   </div>
                 </th>
-                <th
-                  colSpan={2}
-                  className="py-2.5 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-indigo-300 font-extrabold tracking-wide"
-                >
-                  E 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
-                </th>
-                <th
-                  colSpan={2}
-                  className="py-2.5 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-indigo-300 font-extrabold tracking-wide"
-                >
-                  T 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
-                </th>
+                {(selectedOption === 'all' || selectedOption === 'e501') && (
+                  <th
+                    colSpan={2}
+                    className="py-2.5 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-indigo-300 font-extrabold tracking-wide"
+                  >
+                    E 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
+                  </th>
+                )}
+                {(selectedOption === 'all' || selectedOption === 't501') && (
+                  <th
+                    colSpan={2}
+                    className="py-2.5 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-indigo-300 font-extrabold tracking-wide"
+                  >
+                    T 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
+                  </th>
+                )}
                 <th
                   rowSpan={2}
                   className="py-3 px-3 w-16 text-center border-b border-slate-800"
@@ -364,18 +423,26 @@ const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
               </tr>
               {/* Row 2: Sub-columns */}
               <tr className="bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider text-center">
-                <th className="py-2 px-3 border-r border-slate-700 w-36">
-                  FNH₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
-                </th>
-                <th className="py-2 px-3 border-r border-slate-700 w-36">
-                  Na₂CO₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
-                </th>
-                <th className="py-2 px-3 border-r border-slate-700 w-36">
-                  FNH₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
-                </th>
-                <th className="py-2 px-3 border-r border-slate-700 w-36">
-                  Na₂CO₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
-                </th>
+                {(selectedOption === 'all' || selectedOption === 'e501') && (
+                  <>
+                    <th className="py-2 px-3 border-r border-slate-700 w-36">
+                      FNH₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
+                    </th>
+                    <th className="py-2 px-3 border-r border-slate-700 w-36">
+                      Na₂CO₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
+                    </th>
+                  </>
+                )}
+                {(selectedOption === 'all' || selectedOption === 't501') && (
+                  <>
+                    <th className="py-2 px-3 border-r border-slate-700 w-36">
+                      FNH₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
+                    </th>
+                    <th className="py-2 px-3 border-r border-slate-700 w-36">
+                      Na₂CO₃ <span className="text-[9px] text-slate-400 font-normal">(g/l)</span>
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -403,81 +470,411 @@ const E501T501AnalysisPage = ({ plantId = 'sa' }) => {
                       />
                     </td>
 
-                    {/* E 501 FNH3 */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.e501_fnh3}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'e501_fnh3', e.target.value)
-                        }
-                        placeholder="0.00"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_e501_fnh3`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.e501_fnh3 !== ''
-                            ? 'border-indigo-300 bg-indigo-50/50 text-indigo-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-indigo-500`}
-                      />
-                    </td>
+                    {/* E 501 Cells (Limits: FNH3 10–40 g/L, Na2CO3 2–10 g/L) */}
+                    {(selectedOption === 'all' || selectedOption === 'e501') && (
+                      <>
+                        {/* E 501 FNH3 */}
+                        {(() => {
+                          const field = 'e501_fnh3';
+                          const cellVal = reading[field];
+                          const limit = SA_E501_LIMITS.fnh3;
+                          const validation = validateCellValue(cellVal, limit);
+                          const isOutOfLimit = validation.isOutOfLimit;
+                          const isNormal = validation.isNormal;
+                          const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                          const isFormatError = !!errors[`${reading.id}_${field}`];
 
-                    {/* E 501 Na2CO3 */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.e501_na2co3}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'e501_na2co3', e.target.value)
-                        }
-                        placeholder="0.00"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_e501_na2co3`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.e501_na2co3 !== ''
-                            ? 'border-indigo-300 bg-indigo-50/50 text-indigo-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-indigo-500`}
-                      />
-                    </td>
+                          return (
+                            <td className="py-2.5 px-3 border-r border-slate-100 align-top">
+                              <div className="flex flex-col items-center justify-start min-h-[58px]">
+                                <div className="relative w-full max-w-[110px]">
+                                  <input
+                                    id={`input-${reading.id}-${field}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={cellVal}
+                                    onChange={(e) =>
+                                      handleCellChange(reading.id, field, e.target.value)
+                                    }
+                                    placeholder="0.00"
+                                    title={
+                                      isOutOfLimit
+                                        ? `OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : hasValue
+                                        ? `NORMAL: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : `Valid range: ${limit.formattedRange}`
+                                    }
+                                    className={`w-full max-w-[110px] mx-auto text-center font-mono text-xs font-bold py-1.5 px-2 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                      isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                        : isFormatError
+                                        ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                        : hasValue && isNormal
+                                        ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                        : 'border-slate-300 bg-white hover:border-slate-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-800'
+                                    }`}
+                                    aria-label={`${reading.shift} E 501 FNH3`}
+                                  />
+                                  {isOutOfLimit && (
+                                    <span
+                                      className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                      title="Out of limit"
+                                    >
+                                      <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                    </span>
+                                  )}
+                                </div>
 
-                    {/* T 501 FNH3 */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.t501_fnh3}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 't501_fnh3', e.target.value)
-                        }
-                        placeholder="0.00"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_t501_fnh3`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.t501_fnh3 !== ''
-                            ? 'border-indigo-300 bg-indigo-50/50 text-indigo-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-indigo-500`}
-                      />
-                    </td>
+                                {isFormatError ? (
+                                  <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                    <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                    <span>Invalid</span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 flex flex-col items-center justify-center">
+                                    {hasValue && isOutOfLimit && (
+                                      <div
+                                        id={`limit-badge-${reading.id}-${field}`}
+                                        className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                        title={`OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`}
+                                      >
+                                        <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                        <span>OUT OF LIMIT</span>
+                                      </div>
+                                    )}
+                                    {hasValue && isNormal && (
+                                      <div
+                                        id={`status-${reading.id}-${field}`}
+                                        className="text-[9.5px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                        title={`NORMAL: within ${limit.formattedRange}`}
+                                      >
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                        <span>NORMAL</span>
+                                      </div>
+                                    )}
+                                    <span
+                                      id={`range-${reading.id}-${field}`}
+                                      className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                        isOutOfLimit
+                                          ? 'text-rose-700 font-bold'
+                                          : hasValue && isNormal
+                                          ? 'text-emerald-700/80 font-semibold'
+                                          : 'text-slate-400'
+                                      }`}
+                                      title={`Valid range: ${limit.formattedRange}`}
+                                    >
+                                      {limit.formattedRange}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })()}
 
-                    {/* T 501 Na2CO3 */}
-                    <td className="py-2.5 px-3 border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.t501_na2co3}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 't501_na2co3', e.target.value)
-                        }
-                        placeholder="0.00"
-                        className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border transition ${
-                          errors[`${reading.id}_t501_na2co3`]
-                            ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                            : reading.t501_na2co3 !== ''
-                            ? 'border-indigo-300 bg-indigo-50/50 text-indigo-900 font-extrabold focus:bg-white'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        } focus:outline-none focus:ring-1 focus:ring-indigo-500`}
-                      />
-                    </td>
+                        {/* E 501 Na2CO3 */}
+                        {(() => {
+                          const field = 'e501_na2co3';
+                          const cellVal = reading[field];
+                          const limit = SA_E501_LIMITS.na2co3;
+                          const validation = validateCellValue(cellVal, limit);
+                          const isOutOfLimit = validation.isOutOfLimit;
+                          const isNormal = validation.isNormal;
+                          const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                          const isFormatError = !!errors[`${reading.id}_${field}`];
+
+                          return (
+                            <td className="py-2.5 px-3 border-r border-slate-100 align-top">
+                              <div className="flex flex-col items-center justify-start min-h-[58px]">
+                                <div className="relative w-full max-w-[110px]">
+                                  <input
+                                    id={`input-${reading.id}-${field}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={cellVal}
+                                    onChange={(e) =>
+                                      handleCellChange(reading.id, field, e.target.value)
+                                    }
+                                    placeholder="0.00"
+                                    title={
+                                      isOutOfLimit
+                                        ? `OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : hasValue
+                                        ? `NORMAL: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : `Valid range: ${limit.formattedRange}`
+                                    }
+                                    className={`w-full max-w-[110px] mx-auto text-center font-mono text-xs font-bold py-1.5 px-2 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                      isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                        : isFormatError
+                                        ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                        : hasValue && isNormal
+                                        ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                        : 'border-slate-300 bg-white hover:border-slate-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-800'
+                                    }`}
+                                    aria-label={`${reading.shift} E 501 Na2CO3`}
+                                  />
+                                  {isOutOfLimit && (
+                                    <span
+                                      className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                      title="Out of limit"
+                                    >
+                                      <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isFormatError ? (
+                                  <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                    <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                    <span>Invalid</span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 flex flex-col items-center justify-center">
+                                    {hasValue && isOutOfLimit && (
+                                      <div
+                                        id={`limit-badge-${reading.id}-${field}`}
+                                        className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                        title={`OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`}
+                                      >
+                                        <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                        <span>OUT OF LIMIT</span>
+                                      </div>
+                                    )}
+                                    {hasValue && isNormal && (
+                                      <div
+                                        id={`status-${reading.id}-${field}`}
+                                        className="text-[9.5px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                        title={`NORMAL: within ${limit.formattedRange}`}
+                                      >
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                        <span>NORMAL</span>
+                                      </div>
+                                    )}
+                                    <span
+                                      id={`range-${reading.id}-${field}`}
+                                      className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                        isOutOfLimit
+                                          ? 'text-rose-700 font-bold'
+                                          : hasValue && isNormal
+                                          ? 'text-emerald-700/80 font-semibold'
+                                          : 'text-slate-400'
+                                      }`}
+                                      title={`Valid range: ${limit.formattedRange}`}
+                                    >
+                                      {limit.formattedRange}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                    {/* T 501 Cells (Limits: FNH3 1–5 g/L, Na2CO3 20–60 g/L) */}
+                    {(selectedOption === 'all' || selectedOption === 't501') && (
+                      <>
+                        {/* T 501 FNH3 */}
+                        {(() => {
+                          const field = 't501_fnh3';
+                          const cellVal = reading[field];
+                          const limit = SA_T501_LIMITS.fnh3;
+                          const validation = validateCellValue(cellVal, limit);
+                          const isOutOfLimit = validation.isOutOfLimit;
+                          const isNormal = validation.isNormal;
+                          const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                          const isFormatError = !!errors[`${reading.id}_${field}`];
+
+                          return (
+                            <td className="py-2.5 px-3 border-r border-slate-100 align-top">
+                              <div className="flex flex-col items-center justify-start min-h-[58px]">
+                                <div className="relative w-full max-w-[110px]">
+                                  <input
+                                    id={`input-${reading.id}-${field}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={cellVal}
+                                    onChange={(e) =>
+                                      handleCellChange(reading.id, field, e.target.value)
+                                    }
+                                    placeholder="0.00"
+                                    title={
+                                      isOutOfLimit
+                                        ? `OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : hasValue
+                                        ? `NORMAL: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : `Valid range: ${limit.formattedRange}`
+                                    }
+                                    className={`w-full max-w-[110px] mx-auto text-center font-mono text-xs font-bold py-1.5 px-2 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                      isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                        : isFormatError
+                                        ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                        : hasValue && isNormal
+                                        ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                        : 'border-slate-300 bg-white hover:border-slate-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-800'
+                                    }`}
+                                    aria-label={`${reading.shift} T 501 FNH3`}
+                                  />
+                                  {isOutOfLimit && (
+                                    <span
+                                      className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                      title="Out of limit"
+                                    >
+                                      <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isFormatError ? (
+                                  <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                    <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                    <span>Invalid</span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 flex flex-col items-center justify-center">
+                                    {hasValue && isOutOfLimit && (
+                                      <div
+                                        id={`limit-badge-${reading.id}-${field}`}
+                                        className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                        title={`OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`}
+                                      >
+                                        <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                        <span>OUT OF LIMIT</span>
+                                      </div>
+                                    )}
+                                    {hasValue && isNormal && (
+                                      <div
+                                        id={`status-${reading.id}-${field}`}
+                                        className="text-[9.5px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                        title={`NORMAL: within ${limit.formattedRange}`}
+                                      >
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                        <span>NORMAL</span>
+                                      </div>
+                                    )}
+                                    <span
+                                      id={`range-${reading.id}-${field}`}
+                                      className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                        isOutOfLimit
+                                          ? 'text-rose-700 font-bold'
+                                          : hasValue && isNormal
+                                          ? 'text-emerald-700/80 font-semibold'
+                                          : 'text-slate-400'
+                                      }`}
+                                      title={`Valid range: ${limit.formattedRange}`}
+                                    >
+                                      {limit.formattedRange}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })()}
+
+                        {/* T 501 Na2CO3 */}
+                        {(() => {
+                          const field = 't501_na2co3';
+                          const cellVal = reading[field];
+                          const limit = SA_T501_LIMITS.na2co3;
+                          const validation = validateCellValue(cellVal, limit);
+                          const isOutOfLimit = validation.isOutOfLimit;
+                          const isNormal = validation.isNormal;
+                          const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                          const isFormatError = !!errors[`${reading.id}_${field}`];
+
+                          return (
+                            <td className="py-2.5 px-3 border-r border-slate-100 align-top">
+                              <div className="flex flex-col items-center justify-start min-h-[58px]">
+                                <div className="relative w-full max-w-[110px]">
+                                  <input
+                                    id={`input-${reading.id}-${field}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={cellVal}
+                                    onChange={(e) =>
+                                      handleCellChange(reading.id, field, e.target.value)
+                                    }
+                                    placeholder="0.00"
+                                    title={
+                                      isOutOfLimit
+                                        ? `OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : hasValue
+                                        ? `NORMAL: ${cellVal} g/L (Valid range: ${limit.formattedRange})`
+                                        : `Valid range: ${limit.formattedRange}`
+                                    }
+                                    className={`w-full max-w-[110px] mx-auto text-center font-mono text-xs font-bold py-1.5 px-2 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                      isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                        : isFormatError
+                                        ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                        : hasValue && isNormal
+                                        ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                        : 'border-slate-300 bg-white hover:border-slate-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-800'
+                                    }`}
+                                    aria-label={`${reading.shift} T 501 Na2CO3`}
+                                  />
+                                  {isOutOfLimit && (
+                                    <span
+                                      className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                      title="Out of limit"
+                                    >
+                                      <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                    </span>
+                                  )}
+                                </div>
+
+                                {isFormatError ? (
+                                  <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                    <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                    <span>Invalid</span>
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 flex flex-col items-center justify-center">
+                                    {hasValue && isOutOfLimit && (
+                                      <div
+                                        id={`limit-badge-${reading.id}-${field}`}
+                                        className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                        title={`OUT OF LIMIT: ${cellVal} g/L (Valid range: ${limit.formattedRange})`}
+                                      >
+                                        <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                        <span>OUT OF LIMIT</span>
+                                      </div>
+                                    )}
+                                    {hasValue && isNormal && (
+                                      <div
+                                        id={`status-${reading.id}-${field}`}
+                                        className="text-[9.5px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                        title={`NORMAL: within ${limit.formattedRange}`}
+                                      >
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                        <span>NORMAL</span>
+                                      </div>
+                                    )}
+                                    <span
+                                      id={`range-${reading.id}-${field}`}
+                                      className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                        isOutOfLimit
+                                          ? 'text-rose-700 font-bold'
+                                          : hasValue && isNormal
+                                          ? 'text-emerald-700/80 font-semibold'
+                                          : 'text-slate-400'
+                                      }`}
+                                      title={`Valid range: ${limit.formattedRange}`}
+                                    >
+                                      {limit.formattedRange}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })()}
+                      </>
+                    )}
 
                     {/* Delete Row */}
                     <td className="py-2.5 px-3 text-center">

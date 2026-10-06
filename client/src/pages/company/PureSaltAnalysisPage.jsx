@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
+  PURE_SALT_LIMIT_VALIDATION_ENABLED,
   getCellLimit,
   validateCellValue,
   validateFullDataset,
@@ -20,6 +21,8 @@ import {
   Factory,
   ShieldAlert,
   Eye,
+  RefreshCw,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -133,7 +136,16 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
 
-  // ── Real-time input change & boundary check ──
+  // EmailJS & Excel Reporting States
+  const [recipientEmail, setRecipientEmail] = useState(
+    user?.email || import.meta.env.VITE_DEFAULT_REPORT_RECIPIENT_EMAIL || ''
+  );
+  // 'idle' | 'saving' | 'generating' | 'emailing' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle');
+  const [lastSavedRecord, setLastSavedRecord] = useState(null);
+  const [lastExcelData, setLastExcelData] = useState(null);
+
+  // ── Real-time input change (Accepts exact values without limits/tolerances) ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
 
@@ -142,24 +154,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
     }));
 
-    // Immediate validation using centralized limits registry
-    const limit = getCellLimit(plantId, 'pure-salt', rowKey, paramKey);
-    const result = validateCellValue(value, limit);
-
-    setErrors((prev) => {
-      const next = { ...prev };
-      const cellKey = `${rowKey}_${paramKey}`;
-      if (!result.isValid) {
-        next[cellKey] = result.message;
-      } else {
-        delete next[cellKey];
-      }
-      return next;
-    });
-
     // Clear global success on any edit
     setSaveSuccess(false);
-  }, [plantId]);
+  }, []);
 
   const handleReset = () => {
     setData(buildEmptyData());
@@ -167,48 +164,107 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     setErrors({});
     setSaveSuccess(false);
     setDateError(false);
+    setSavePhase('idle');
+    setLastSavedRecord(null);
+    setLastExcelData(null);
     showToast('Form cleared successfully.', 'info');
   };
 
-  // Full dataset validation before submission
+  // ── Form validation before submission (respects PURE_SALT_LIMIT_VALIDATION_ENABLED) ──
   const validate = () => {
-    let hasError = false;
-
     if (!date) {
       setDateError(true);
-      hasError = true;
-    } else {
-      setDateError(false);
+      showToast('Please select an analysis date before saving.', 'error');
+      return false;
     }
+    setDateError(false);
 
-    // Run full validation across all cells
-    const datasetValidation = validateFullDataset(data, plantId, 'pure-salt');
-    if (!datasetValidation.isValid) {
-      hasError = true;
-      const formattedErrors = {};
-      Object.entries(datasetValidation.errors).forEach(([k, err]) => {
-        formattedErrors[k] = err.message;
+    // Basic numeric check across all entered values
+    let hasFormatError = false;
+    Object.entries(data || {}).forEach(([rowKey, rowVals]) => {
+      Object.entries(rowVals || {}).forEach(([paramKey, val]) => {
+        if (val !== '' && val !== null && val !== undefined) {
+          const str = String(val).trim();
+          if (!/^-?\d*\.?\d+$/.test(str) || isNaN(parseFloat(str))) {
+            hasFormatError = true;
+          }
+        }
       });
-      setErrors((prev) => ({ ...prev, ...formattedErrors }));
+    });
+
+    if (hasFormatError) {
+      showToast('Please ensure all entered parameter values are valid numbers.', 'error');
+      return false;
     }
 
-    return !hasError;
+    // Validate tolerance limits if enabled (flags out-of-limits without blocking DB save)
+    if (PURE_SALT_LIMIT_VALIDATION_ENABLED) {
+      const datasetValidation = validateFullDataset(data, plantId, 'pure-salt');
+      if (datasetValidation.hasFormatError) {
+        showToast('Please ensure all entered parameter values are valid numbers.', 'error');
+        return false;
+      }
+    }
+
+    return true;
   };
 
-  const handleSave = async () => {
-    if (!validate()) {
-      showToast('Please correct values that exceed allowed tolerance limits before saving.', 'error');
+  // ── Retry Email Dispatch via backend if initial email failed ──
+  const handleRetryEmail = async () => {
+    if (!lastSavedRecord?._id) {
+      showToast('No saved report available to re-send.', 'error');
       return;
     }
 
     setSaving(true);
+    setSavePhase('emailing');
+
+    try {
+      const retryRes = await api.post(`/pure-salt-analysis/${lastSavedRecord._id}/retry-email`, {
+        recipientEmail: recipientEmail.trim(),
+      });
+
+      if (retryRes.data?.success && retryRes.data?.emailSent) {
+        setSavePhase('completed');
+        setSaveSuccess(true);
+        showToast('Saved & Emailed Successfully ✓', 'success');
+
+        setTimeout(() => {
+          setSaving(false);
+          setSavePhase('idle');
+        }, 4000);
+      } else {
+        setSaving(false);
+        setSavePhase('email_failed');
+        showToast(retryRes.data?.message || 'Data saved and Excel generated, but email sending failed.', 'warning');
+      }
+    } catch (err) {
+      setSaving(false);
+      setSavePhase('email_failed');
+      showToast('Data saved and Excel generated, but email sending failed.', 'warning');
+    }
+  };
+
+  // ── Section 2 & 3: Save to MongoDB, Generate Excel & Send via Nodemailer Backend ──
+  const handleSave = async () => {
+    if (!validate()) {
+      return;
+    }
+
+    // Stage 1: "Saving..."
+    setSaving(true);
+    setSavePhase('saving');
+    setSaveSuccess(false);
 
     const payload = {
       date,
-      plant: 'ACL',
+      plant: 'ACL Plant',
       analysisType: 'Pure Salt Analysis',
+      shift: 'All Shifts (I, II, III)',
       submittedBy: user?.name || 'Plant Operator',
       submittedAt: new Date().toISOString(),
+      email: recipientEmail.trim(),
+      recipientEmail: recipientEmail.trim(),
       rows: Object.fromEntries(
         ROWS.map((r) => [
           r.key,
@@ -222,123 +278,260 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       ),
     };
 
+    let response;
     try {
-      // Backend API call with strict server-side tolerance validation
-      const response = await api.post('/api/pure-salt-analysis', payload);
-      setSaving(false);
-      setSaveSuccess(true);
-      showToast(response.data?.message || 'Pure Salt Analysis verified & saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 6000);
+      // Step: Send data to backend API (handles DB Save + ExcelJS Generate + Nodemailer Email with .xlsx attachment)
+      response = await api.post('/pure-salt-analysis', payload);
     } catch (err) {
       setSaving(false);
-      console.error('[PureSaltAnalysis] Save failed:', err);
-      const serverMessage = err.response?.data?.message || err.message;
-      const serverDetails = err.response?.data?.errorDetails;
+      setSavePhase('idle');
+      console.error('[PureSaltAnalysis] Database save failed:', err);
 
-      if (serverDetails && typeof serverDetails === 'object') {
-        const nextErrors = {};
-        Object.entries(serverDetails).forEach(([k, detail]) => {
-          nextErrors[k] = typeof detail === 'object' ? detail.message : detail;
-        });
-        setErrors((prev) => ({ ...prev, ...nextErrors }));
-      }
+      // Section 12: If MongoDB save fails: "Unable to save the data. Please try again."
+      showToast('Unable to save the data. Please try again.', 'error');
+      return;
+    }
 
-      showToast('Validation Error: ' + serverMessage, 'error');
+    // Step: Confirm MongoDB save successful
+    if (!response?.data?.success) {
+      setSaving(false);
+      setSavePhase('idle');
+      showToast('Unable to save the data. Please try again.', 'error');
+      return;
+    }
+
+    const savedRecord = response.data.data;
+    const excelInfo = response.data.excel;
+    setLastSavedRecord(savedRecord);
+    setLastExcelData(excelInfo);
+
+    // Stage 2: "Generating Report..."
+    setSavePhase('generating');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Stage 3: "Sending Email..."
+    setSavePhase('emailing');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Stage 4: Final Status Messaging (Section 3, 9 & 12)
+    if (response.data.emailSent) {
+      setSavePhase('completed');
+      setSaveSuccess(true);
+      showToast('Saved & Emailed Successfully ✓', 'success');
+
+      // Reset button state to idle after feedback display
+      setTimeout(() => {
+        setSaving(false);
+        setSavePhase('idle');
+      }, 5000);
+    } else {
+      // MongoDB save succeeded, but email sending failed
+      setSaving(false);
+      setSavePhase('email_failed');
+      setSaveSuccess(true);
+      const warnMsg = response.data.message || 'Data saved and Excel generated, but email sending failed.';
+      showToast(warnMsg, 'warning');
     }
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-6">
+    <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
+      {/* ── Header Card (Pure Salt Analysis Tab) with Integrated Date Section ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
-          {/* Left: Back + Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          {/* Left: Plant breadcrumb + Pure Salt Analysis Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
-              id="btn-psa-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to ACL Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
 
             <div className="min-w-0">
-              {/* Breadcrumb */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Factory className="w-3.5 h-3.5 text-slate-400" />
-                <span>ACL Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <FlaskConical className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">Pure Salt Analysis</span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
-                PURE SALT ANALYSIS
-              </h1>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+              <Factory className="w-3.5 h-3.5 text-slate-400" />
+              <span>ACL Plant</span>
+              <ChevronRight className="w-3 h-3" />
+              <FlaskConical className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-blue-600 font-semibold">Pure Salt Analysis</span>
             </div>
+            <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+              PURE SALT ANALYSIS
+            </h1>
+          </div>
           </div>
 
-          {/* Right: Actions */}
-          {!isViewOnly ? (
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-psa-reset"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-                title="Clear all fields"
+          {/* Right: Date Section, Recipient Email, Test & Action Buttons */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+              <label
+                htmlFor="psa-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="psa-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    setDateError(false);
+                    setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-[11px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded border border-blue-200 hidden md:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
 
-              <button
-                id="btn-psa-save"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
-                title="Save analysis data"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
+            {/* Actions */}
+            {!isViewOnly ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  id="btn-psa-reset"
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 disabled:opacity-50 cursor-pointer"
+                  title="Clear all fields"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset</span>
+                </button>
+
+                {savePhase === 'email_failed' && (
+                  <button
+                    id="btn-psa-retry-email"
+                    type="button"
+                    onClick={handleRetryEmail}
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition shadow-2xs cursor-pointer"
+                    title="Retry sending report email with attached Excel file"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${saving ? 'animate-spin' : ''}`} />
+                    <span>Retry Email</span>
+                  </button>
                 )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 shadow-2xs">
-                <Eye className="w-3.5 h-3.5 text-amber-600" />
-                <span>View-Only Mode</span>
-              </span>
-            </div>
-          )}
+
+                <button
+                  id="btn-psa-save"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-75 cursor-pointer ${
+                    savePhase === 'completed'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : savePhase === 'email_failed'
+                      ? 'bg-slate-700 hover:bg-slate-800'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                  title="Save analysis data and dispatch automated Excel report"
+                >
+                  {saving ? (
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                  ) : savePhase === 'completed' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>
+                    {savePhase === 'saving'
+                      ? 'Saving...'
+                      : savePhase === 'generating'
+                      ? 'Generating Report...'
+                      : savePhase === 'emailing'
+                      ? 'Sending Email...'
+                      : savePhase === 'completed'
+                      ? 'Saved & Emailed Successfully ✓'
+                      : 'Save / Submit'}
+                  </span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 shadow-2xs">
+                  <Eye className="w-3.5 h-3.5 text-amber-600" />
+                  <span>View-Only Mode</span>
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
+      {/* ── Status Banner (Success or Partial Email Failure) ────────────────── */}
       {saveSuccess && (
         <div
-          id="psa-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
+          id="psa-status-banner"
+          className={`flex items-start gap-3 p-3 rounded-xl border shadow-xs animate-fadeIn ${
+            savePhase === 'email_failed'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              Pure Salt Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
+          {savePhase === 'email_failed' ? (
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          )}
+          <div className="text-xs flex-1">
+            <div className="font-bold">
+              {savePhase === 'email_failed'
+                ? 'Data saved and Excel generated, but email sending failed.'
+                : 'Saved & Emailed Successfully ✓'}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-600 text-[11px]">
+              <span>
+                Pure Salt Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
+              </span>
+              {lastExcelData?.fileName && (
+                <span className="inline-flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  <FileSpreadsheet className="w-3 h-3 text-blue-600" />
+                  <span>Attached: {lastExcelData.fileName}</span>
+                </span>
+              )}
+              {recipientEmail && (
+                <span className="text-slate-500">
+                  Recipient: <strong>{recipientEmail}</strong>
+                </span>
+              )}
+            </div>
           </div>
+          {savePhase === 'email_failed' && (
+            <button
+              onClick={handleRetryEmail}
+              disabled={saving}
+              className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 rounded border border-amber-400/50 transition cursor-pointer shrink-0"
+            >
+              Retry Email
+            </button>
+          )}
           <button
             onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
+            className="text-slate-400 hover:text-slate-600 transition text-base leading-none shrink-0"
             aria-label="Dismiss"
           >
             ×
@@ -346,84 +539,8 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="psa-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Analysis Date</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="psa-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  setDateError(false);
-                  setSaveSuccess(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" />
-                Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-
-          {/* Info badge */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-500 shrink-0">
-            <FlaskConical className="w-3.5 h-3.5 text-blue-500" />
-            <span>5 Sample Rows · 6 Parameters</span>
-          </div>
-        </div>
-      </div>
-
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-
-        {/* Table header label */}
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-              {isViewOnly ? 'Analysis Specifications (View-Only)' : 'Analysis Data Entry'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3.5 text-[11px] font-bold text-slate-600">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-sky-200 border-2 border-blue-500 inline-block" />
-              Raw Salt
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-white border-2 border-slate-400 inline-block" />
-              Shifts
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-emerald-200 border-2 border-emerald-500 inline-block" />
-              Composition
-            </span>
-          </div>
-        </div>
 
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
@@ -471,45 +588,80 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                       </div>
                     </td>
 
-                    {/* Parameter input cells */}
+                    {/* Parameter input cells (Tolerance / Limit Validation) */}
                     {PARAMETERS.map((param) => {
-                      const fieldKey = `${row.key}_${param.key}`;
                       const cellVal = data[row.key][param.key];
                       const limit = getCellLimit(plantId, 'pure-salt', row.key, param.key);
-                      const cellValidation = validateCellValue(cellVal, limit);
-                      const isInvalid = !isViewOnly && (!cellValidation.isValid || !!errors[fieldKey]);
-                      const errorMessage = errors[fieldKey] || (!cellValidation.isValid ? cellValidation.message : null);
+                      const validation = validateCellValue(cellVal, limit);
+                      const isOutOfLimit = validation.isOutOfLimit;
+                      const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
 
                       return (
-                        <td key={param.key} className="px-3 py-2.5 text-center align-middle">
-                          <input
-                            id={`psa-input-${row.key}-${param.key}`}
-                            type="text"
-                            inputMode="decimal"
-                            readOnly={isViewOnly}
-                            disabled={isViewOnly}
-                            value={cellVal}
-                            onChange={(e) =>
-                              !isViewOnly && handleChange(row.key, param.key, e.target.value)
-                            }
-                            placeholder={isViewOnly ? '—' : '0.00'}
-                            className={`w-full max-w-[96px] mx-auto text-center text-xs font-mono font-bold px-2.5 py-1.5 rounded-lg border shadow-2xs transition-all ${
-                              isViewOnly
-                                ? 'bg-slate-50 text-slate-800 border-slate-200 cursor-default select-text'
-                                : isInvalid
-                                ? 'border-2 border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60 focus:outline-none'
-                                : styles.inputFocus
-                            }`}
-                            aria-label={`${row.label} ${param.label}`}
-                          />
-
-                          {/* Error Message if format is invalid */}
-                          {isInvalid && (
-                            <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
-                              <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
-                              <span className="whitespace-nowrap">{errorMessage}</span>
+                        <td key={param.key} className="px-3 py-2 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[50px]">
+                            <div className="relative w-full max-w-[98px]">
+                              <input
+                                id={`psa-input-${row.key}-${param.key}`}
+                                type="text"
+                                inputMode="decimal"
+                                readOnly={isViewOnly}
+                                disabled={isViewOnly}
+                                value={cellVal}
+                                onChange={(e) =>
+                                  !isViewOnly && handleChange(row.key, param.key, e.target.value)
+                                }
+                                placeholder={isViewOnly ? '—' : '0.00'}
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%, Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
+                                      : hasValue
+                                      ? `Normal: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%)`
+                                      : `Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}% (Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
+                                    : ''
+                                }
+                                className={`w-full mx-auto text-center text-xs font-mono font-bold px-2 py-1.5 rounded-lg border shadow-2xs transition-all ${
+                                  isViewOnly
+                                    ? isOutOfLimit
+                                      ? 'bg-rose-50 text-rose-900 border-rose-300 font-black cursor-default select-text'
+                                      : 'bg-slate-50 text-slate-800 border-slate-200 cursor-default select-text'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                    : styles.inputFocus
+                                }`}
+                                aria-label={`${row.label} ${param.label}`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
                             </div>
-                          )}
+
+                            {/* Show actual allowed range when value is out of range */}
+                            {isOutOfLimit && limit && (
+                              <div
+                                id={`psa-limit-badge-${row.key}-${param.key}`}
+                                className="mt-1 px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                title={`Allowed: ${limit.min.toFixed(2)}% to ${limit.max.toFixed(2)}%`}
+                              >
+                                <span>Limit: {limit.min.toFixed(2)}–{limit.max.toFixed(2)}%</span>
+                              </div>
+                            )}
+
+                            {/* Subtle target hint when field is empty */}
+                            {!isOutOfLimit && limit && !hasValue && !isViewOnly && (
+                              <span
+                                className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight"
+                                title={`Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%`}
+                              >
+                                {limit.min.toFixed(2)}–{limit.max.toFixed(2)}%
+                              </span>
+                            )}
+                          </div>
                         </td>
                       );
                     })}
@@ -542,7 +694,17 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                 ) : (
                   <Save className="w-3.5 h-3.5" />
                 )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
+                <span>
+                  {savePhase === 'saving'
+                    ? 'Saving...'
+                    : savePhase === 'generating'
+                    ? 'Generating Report...'
+                    : savePhase === 'emailing'
+                    ? 'Sending Email...'
+                    : savePhase === 'completed'
+                    ? 'Saved & Emailed Successfully ✓'
+                    : 'Save / Submit'}
+                </span>
               </button>
             </div>
           )}

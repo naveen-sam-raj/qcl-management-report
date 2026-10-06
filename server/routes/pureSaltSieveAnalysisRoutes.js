@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog } = require('../models');
+const { validateAnalysisPayload } = require('../services/analysisValidation');
 
 // In-memory / cache storage for pure salt sieve records
 const sieveRecords = [];
@@ -18,33 +19,20 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
+    // Validate payload against format and limits
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || 'Validation failed. Enter numeric values only.',
+        errors: validation.errors,
+      });
+    }
+
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
         message: 'Analysis Date is required to save Sieve Analysis.',
-      });
-    }
-
-    const rows = payload.rows || {};
-    const errors = [];
-
-    // Validate numeric values if entered
-    Object.entries(rows).forEach(([rowKey, paramValues]) => {
-      if (typeof paramValues !== 'object' || paramValues === null) return;
-      Object.entries(paramValues).forEach(([paramKey, val]) => {
-        if (val === '' || val === null || val === undefined) return;
-        const num = Number(val);
-        if (isNaN(num)) {
-          errors.push(`${rowKey.toUpperCase()} - ${paramKey.toUpperCase()} must be a valid number.`);
-        }
-      });
-    });
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed. Enter numeric values only.',
-        errors,
       });
     }
 

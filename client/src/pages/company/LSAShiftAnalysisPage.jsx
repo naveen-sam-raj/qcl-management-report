@@ -14,6 +14,11 @@ import {
   Flame,
   Layers,
 } from 'lucide-react';
+import {
+  getCellLimit,
+  validateCellValue,
+  SA_LSA_LIMITS,
+} from '../../services/analysisValidation';
 
 // ─── Shift Rows ───────────────────────────────────────────────────────────────
 const SHIFTS = [
@@ -60,7 +65,7 @@ const PARAMETERS = [
   { key: 'na2so4',    label: 'Na₂SO₄', rawLabel: 'Na2SO4', unit: '%', isPercent: true,  placeholder: '0.000', step: '0.001' },
   { key: 'vm',        label: 'VM',     rawLabel: 'VM',     unit: '%', isPercent: true,  placeholder: '0.00', step: '0.01' },
   { key: 'ir',        label: 'IR',     rawLabel: 'IR',     unit: '%', isPercent: true,  placeholder: '0.000', step: '0.001' },
-  { key: 'bd',        label: 'BD',     rawLabel: 'BD',     unit: 'kg/m³', isPercent: false, placeholder: '0.00', step: '1' },
+  { key: 'bd',        label: 'BD',     rawLabel: 'BD',     unit: 'g/L', isPercent: false, placeholder: '0.00', step: '1' },
   { key: 'turbidity', label: 'TURBIDITY SOLUTION', rawLabel: 'TURBIDITY', unit: 'NTU', isPercent: false, placeholder: '0.00', step: '1' },
 ];
 
@@ -212,21 +217,21 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-10">
+    <div className="space-y-4 animate-fadeIn">
 
       {/* ── Breadcrumb Header matching TK 203 theme ────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
-          {/* Left: Back + Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          {/* Left: Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
-              id="btn-lsa-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to SA Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
 
             <div className="min-w-0">
@@ -245,6 +250,47 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
           </div>
 
           {/* Right: Actions */}
+          {/* Right: Date Section + Action Buttons */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+              <label
+                htmlFor="lsa-shift-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="lsa-shift-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    if (typeof setDateError === 'function') setDateError(false);
+                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    typeof dateError !== 'undefined' && dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {typeof dateError !== 'undefined' && dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
+
           <div className="flex items-center gap-2 shrink-0">
             <button
               id="btn-lsa-reset"
@@ -270,6 +316,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
               )}
               <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
             </button>
+          </div>
           </div>
         </div>
       </div>
@@ -299,63 +346,56 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Card matching TK 203 theme ─────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="lsa-shift-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date :</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="lsa-shift-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  setDateError(false);
-                  setSaveSuccess(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
-                  dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" />
-                Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ── Analysis Table Card matching TK 203 theme ──────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
-        {/* Table header label bar with blue indicator */}
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-              LSA Shift Analysis Data Entry (I, II, III Shift & Composite)
-            </span>
+        {/* Table header with Integrated Date Selector */}
+        <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-4 rounded-full bg-blue-600" />
+              <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+                LSA Shift Analysis Data Entry (I, II, III Shift &amp; Composite)
+              </span>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="lsa-shift-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="lsa-shift-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    setDateError(false);
+                    setSaveSuccess(false);
+                  }}
+                  className={`pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
+                    dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 bg-white hover:border-slate-400'
+                  }`}
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {dateError && (
+                <span className="text-[11px] text-red-500 font-medium">Date required</span>
+              )}
+            </div>
           </div>
           <span className="text-[11px] font-bold text-slate-400 font-mono hidden sm:inline">
             Na₂CO₃ · NaCl · Fe · Na₂SO₄ · VM · IR · BD · Turbidity
@@ -415,32 +455,106 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                       const isInvalid = !!errors[fieldKey];
                       const errorMessage = errors[fieldKey];
 
-                      return (
-                        <td key={param.key} className="px-3 py-2.5 text-center align-middle">
-                          <input
-                            id={`lsa-input-${shift.key}-${param.key}`}
-                            type="text"
-                            inputMode="decimal"
-                            value={cellVal}
-                            onChange={(e) =>
-                              handleChange(shift.key, param.key, e.target.value)
-                            }
-                            placeholder={param.placeholder}
-                            className={`w-full max-w-[105px] mx-auto text-center text-sm font-mono font-bold px-3 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                              isInvalid
-                                ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
-                                : shift.inputFocus
-                            }`}
-                            aria-label={`${shift.label} ${param.label}`}
-                          />
+                      const limit = getCellLimit(plantId || 'sa', 'lsa', shift.key, param.key) || SA_LSA_LIMITS[param.key];
+                      const validation = validateCellValue(cellVal, limit);
+                      const isOutOfLimit = validation.isOutOfLimit;
+                      const isNormal = validation.isNormal;
+                      const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
 
-                          {/* Error Message if invalid format */}
-                          {isInvalid && (
-                            <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
-                              <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
-                              <span>{errorMessage}</span>
+                      return (
+                        <td key={param.key} className="px-3 py-2.5 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[58px]">
+                            <div className="relative w-full max-w-[105px]">
+                              <input
+                                id={`lsa-input-${shift.key}-${param.key}`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                onChange={(e) =>
+                                  handleChange(shift.key, param.key, e.target.value)
+                                }
+                                placeholder={param.placeholder}
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal} ${limit.unit} (Valid range: ${limit.formattedRange})`
+                                      : hasValue
+                                      ? `Normal: ${cellVal} ${limit.unit} (Valid range: ${limit.formattedRange})`
+                                      : `Valid range: ${limit.formattedRange}`
+                                    : ''
+                                }
+                                className={`w-full max-w-[105px] mx-auto text-center text-sm font-mono font-bold px-2.5 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                    : isInvalid
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                    : hasValue && isNormal && limit
+                                    ? 'border-2 border-emerald-400/80 bg-emerald-50/40 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
+                                    : shift.inputFocus
+                                }`}
+                                aria-label={`${shift.label} ${param.label}`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
                             </div>
-                          )}
+
+                            {/* Error / Validation Status & Range Display */}
+                            {isInvalid ? (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                <span>{errorMessage}</span>
+                              </div>
+                            ) : (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {/* Out of limit alert badge */}
+                                {hasValue && isOutOfLimit && (
+                                  <div
+                                    id={`lsa-limit-badge-${shift.key}-${param.key}`}
+                                    className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs mb-0.5"
+                                    title={`OUT OF LIMIT: ${cellVal} ${limit?.unit || ''} (Valid range: ${limit?.formattedRange})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </div>
+                                )}
+
+                                {/* Normal status badge */}
+                                {hasValue && isNormal && limit && (
+                                  <div
+                                    id={`lsa-status-${shift.key}-${param.key}`}
+                                    className="text-[9.5px] text-emerald-700 font-extrabold tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn mb-0.5"
+                                    title={`NORMAL: within ${limit.formattedRange}`}
+                                  >
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </div>
+                                )}
+
+                                {/* Range display near input field */}
+                                {limit && (
+                                  <span
+                                    id={`lsa-range-${shift.key}-${param.key}`}
+                                    className={`text-[9.5px] font-medium tracking-tight whitespace-nowrap ${
+                                      isOutOfLimit
+                                        ? 'text-rose-700 font-bold'
+                                        : hasValue && isNormal
+                                        ? 'text-emerald-700/80 font-semibold'
+                                        : 'text-slate-400'
+                                    }`}
+                                    title={`Valid range: ${limit.formattedRange}`}
+                                  >
+                                    {limit.formattedRange}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </td>
                       );
                     })}
@@ -454,7 +568,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
         {/* Table footer hint & bottom action */}
         <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
-            Values for <strong>LSA Shift Analysis</strong> (Na₂CO₃, NaCl, Fe, Na₂SO₄, VM, IR, BD, Turbidity). Numeric values only.
+            Values for <strong>LSA Shift Analysis</strong> (Frequency: <strong>Once in a Shift</strong> · Na₂CO₃, NaCl, Fe, Na₂SO₄, VM, IR, BD, Turbidity). Numeric values only. Boundary values are considered normal.
           </p>
           <div className="flex items-center gap-2">
             <button

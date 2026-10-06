@@ -4,6 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
+  getCellLimit,
+  validateCellValue,
+} from '../../services/analysisValidation';
+import {
   ArrowLeft,
   Calendar,
   Save,
@@ -15,13 +19,80 @@ import {
   Database,
 } from 'lucide-react';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── TK 205 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
+// Frequency: SHIFT TWICE
+// Unit: strictly Kgm/m³
+//
+// Parameters and official limits:
+// 1. FNH3: Target: 3.17 Kgm/m³, Tolerance: ±0.10 Kgm/m³, Allowed range: 3.07–3.27 Kgm/m³
+// 2. CNH3: Target: 1.98 Kgm/m³, Tolerance: ±0.10 Kgm/m³, Allowed range: 1.88–2.08 Kgm/m³
+// 3. TCL:  Target: 5.64 Kgm/m³, Tolerance: ±0.10 Kgm/m³, Allowed range: 5.54–5.74 Kgm/m³
+// 4. PCL:  Target: 3.66 Kgm/m³, Tolerance: ±0.10 Kgm/m³, Allowed range: 3.56–3.76 Kgm/m³
+
+export const TK205_LIMITS = {
+  fnh3: {
+    key: 'fnh3',
+    paramName: 'FNH3',
+    label: 'FNH₃',
+    target: 3.17,
+    tolerance: 0.10,
+    min: 3.07,
+    max: 3.27,
+    unit: 'Kgm/m³',
+    formattedRange: '3.07–3.27 Kgm/m³',
+    formattedTarget: '3.17 Kgm/m³',
+    formattedTolerance: '±0.10 Kgm/m³',
+    placeholder: '3.17',
+  },
+  cnh3: {
+    key: 'cnh3',
+    paramName: 'CNH3',
+    label: 'CNH₃',
+    target: 1.98,
+    tolerance: 0.10,
+    min: 1.88,
+    max: 2.08,
+    unit: 'Kgm/m³',
+    formattedRange: '1.88–2.08 Kgm/m³',
+    formattedTarget: '1.98 Kgm/m³',
+    formattedTolerance: '±0.10 Kgm/m³',
+    placeholder: '1.98',
+  },
+  tcl: {
+    key: 'tcl',
+    paramName: 'TCL',
+    label: 'TCl',
+    target: 5.64,
+    tolerance: 0.10,
+    min: 5.54,
+    max: 5.74,
+    unit: 'Kgm/m³',
+    formattedRange: '5.54–5.74 Kgm/m³',
+    formattedTarget: '5.64 Kgm/m³',
+    formattedTolerance: '±0.10 Kgm/m³',
+    placeholder: '5.64',
+  },
+  pcl: {
+    key: 'pcl',
+    paramName: 'PCL',
+    label: 'PCl',
+    target: 3.66,
+    tolerance: 0.10,
+    min: 3.56,
+    max: 3.76,
+    unit: 'Kgm/m³',
+    formattedRange: '3.56–3.76 Kgm/m³',
+    formattedTarget: '3.66 Kgm/m³',
+    formattedTolerance: '±0.10 Kgm/m³',
+    placeholder: '3.66',
+  },
+};
 
 const PARAMETERS = [
-  { key: 'fnh3', label: 'FNH₃', unit: '', colClass: 'min-w-[120px] border-r border-slate-800/50' },
-  { key: 'cnh3', label: 'CNH₃', unit: '', colClass: 'min-w-[120px] border-r border-slate-800/50' },
-  { key: 'tcl',  label: 'TCl',  unit: '', colClass: 'min-w-[120px] border-r border-slate-800/50' },
-  { key: 'pcl',  label: 'PCl',  unit: '', colClass: 'min-w-[120px]' },
+  { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', colClass: 'min-w-[130px] border-r border-slate-800/50' },
+  { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', colClass: 'min-w-[130px] border-r border-slate-800/50' },
+  { key: 'tcl',  label: 'TCl',  unit: 'Kgm/m³', colClass: 'min-w-[130px] border-r border-slate-800/50' },
+  { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', colClass: 'min-w-[130px]' },
 ];
 
 const TIME_SLOTS = [
@@ -102,7 +173,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
 
   const visibleRows = TIME_SLOTS;
 
-  // ── Real-time input change ──
+  // ── Real-time input change (Does NOT modify entered value) ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
 
@@ -111,7 +182,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
     }));
 
-    // Clear cell error if any
+    // Clear cell format error if any
     setErrors((prev) => {
       const next = { ...prev };
       delete next[`${rowKey}_${paramKey}`];
@@ -200,7 +271,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-14">
+    <div className="space-y-4 animate-fadeIn">
 
       {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
       <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
@@ -208,14 +279,13 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
           {/* Left: Back + Titles */}
           <div className="flex items-center gap-3">
             <button
-              id="btn-tk205-back"
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs shrink-0"
-              title="Back to ACL Plant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
             </button>
-
             <div className="min-w-0">
               {/* Breadcrumb */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
@@ -225,38 +295,82 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                 <Database className="w-3.5 h-3.5 text-blue-500" />
                 <span className="text-blue-600 font-semibold">TK 205</span>
               </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
-                TK 205
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5 flex items-center gap-2">
+                <span>TK 205</span>
+                <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
+                  SHIFT TWICE
+                </span>
               </h1>
             </div>
           </div>
 
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              id="btn-tk205-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Clear all fields"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
-
-            <button
-              id="btn-tk205-save"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
-              title="Save TK 205 data"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
+          {/* Right: Date Section + Action Buttons */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+              <label
+                htmlFor="tk205-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="tk205-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    if (typeof setDateError === 'function') setDateError(false);
+                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    typeof dateError !== 'undefined' && dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
               )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
+              {typeof dateError !== 'undefined' && dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                id="btn-tk205-reset"
+                onClick={handleReset}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
+                title="Clear all fields"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+
+              <button
+                id="btn-tk205-save"
+                onClick={handleSave}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
+                title="Save TK 205 data"
+              >
+                {saving ? (
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -286,69 +400,38 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       )}
 
-      {/* ── Date Selection Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <label
-              htmlFor="tk205-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date :</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="tk205-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  setDateError(false);
-                  setSaveSuccess(false);
-                }}
-                className={`pl-9 pr-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
-                  dateError
-                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              />
-            </div>
-            {date && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-md">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-700">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-            )}
-            {dateError && (
-              <p className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" />
-                Date is required to save the analysis.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
-        {/* Table header label */}
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        {/* Table Header Bar */}
+        <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-              TK 205 Analysis Data Entry (2-Hourly Intervals)
+            <Database className="w-4 h-4 text-blue-600" />
+            <h2 className="text-xs font-extrabold text-slate-800 tracking-tight uppercase">
+              TK 205 Measurements
+            </h2>
+            <span className="text-[10px] bg-blue-100 text-blue-800 font-extrabold px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
+              SHIFT TWICE
             </span>
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] text-slate-600 font-semibold flex-wrap">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Unit: Kgm/m³</span>
+            <span>•</span>
+            <span>FNH₃: 3.07–3.27</span>
+            <span>•</span>
+            <span>CNH₃: 1.88–2.08</span>
+            <span>•</span>
+            <span>TCl: 5.54–5.74</span>
+            <span>•</span>
+            <span>PCl: 3.56–3.76</span>
           </div>
         </div>
 
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             {/* Column headers */}
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
@@ -362,7 +445,12 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                       idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
                     } ${p.colClass}`}
                   >
-                    {p.label}
+                    <div className="font-extrabold text-blue-300 text-xs">
+                      {p.label}
+                    </div>
+                    <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
+                      Kgm/m³
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -384,39 +472,112 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                       </span>
                     </td>
 
-                    {/* Parameter input cells */}
+                    {/* Parameter input cells with Tolerance / Limit Validation */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
                       const cellVal = data[row.key][param.key];
-                      const isInvalid = !!errors[fieldKey];
-                      const errorMessage = errors[fieldKey];
+                      const isFormatError = !!errors[fieldKey];
+                      const formatErrorMessage = errors[fieldKey];
+
+                      const limit = getCellLimit(plantId, 'tk205', row.key, param.key) || TK205_LIMITS[param.key];
+                      const validation = validateCellValue(cellVal, limit);
+                      const isOutOfLimit = validation.isOutOfLimit;
+                      const isNormal = validation.isNormal;
+                      const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
 
                       return (
-                        <td key={param.key} className="px-4 py-2.5 text-center align-middle">
-                          <input
-                            id={`tk205-input-${row.key}-${param.key}`}
-                            type="text"
-                            inputMode="decimal"
-                            value={cellVal}
-                            placeholder="0.00"
-                            onChange={(e) =>
-                              handleChange(row.key, param.key, e.target.value)
-                            }
-                            className={`w-full max-w-[115px] mx-auto px-3 py-1.5 text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                              isInvalid
-                                ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
-                                : cellVal !== ''
-                                ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
-                                : styles.inputFocus
-                            }`}
-                            aria-label={`${param.label} at ${row.time}`}
-                            title={isInvalid ? errorMessage : `${param.label} at ${row.time}`}
-                          />
-                          {isInvalid && (
-                            <p className="text-[10px] text-red-600 font-bold mt-1 text-center animate-fadeIn">
-                              {errorMessage}
-                            </p>
-                          )}
+                        <td key={param.key} className="px-4 py-2.5 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[62px]">
+                            <div className="relative w-full max-w-[115px]">
+                              <input
+                                id={`tk205-input-${row.key}-${param.key}`}
+                                type="text"
+                                inputMode="decimal"
+                                value={cellVal}
+                                placeholder="0.00"
+                                onChange={(e) =>
+                                  handleChange(row.key, param.key, e.target.value)
+                                }
+                                title={
+                                  limit
+                                    ? isOutOfLimit
+                                      ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange}, Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                                      : hasValue
+                                      ? `NORMAL: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange} (Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                                    : ''
+                                }
+                                className={`w-full max-w-[115px] mx-auto text-center text-sm font-mono font-bold px-3 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+                                  isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                    : isFormatError
+                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                    : hasValue && isNormal
+                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
+                                    : styles.inputFocus
+                                }`}
+                                aria-label={`${param.label} at ${row.time}`}
+                              />
+                              {isOutOfLimit && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+                                  title="Out of limit"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Invalid numeric error message */}
+                            {isFormatError && (
+                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
+                                <span className="whitespace-nowrap">{formatErrorMessage}</span>
+                              </div>
+                            )}
+
+                            {/* Status and Allowed Range Display */}
+                            {!isFormatError && (
+                              <div className="mt-1 flex flex-col items-center justify-center">
+                                {hasValue && isNormal && (
+                                  <span
+                                    id={`tk205-status-${row.key}-${param.key}`}
+                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
+                                    title={`NORMAL: within ${limit?.formattedRange || ''}`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>NORMAL</span>
+                                  </span>
+                                )}
+
+                                {hasValue && isOutOfLimit && (
+                                  <span
+                                    id={`tk205-status-${row.key}-${param.key}`}
+                                    className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                    title={`OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit?.formattedRange || ''})`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <span>OUT OF LIMIT</span>
+                                  </span>
+                                )}
+
+                                {/* Allowed range displayed below each input field */}
+                                <span
+                                  id={`tk205-range-${row.key}-${param.key}`}
+                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                    isOutOfLimit
+                                      ? 'text-rose-700 font-bold'
+                                      : hasValue
+                                      ? 'text-slate-600 font-bold'
+                                      : 'text-slate-400'
+                                  }`}
+                                  title={`Target: ${limit?.formattedTarget || ''} (${limit?.formattedTolerance || ''})`}
+                                >
+                                  {limit?.formattedRange}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </td>
                       );
                     })}
@@ -432,7 +593,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>TK 205</strong> (FNH₃, CNH₃, TCl, PCl). Numeric values only. Leave blank if not applicable.
+              Values for <strong>TK 205</strong> (FNH₃, CNH₃, TCl, PCl). Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>. Enter numeric values only. Leave blank if not applicable.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">

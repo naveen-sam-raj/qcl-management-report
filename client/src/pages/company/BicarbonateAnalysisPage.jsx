@@ -5,6 +5,7 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
+  AlertCircle,
   Calendar,
   Save,
   RotateCcw,
@@ -192,17 +193,18 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn pb-12">
+    <div className="space-y-5 animate-fadeIn">
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
-            title="Back to SA Plant"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -253,52 +255,44 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
         </div>
       </div>
 
-      {/* ── DATE SELECTION BAR (Full-width row directly below header) ── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Calendar className="w-4 h-4 text-teal-600" />
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-            Analysis Date :
-          </span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
-          />
-          <span className="text-xs font-medium text-slate-500 hidden sm:inline">
-            ({formatDateDisplay(date)})
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDate(new Date().toISOString().split('T')[0])}
-            className="text-xs font-semibold text-slate-600 hover:text-teal-700 px-2.5 py-1 rounded-md border border-slate-200 hover:bg-slate-50 transition"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => setDate('2026-09-12')}
-            className="text-xs font-semibold text-teal-700 hover:text-teal-800 bg-teal-50 hover:bg-teal-100/70 px-2.5 py-1 rounded-md border border-teal-200/60 transition"
-          >
-            12/09/2026 Sample
-          </button>
-        </div>
-      </div>
-
       {/* ── MAIN ANALYSIS TABLE (Clean TK 203 Dark Header Style) ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner */}
-        <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
-            <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
-              BI CARBONATE NaCl/Na₂CO₃ Readings Table
-            </span>
-            <span className="text-xs text-slate-400 font-medium">
-              ({readings.length} time slots)
-            </span>
+        {/* Table top title banner with Integrated Date Selector */}
+        <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
+                BI CARBONATE NaCl/Na₂CO₃ Readings
+              </span>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="bicarbonate-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="bicarbonate-date-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 bg-white hover:border-slate-400"
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+            </div>
           </div>
 
           <button

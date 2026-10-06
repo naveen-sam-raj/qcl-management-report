@@ -2,9 +2,23 @@ const { Company, Plant, User, Report, ActivityLog } = require('../models');
 
 const seedDatabase = async () => {
   try {
+    // Only ensure root Super Admin exists so admin can log in and manage
+    const existingSuperAdmin = await User.findOne({ role: 'super_admin' });
+    if (!existingSuperAdmin) {
+      await User.create({
+        name: 'Super Admin',
+        email: 'superadmin@spicglobal.com',
+        username: 'superadmin',
+        password: 'Admin@123',
+        mobile: '+91 98400 11001',
+        role: 'super_admin',
+        status: 'active',
+      });
+      console.log('[Seed] ✅ Root Super Admin "superadmin" initialized.');
+    }
+
     const existingCompanies = await Company.countDocuments();
     if (existingCompanies > 0) {
-      console.log('[Seed] Database already initialized.');
       return;
     }
 
@@ -47,7 +61,7 @@ const seedDatabase = async () => {
       primaryColor: '#0D9488',
     });
 
-    // 2. Create the 4 Plant Units for TFL (ready for users to be assigned to them)
+    // 2. Create the 4 Plant Units for TFL
     await Plant.create({
       company: tfl._id,
       name: 'ACL Plant',
@@ -140,7 +154,7 @@ const seedDatabase = async () => {
       },
     });
 
-    // 3. ONLY Super Admin is created (all other admins and users are created by the user!)
+    // 3. Super Admin
     await User.create({
       name: 'Super Admin',
       email: 'superadmin@spicglobal.com',
@@ -151,18 +165,18 @@ const seedDatabase = async () => {
       status: 'active',
     });
 
-    // 4. Clean Initial System Log
+    // 4. Initial System Log
     await ActivityLog.create({
       userName: 'Super Admin',
       userEmail: 'superadmin@spicglobal.com',
       role: 'super_admin',
       companyName: 'Corporate HQ',
       action: 'SYSTEM_INITIALIZATION',
-      details: 'Clean system initialized. Ready for Super Admin to create company admins and users.',
+      details: 'Clean system initialized with standard company credentials.',
       status: 'SUCCESS',
     });
 
-    console.log('[Seed] Clean system successfully initialized with Super Admin only.');
+    console.log('[Seed] Clean system successfully initialized with all company credentials.');
   } catch (err) {
     console.error('[Seed] Error initializing system:', err);
   }

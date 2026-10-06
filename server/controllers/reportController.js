@@ -112,7 +112,7 @@ const exportReportsExcel = async (req, res) => {
       .sort({ date: -1 });
 
     const companyName = req.user.company?.name || 'All Companies';
-    const excelBuffer = generateReportsExcel(reports, {
+    const excelBuffer = await generateReportsExcel(reports, {
       companyName,
       exportedBy: `${req.user.name} (${req.user.role})`,
     });

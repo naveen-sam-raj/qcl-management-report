@@ -1,4 +1,5 @@
 const { Plant } = require('../models');
+const { sendPlantUpdateNotification } = require('../services/plantNotificationService');
 
 // Generate 24-hour realistic historical telemetry data for Recharts
 const generateTelemetryHistory = (plant) => {
@@ -122,10 +123,68 @@ const updatePlantParameters = async (req, res) => {
 
     const updated = await Plant.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
 
+    // ── Automatic Plant-Wise Notification to Assigned Plant User ──
+    const changedFields = [];
+    if (status) changedFields.push(`Status: ${status}`);
+    if (efficiency !== undefined) changedFields.push(`Efficiency: ${efficiency}%`);
+    if (dailyProduction !== undefined) changedFields.push(`Daily Production: ${dailyProduction} TPD`);
+    if (parameters) {
+      changedFields.push(
+        `Operating Parameters: ${Object.entries(parameters).map(([k, v]) => `${k}=${v}`).join(', ')}`
+      );
+    }
+
+    let notifResult = null;
+    try {
+      notifResult = await sendPlantUpdateNotification({
+        plant: updated,
+        whatUpdated: 'Plant Operational Parameters & Telemetry',
+        updatedBy: req.user?.name || 'Plant Administrator',
+        dateTime: new Date(),
+        details: changedFields.length > 0 ? changedFields.join('\n') : 'Parameters updated by admin.',
+      });
+    } catch (notifErr) {
+      console.warn('[PlantController] Automatic notification failed:', notifErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Plant telemetry parameters updated.',
       plant: updated,
+      notification: notifResult,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Send plant update notification to assigned user
+// @route   POST /api/plants/:id/notify-update
+// @access  Private (Super Admin, Company Admin)
+const notifyPlantUpdate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { whatUpdated, details, dateTime } = req.body;
+
+    const plant = await Plant.findById(id);
+    if (!plant) {
+      return res.status(404).json({ success: false, message: 'Plant not found.' });
+    }
+
+    const result = await sendPlantUpdateNotification({
+      plant,
+      whatUpdated: whatUpdated || 'Plant Data Updated',
+      updatedBy: req.user?.name || 'Plant Administrator',
+      dateTime: dateTime || new Date(),
+      details: details || '',
+    });
+
+    return res.status(200).json({
+      success: result.success,
+      message: result.success
+        ? `Notification emailed to ${result.recipient}`
+        : result.error || 'Failed to send notification',
+      data: result,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -136,4 +195,5 @@ module.exports = {
   getPlants,
   getPlantById,
   updatePlantParameters,
+  notifyPlantUpdate,
 };

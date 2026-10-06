@@ -104,13 +104,13 @@ const SuperAdminLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 selection:bg-purple-600 selection:text-white relative overflow-hidden">
+    <div className="h-screen max-h-screen bg-slate-900 flex flex-col justify-center py-4 px-4 sm:px-6 lg:px-8 selection:bg-purple-600 selection:text-white relative overflow-hidden">
       {/* Background ambient lighting */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Back to Home Link */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md mb-4">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md mb-2">
         <Link
           to="/"
           className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition"
@@ -122,22 +122,22 @@ const SuperAdminLogin = () => {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         {/* Shield Icon Badge */}
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-xl shadow-purple-600/30 mb-4 border border-purple-400/30">
-          <ShieldCheck className="w-8 h-8" />
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-xl shadow-purple-600/30 mb-2 border border-purple-400/30">
+          <ShieldCheck className="w-6 h-6" />
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
           Super Admin Console
         </h2>
-        <p className="mt-2 text-xs sm:text-sm text-slate-400">
+        <p className="mt-1 text-xs text-slate-400">
           Central Corporate Governance • SPIC • TFL • Greenstar
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-800/80 backdrop-blur-xl py-8 px-6 sm:px-10 shadow-2xl rounded-2xl border border-slate-700/80">
+      <div className="mt-4 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-slate-800/80 backdrop-blur-xl py-6 px-6 sm:px-8 shadow-2xl rounded-2xl border border-slate-700/80">
           {errorMsg && (
-            <div className="mb-6 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
               {errorMsg}
             </div>
           )}

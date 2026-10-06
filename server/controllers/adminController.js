@@ -4,6 +4,7 @@ const {
   getISTEndOfDay,
   getLicenseStatus,
 } = require('../utils/licenseUtils');
+const { sendUserWelcomeEmail } = require('../services/emailService');
 
 // @desc    Create a new Company Admin
 // @route   POST /api/admin/company-admins
@@ -168,6 +169,22 @@ const createCompanyAdmin = async (req, res) => {
     const adminObj = safeAdmin.toObject ? safeAdmin.toObject() : { ...safeAdmin };
     adminObj.usersCount = 0;
     adminObj.licenseStatus = getLicenseStatus(startIST, endIST);
+
+    // Send welcome email with login credentials to the user's personal email
+    try {
+      sendUserWelcomeEmail({
+        to: newAdmin.email,
+        name: newAdmin.name,
+        username: newAdmin.username,
+        password: password,
+        role: 'company_admin',
+        companyName: company.name,
+      }).catch((emailErr) => {
+        console.warn('[Admin Controller] Email delivery error:', emailErr.message);
+      });
+    } catch (emailErr) {
+      console.warn('[Admin Controller] Email dispatch warning:', emailErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -383,6 +400,8 @@ const resetCompanyAdminPassword = async (req, res) => {
     }
 
     admin.password = newPassword;
+    admin.passwordChangedAt = new Date();
+    admin.tokenVersion = (admin.tokenVersion || 0) + 1;
     await admin.save();
 
     // Record audit log

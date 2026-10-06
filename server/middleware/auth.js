@@ -51,6 +51,29 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // ── Check if password was changed after token was issued ──
+    if (user.role !== 'super_admin') {
+      const tokenVersionMismatch = (
+        user.tokenVersion !== undefined &&
+        decoded.tokenVersion !== undefined &&
+        user.tokenVersion !== decoded.tokenVersion
+      );
+      const passwordChangedAfterToken = (
+        user.passwordChangedAt &&
+        decoded.iat &&
+        (decoded.iat < Math.floor(new Date(user.passwordChangedAt).getTime() / 1000))
+      );
+
+      if (tokenVersionMismatch || passwordChangedAfterToken) {
+        return res.status(401).json({
+          success: false,
+          code: 'PASSWORD_CHANGED',
+          passwordChanged: true,
+          message: 'Your password has been changed. Please contact admin.',
+        });
+      }
+    }
+
     // ── Requirement 14: Centralized License Expiry Check for Protected APIs ──
     // Super Admin is NEVER blocked by license restriction
     if (user.role === 'company_admin') {

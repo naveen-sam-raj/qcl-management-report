@@ -95,9 +95,9 @@ const CompanyLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 selection:bg-blue-600 selection:text-white">
+    <div className="h-screen max-h-screen overflow-hidden bg-slate-50 flex flex-col justify-center py-4 px-4 sm:px-6 lg:px-8 selection:bg-blue-600 selection:text-white">
       {/* Back button */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md mb-4">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md mb-2">
         <Link
           to="/"
           className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 transition"
@@ -231,17 +231,6 @@ const CompanyLogin = () => {
               <span>{loading ? 'Authenticating...' : 'Sign In to Portal'}</span>
             </button>
           </form>
-
-          {/* Prompt Switch to Super Admin */}
-          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
-            <span className="text-xs text-slate-500">Need corporate-wide management? </span>
-            <Link
-              to="/login/super-admin"
-              className="text-xs font-bold text-slate-900 hover:text-blue-600 transition"
-            >
-              Super Admin Sign In →
-            </Link>
-          </div>
         </div>
       </div>
 

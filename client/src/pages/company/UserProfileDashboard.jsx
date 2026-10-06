@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { MOCK_USERS, MOCK_PLANTS, MOCK_REPORTS, MOCK_LOGS } from '../../services/mockData';
+import { MOCK_PLANTS, MOCK_REPORTS, MOCK_LOGS } from '../../services/mockData';
+import api from '../../services/api';
 import {
   ArrowLeft,
   User,
@@ -45,22 +46,20 @@ const UserProfileDashboard = () => {
   useEffect(() => {
     const loadProfile = async () => {
       setLoading(true);
-      await new Promise((r) => setTimeout(r, 400));
+      try {
+        const res = await api.get(`/users/${userId}`);
+        if (!res.data?.success || !res.data.user) {
+          navigate(-1);
+          return;
+        }
+        const safeUser = res.data.user;
+        setProfileUser(safeUser);
 
-      // Find user by id
-      const found = MOCK_USERS.find((u) => u._id === userId);
-      if (!found) {
-        navigate(-1);
-        return;
-      }
-      const { password: _, ...safeUser } = found;
-      setProfileUser(safeUser);
-
-      // Find their assigned plant
-      const plant = MOCK_PLANTS.find(
-        (p) => p._id === (safeUser.plant?._id || safeUser.plant)
-      );
-      setAssignedPlant(plant || null);
+        // Find their assigned plant
+        const plant = safeUser.plant || MOCK_PLANTS.find(
+          (p) => p._id === (safeUser.plant?._id || safeUser.plant)
+        );
+        setAssignedPlant(plant || null);
 
       if (plant) {
         // Generate mock telemetry for this user's plant
@@ -84,8 +83,11 @@ const UserProfileDashboard = () => {
           (!plantCode || r.plant?.code === plantCode)
       );
       setUserReports(reports);
-
-      setLoading(false);
+      } catch (err) {
+        navigate(-1);
+      } finally {
+        setLoading(false);
+      }
     };
 
     loadProfile();

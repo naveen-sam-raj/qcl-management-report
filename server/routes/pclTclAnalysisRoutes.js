@@ -25,10 +25,22 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { timeRows = {}, plus18Row = {} } = payload;
+    const { shiftRows = {}, timeRows = {}, plus18Row = {} } = payload;
     const errors = [];
 
-    // Validate time row values
+    // Validate shift row values (I Shift, II Shift, III Shift across Streams A - H)
+    Object.entries(shiftRows).forEach(([shiftKey, streamValues]) => {
+      if (typeof streamValues !== 'object' || streamValues === null) return;
+      Object.entries(streamValues).forEach(([streamKey, val]) => {
+        if (val === '' || val === null || val === undefined) return;
+        const num = Number(val);
+        if (isNaN(num)) {
+          errors.push(`Shift '${shiftKey}', Stream '${streamKey.toUpperCase()}' must be a valid number.`);
+        }
+      });
+    });
+
+    // Validate time row values (backward compatibility)
     Object.entries(timeRows).forEach(([timeKey, streamValues]) => {
       if (typeof streamValues !== 'object' || streamValues === null) return;
       Object.entries(streamValues).forEach(([streamKey, val]) => {
@@ -40,7 +52,7 @@ router.post('/', async (req, res) => {
       });
     });
 
-    // Validate +18 % row values
+    // Validate +18 % row values (backward compatibility)
     Object.entries(plus18Row).forEach(([streamKey, val]) => {
       if (val === '' || val === null || val === undefined) return;
       const num = Number(val);
@@ -62,7 +74,8 @@ router.post('/', async (req, res) => {
       id: `pcl_tcl_${Date.now()}`,
       date: payload.date,
       plant: payload.plant || 'ACL',
-      analysisType: payload.analysisType || 'PCL/TCL & +18 Analysis',
+      analysisType: payload.analysisType || 'PCL/TCL Analysis',
+      shiftRows,
       timeRows,
       plus18Row,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',

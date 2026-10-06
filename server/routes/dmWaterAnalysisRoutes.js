@@ -69,13 +69,16 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const numericFields = ['ph', 'cond', 'p', 'm', 'th', 'sio2'];
+    const numericFields = ['ph', 'cond', 'alk', 'p', 'm', 'th', 'sio2'];
     const errors = [];
 
     readings.forEach((reading, index) => {
       numericFields.forEach((field) => {
         const val = reading[field];
         if (val !== '' && val !== null && val !== undefined) {
+          if (field === 'th' && (String(val).toLowerCase() === 'nil' || String(val).toLowerCase() === '0')) {
+            return;
+          }
           if (isNaN(Number(val))) {
             errors.push(`Row ${index + 1} (${reading.unit || 'Sample'}) -> ${field.toUpperCase()} must be a valid number.`);
           }

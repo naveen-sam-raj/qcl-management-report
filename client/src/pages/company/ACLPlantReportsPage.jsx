@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import api from '../../services/api';
 import {
   ArrowLeft,
   Calendar,
@@ -129,67 +130,88 @@ const formatDateDisplay = (isoDate) => {
   }
 };
 
-// Generates realistic sample data for Pure Salt Analysis based on user filters
-const generateReportData = (filters) => {
+// Maps actual saved laboratory records to report rows, strictly using accurate entered values.
+// Any parameter or shift cell with no input is formatted as '*' (no random/dummy values).
+const mapActualReportData = (savedRecords = [], filters) => {
   const { dateFrom, dateTo, shift, section, subModule } = filters;
-  const start = new Date(dateFrom || new Date().toISOString().slice(0, 10));
-  const end = new Date(dateTo || dateFrom || new Date().toISOString().slice(0, 10));
-
   const records = [];
-  const shiftList = [
-    { key: 'rawSalt', label: 'RAW SALT', section: 'Salt Dissolution & Brine Prep', baseNacl: 98.2, ca: 0.18, mg: 0.09, so4: 0.35, ir: 0.12, h2o: 1.06 },
-    { key: 'shift1', label: 'I SHIFT', section: 'Centrifuge & Fluid Bed Dryer', baseNacl: 99.4, ca: 0.04, mg: 0.02, so4: 0.14, ir: 0.03, h2o: 0.37 },
-    { key: 'shift2', label: 'II SHIFT', section: 'Centrifuge & Fluid Bed Dryer', baseNacl: 99.5, ca: 0.03, mg: 0.02, so4: 0.12, ir: 0.03, h2o: 0.30 },
-    { key: 'shift3', label: 'III SHIFT', section: 'Centrifuge & Fluid Bed Dryer', baseNacl: 99.4, ca: 0.04, mg: 0.02, so4: 0.13, ir: 0.04, h2o: 0.37 },
-    { key: 'composition', label: 'COMPOSITION', section: 'Bagging & Warehouse', baseNacl: 99.6, ca: 0.02, mg: 0.01, so4: 0.10, ir: 0.02, h2o: 0.25 },
+
+  const shiftDefs = [
+    { key: 'rawSalt', label: 'RAW SALT', section: 'Salt Dissolution & Brine Prep' },
+    { key: 'shift1', label: 'I SHIFT', section: 'Centrifuge & Fluid Bed Dryer' },
+    { key: 'shift2', label: 'II SHIFT', section: 'Centrifuge & Fluid Bed Dryer' },
+    { key: 'shift3', label: 'III SHIFT', section: 'Centrifuge & Fluid Bed Dryer' },
+    { key: 'composition', label: 'COMPOSITION', section: 'Bagging & Warehouse' },
   ];
 
-  // Loop through days from start to end (max 31 days safe guard)
-  let cur = new Date(start);
-  let daysCount = 0;
-  while (cur <= end && daysCount < 31) {
-    const curDateStr = cur.toISOString().slice(0, 10);
+  const formatCell = (v) => {
+    if (
+      v === null ||
+      v === undefined ||
+      String(v).trim() === '' ||
+      String(v).trim() === '—' ||
+      String(v).trim() === '-' ||
+      String(v).trim() === 'null' ||
+      String(v).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(v);
+    return isNaN(n) ? v : n.toFixed(2);
+  };
 
-    shiftList.forEach((s) => {
-      // Shift filter
-      if (shift !== 'all') {
-        if (shift === 'shift1' && s.key !== 'shift1') return;
-        if (shift === 'shift2' && s.key !== 'shift2') return;
-        if (shift === 'shift3' && s.key !== 'shift3') return;
-        if (shift === 'raw_salt' && s.key !== 'rawSalt') return;
-        if (shift === 'composition' && s.key !== 'composition') return;
-      }
+  if (Array.isArray(savedRecords) && savedRecords.length > 0) {
+    savedRecords.forEach((rec) => {
+      const recDate = rec.date || '';
+      shiftDefs.forEach((s) => {
+        // Shift filter
+        if (shift !== 'all') {
+          if (shift === 'shift1' && s.key !== 'shift1') return;
+          if (shift === 'shift2' && s.key !== 'shift2') return;
+          if (shift === 'shift3' && s.key !== 'shift3') return;
+          if (shift === 'raw_salt' && s.key !== 'rawSalt') return;
+          if (shift === 'composition' && s.key !== 'composition') return;
+        }
 
-      // SubModule filter
-      if (subModule === 'raw' && s.key !== 'rawSalt') return;
-      if (subModule === 'composition' && s.key !== 'composition') return;
-      if (subModule === 'shifts' && (s.key === 'rawSalt' || s.key === 'composition')) return;
+        // SubModule filter
+        if (subModule === 'raw' && s.key !== 'rawSalt') return;
+        if (subModule === 'composition' && s.key !== 'composition') return;
+        if (subModule === 'shifts' && (s.key === 'rawSalt' || s.key === 'composition')) return;
 
-      // Section filter
-      if (section !== 'all') {
-        if (section === 'salt_dissolution' && s.key !== 'rawSalt') return;
-        if (section === 'centrifuge' && !['shift1', 'shift2', 'shift3'].includes(s.key)) return;
-        if (section === 'bagging' && s.key !== 'composition') return;
-      }
+        // Section filter
+        if (section !== 'all') {
+          if (section === 'salt_dissolution' && s.key !== 'rawSalt') return;
+          if (section === 'centrifuge' && !['shift1', 'shift2', 'shift3'].includes(s.key)) return;
+          if (section === 'bagging' && s.key !== 'composition') return;
+        }
 
-      records.push({
-        id: `${curDateStr}-${s.key}`,
-        date: curDateStr,
-        shift: s.label,
-        shiftKey: s.key,
-        section: s.section,
-        nacl: (s.baseNacl + (Math.sin(daysCount) * 0.15)).toFixed(2),
-        ca: (s.ca + (Math.cos(daysCount) * 0.01)).toFixed(2),
-        mg: (s.mg + (Math.sin(daysCount) * 0.005)).toFixed(2),
-        so4: (s.so4 + (Math.cos(daysCount) * 0.02)).toFixed(2),
-        ir: (s.ir + (Math.sin(daysCount) * 0.01)).toFixed(2),
-        h2o: (s.h2o + (Math.cos(daysCount) * 0.03)).toFixed(2),
-        status: s.key === 'rawSalt' ? 'Feed Standard' : 'In Spec (Pass)',
+        const rowData = rec.rows?.[s.key] || {};
+        const nacl = formatCell(rowData.nacl);
+        const ca = formatCell(rowData.ca);
+        const mg = formatCell(rowData.mg);
+        const so4 = formatCell(rowData.so4);
+        const ir = formatCell(rowData.ir);
+        const h2o = formatCell(rowData.h2o);
+
+        // Check if row has any actual input
+        const hasInputs = [nacl, ca, mg, so4, ir, h2o].some((val) => val !== '*');
+
+        records.push({
+          id: `${recDate}-${s.key}`,
+          date: recDate,
+          shift: s.label,
+          shiftKey: s.key,
+          section: s.section,
+          nacl,
+          ca,
+          mg,
+          so4,
+          ir,
+          h2o,
+          status: s.key === 'rawSalt' ? 'Feed Standard' : hasInputs ? 'Recorded' : 'Pending Input (*)',
+        });
       });
     });
-
-    cur.setDate(cur.getDate() + 1);
-    daysCount++;
   }
 
   return records;
@@ -244,7 +266,7 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
     showToast('Filters reset to default.', 'info');
   };
 
-  // Generate Report & Excel
+  // Generate Report & Excel with 100% accurate plant inputs (No random values)
   const handleGenerateReport = async () => {
     if (!dateFrom || !dateTo) {
       showToast('Please select both Date From and Date To.', 'error');
@@ -264,15 +286,12 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
     setGenerating(true);
 
     try {
-      // Simulate database query or API call
-      await new Promise((res) => setTimeout(res, 600));
-
       const filterPayload = {
         plant: 'ACL Plant',
         reportType,
         reportTypeName: currentModule.name,
         subModule,
-        subModuleName: currentModule.subModules.find((s) => s.id === subModule)?.name || 'All',
+        subModuleName: currentModule.subModules?.find((s) => s.id === subModule)?.name || 'All',
         dateFrom,
         dateTo,
         shift,
@@ -281,7 +300,18 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         sectionName: SECTION_OPTIONS.find((s) => s.value === section)?.label || 'All',
       };
 
-      const data = generateReportData(filterPayload);
+      // Fetch accurate real-time records from MongoDB backend
+      let savedRecords = [];
+      try {
+        const res = await api.get(`/api/pure-salt-analysis?startDate=${dateFrom}&endDate=${dateTo}`);
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          savedRecords = res.data.data;
+        }
+      } catch (apiErr) {
+        console.warn('[ACLReports] API fetch warning, checking fallback:', apiErr.message);
+      }
+
+      const data = mapActualReportData(savedRecords, filterPayload);
 
       setGeneratedReport({
         filters: filterPayload,
@@ -290,7 +320,11 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         totalCount: data.length,
       });
 
-      showToast(`Generated ${data.length} records successfully.`, 'success');
+      if (data.length > 0) {
+        showToast(`Loaded ${data.length} accurate records from database.`, 'success');
+      } else {
+        showToast('No saved plant inputs found for selected date range.', 'info');
+      }
     } catch (err) {
       console.error('[ACLReports] Generation failed:', err);
       showToast('Error generating report: ' + err.message, 'error');
@@ -299,7 +333,7 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
     }
   };
 
-  // Export generated report to Excel
+  // Export generated report to Excel - unentered boxes strictly output '*'
   const handleExportExcel = async () => {
     if (!generatedReport || generatedReport.records.length === 0) {
       showToast('No report data available to export. Please generate a report first.', 'error');
@@ -324,13 +358,28 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         ['Generated By:', user?.name || 'Administrator'],
         ['Generated At:', new Date().toLocaleString('en-IN')],
         ['Total Records:', generatedReport.totalCount],
+        ['Note:', 'Boxes marked with * indicate no input was entered for that parameter/shift.'],
         [''],
       ];
 
-      // ── Table Data ──
+      // ── Table Data (strictly '*' for any empty/missing input) ──
       const tableHeaders = currentModule.columns.map((c) => c.label);
       const tableData = generatedReport.records.map((r) =>
-        currentModule.columns.map((c) => r[c.key] ?? '')
+        currentModule.columns.map((c) => {
+          const val = r[c.key];
+          if (
+            val === null ||
+            val === undefined ||
+            String(val).trim() === '' ||
+            String(val).trim() === '—' ||
+            String(val).trim() === '-' ||
+            String(val).trim() === 'null' ||
+            String(val).trim() === 'undefined'
+          ) {
+            return '*';
+          }
+          return val;
+        })
       );
 
       const wsContent = [...titleRows, tableHeaders, ...tableData];
@@ -346,7 +395,7 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         ['Plant Unit', 'ACL (Ammonium Chloride) Plant'],
         ['Company', user?.company?.name || 'Tuticorin Alkali Chemicals & Fertilizers Ltd.'],
         ['Export Format', 'Microsoft Excel Spreadsheet (.xlsx)'],
-        ['Verification Hash', Math.random().toString(36).substring(2, 12).toUpperCase()],
+        ['Verification Code', `QC-${(generatedReport.filters.dateFrom || '').replace(/-/g, '')}-${(generatedReport.filters.dateTo || '').replace(/-/g, '')}-ACL`],
       ];
       const wsMeta = XLSX.utils.aoa_to_sheet(metaRows);
       wsMeta['!cols'] = [{ wch: 20 }, { wch: 50 }];
@@ -363,7 +412,7 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-16">
+    <div className="space-y-6 animate-fadeIn">
 
       {/* ── Top Header Bar ──────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-4">

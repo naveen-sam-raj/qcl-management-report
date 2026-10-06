@@ -8,10 +8,11 @@ export default defineConfig({
   // Store Vite's dep cache in system temp — avoids OneDrive EPERM file-lock errors on Windows
   cacheDir: path.join(os.tmpdir(), 'spic-vite-cache'),
   server: {
+    host: true,
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
       },
     },
