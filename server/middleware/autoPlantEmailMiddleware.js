@@ -100,24 +100,30 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     return next();
   }
 
-  // Intercept the response JSON method to trigger workflow in the background
+  // Capture the response body
   const originalJson = res.json;
+  let responseBody;
   res.json = function (data) {
+    responseBody = data;
+    // Provide immediate feedback to the frontend before sending
     if (res.statusCode >= 200 && res.statusCode < 300 && data && data.success !== false) {
-      // Fire and forget: execute email workflow in background
-      dispatchAutoNotification(req, url, data).catch((err) => {
-        console.warn('[AutoPlantEmail] Exception in background workflow:', err.message);
-      });
-      
-      // Provide immediate feedback to the frontend
       data.emailSent = false;
       data.emailStatus = 'processing';
       if (data.message && typeof data.message === 'string' && !data.message.includes('Email')) {
         data.message += ' (Email notification is processing in background).';
       }
     }
-    return originalJson.call(this, data);
+    return originalJson.apply(this, arguments);
   };
+
+  // Trigger the email workflow ONLY AFTER the HTTP response has completely finished and closed
+  res.on('finish', () => {
+    if (res.statusCode >= 200 && res.statusCode < 300 && responseBody && responseBody.success !== false) {
+      dispatchAutoNotification(req, url, responseBody).catch((err) => {
+        console.warn('[AutoPlantEmail] Exception in background workflow:', err.message);
+      });
+    }
+  });
 
   next();
 };

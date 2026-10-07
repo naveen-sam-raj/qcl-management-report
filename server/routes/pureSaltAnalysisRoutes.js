@@ -91,7 +91,9 @@ router.post('/', protect, async (req, res) => {
 
     // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-    const result = await executeSaveAndEmailWorkflow({
+    
+    // Fire and forget - do not await!
+    executeSaveAndEmailWorkflow({
       plantIdentifier: plantTarget,
       analysisType: 'Pure Salt Analysis',
       unit: '',
@@ -103,9 +105,14 @@ router.post('/', protect, async (req, res) => {
       company: req.user?.company?._id || req.user?.company || null,
       explicitRecord: savedRecord,
       rawBody: payload,
-    });
+    }).catch(err => console.warn('[AutoPlantEmail] Exception in background workflow:', err.message));
 
-    return res.status(201).json(result);
+    return res.status(201).json({
+      success: true,
+      message: 'Analysis data saved successfully',
+      data: savedRecord,
+      emailStatus: 'processing'
+    });
   } catch (error) {
     console.error('[PureSaltAnalysis API] Error saving data:', error);
     return res.status(500).json({
