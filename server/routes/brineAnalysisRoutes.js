@@ -125,7 +125,7 @@ router.post('/', async (req, res) => {
  * @route   GET /api/brine-analysis
  * @access  Private
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
     let filtered = [...brineRecords];

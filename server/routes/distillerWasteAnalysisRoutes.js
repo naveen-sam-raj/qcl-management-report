@@ -162,7 +162,7 @@ router.post('/', async (req, res) => {
  * @route   GET /api/distiller-waste-analysis
  * @access  Private
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { date, plant } = req.query;
 

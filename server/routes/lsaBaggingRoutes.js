@@ -153,7 +153,7 @@ router.post('/', async (req, res) => {
  * @route   GET /api/lsa-bagging-analysis
  * @access  Private
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { date } = req.query;
     if (date) {

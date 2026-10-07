@@ -113,7 +113,7 @@ router.post('/', async (req, res) => {
  * @route   GET /api/pure-salt-sieve-analysis
  * @access  Private
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
     let filtered = [...sieveRecords];
