@@ -34,6 +34,9 @@ import {
   CheckSquare,
   Square,
   AlertCircle,
+  UserCheck,
+  FlaskConical,
+  Pill,
 } from 'lucide-react';
 
 const PLANT_OPTIONS = [
@@ -43,21 +46,44 @@ const PLANT_OPTIONS = [
   { id: 'CO2', label: 'CO2 Plant', icon: Gauge },
 ];
 
-// Custom top label for bars
+// Custom top label for bars (display numeric value above each bar)
 const renderCustomBarLabel = (props) => {
   const { x, y, width, value } = props;
   if (value === undefined || value === null) return null;
   return (
     <text
       x={x + width / 2}
-      y={y - 6}
-      fill="#1e293b"
+      y={y - 8}
+      fill="#0f172a"
       textAnchor="middle"
-      fontSize={11}
-      fontWeight={700}
+      fontSize={12}
+      fontWeight={800}
     >
       {value}
     </text>
+  );
+};
+
+// Custom X-axis label with title and clean truncation
+const renderCustomXAxisTick = (props) => {
+  const { x, y, payload } = props;
+  const label = payload?.value || '';
+  const displayLabel = label.length > 12 ? `${label.substring(0, 11)}…` : label;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={0}
+        dy={14}
+        textAnchor="middle"
+        fill="#334155"
+        fontSize={11}
+        fontWeight={600}
+      >
+        <title>{label}</title>
+        {displayLabel}
+      </text>
+    </g>
   );
 };
 
@@ -173,9 +199,9 @@ const TFLOverallGraphPage = () => {
 
   const hasRealData = analyticsData?.hasData && analyticsData?.totalRecords > 0;
   const summary = analyticsData?.summary;
-  const plantWiseAnalysisCount = analyticsData?.plantWiseAnalysisCount || [];
-  const top5QualityTests = analyticsData?.top5QualityTests || [];
-  const top5Products = analyticsData?.top5Products || [];
+  const top5Consultants = analyticsData?.top5Consultants || [];
+  const top5Tests = analyticsData?.top5Tests || analyticsData?.top5QualityTests || [];
+  const top5Medicines = analyticsData?.top5Medicines || analyticsData?.top5Products || [];
   const plantComplianceList = analyticsData?.plantComplianceList || [];
 
   return (
@@ -461,59 +487,57 @@ const TFLOverallGraphPage = () => {
             </div>
           </div>
 
-          {/* 3 PRIMARY BAR CHARTS IN 1 HORIZONTAL ROW */}
+          {/* 3 PRIMARY BAR CHARTS IN 1 HORIZONTAL ROW (Top 5 Consultants | Top 5 Tests | Top 5 Medicines) */}
           <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-200/80 bg-slate-50/60 flex items-center justify-between">
+            <div className="px-5 py-3.5 border-b border-slate-200/80 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />
                 <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
-                  TFL Combined Analytics Overview ({fromDate} to {toDate})
+                  TFL Overall Analytics ({fromDate} to {toDate})
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                   Live MongoDB Data
                 </span>
               </div>
-              <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
-                Top Categories
+              <span className="text-xs font-semibold text-slate-500">
+                Top 5 Metrics Breakdown
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200/80">
-              {/* ── Chart A: Plant-wise Analysis Count ── */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200/80 bg-white">
+              {/* ── Chart 1: Top 5 Consultants ── */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0 bg-white">
                 <div className="mb-2">
                   <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Plant-wise Analysis Count
-                    </h3>
-                    <span className="text-[10px] font-semibold text-slate-400">Selected Plants</span>
+                    <div className="flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-blue-600" />
+                      <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Top 5 Consultants
+                      </h3>
+                    </div>
+                    <span className="text-[10px] font-semibold text-slate-400">
+                      {top5Consultants.length > 0 ? `Showing ${top5Consultants.length}` : 'No data'}
+                    </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Actual logged records per plant
+                    Highest logged records by consultant/operator
                   </p>
                 </div>
 
-                <div className="w-full h-[240px] sm:h-[260px] pt-2">
-                  {plantWiseAnalysisCount.length > 0 ? (
+                <div className="w-full h-[250px] sm:h-[270px] pt-2">
+                  {top5Consultants.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={plantWiseAnalysisCount}
-                        margin={{ top: 22, right: 12, left: -18, bottom: 20 }}
+                        data={top5Consultants}
+                        margin={{ top: 25, right: 12, left: -18, bottom: 20 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis
                           dataKey="name"
-                          tick={{ fontSize: 10, fill: '#475569', fontWeight: 500 }}
+                          tick={renderCustomXAxisTick}
                           tickLine={{ stroke: '#cbd5e1' }}
                           axisLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
-                          label={{
-                            value: 'Plants',
-                            position: 'insideBottom',
-                            offset: -12,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            fill: '#64748b',
-                          }}
+                          interval={0}
                         />
                         <YAxis
                           tick={{ fontSize: 10, fill: '#64748b' }}
@@ -536,62 +560,59 @@ const TFLOverallGraphPage = () => {
                             position="top"
                             content={renderCustomBarLabel}
                           />
-                          {plantWiseAnalysisCount.map((entry, index) => (
-                            <Cell key={`cell-plant-${index}`} fill="#2563eb" />
+                          {top5Consultants.map((entry, index) => (
+                            <Cell key={`cell-consultant-${index}`} fill="#2563eb" />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                      No plant records in date range
+                    <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400">
+                      <p className="font-semibold text-slate-500">No data available</p>
+                      <p className="text-[11px] text-slate-400 mt-1">No consultant records found</p>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Categories with data: <strong className="text-slate-700">{plantWiseAnalysisCount.length}</strong></span>
-                  <span>Total: <strong className="text-slate-800">{summary?.totalRecords}</strong></span>
+                  <span>Count: <strong className="text-slate-700">{top5Consultants.length}</strong></span>
+                  <span>Top: <strong className="text-slate-800">{top5Consultants[0]?.name || '—'}</strong></span>
                 </div>
               </div>
 
-              {/* ── Chart B: Top 5 Quality Tests ── */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0">
+              {/* ── Chart 2: Top 5 Tests ── */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0 bg-white">
                 <div className="mb-2">
                   <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Top Quality Tests
-                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <FlaskConical className="w-4 h-4 text-cyan-600" />
+                      <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Top 5 Tests
+                      </h3>
+                    </div>
                     <span className="text-[10px] font-semibold text-slate-400">
-                      {top5QualityTests.length > 0 ? `Showing ${top5QualityTests.length}` : 'No data'}
+                      {top5Tests.length > 0 ? `Showing ${top5Tests.length}` : 'No data'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Real parameters tested in database
+                    Most frequently performed quality tests
                   </p>
                 </div>
 
-                <div className="w-full h-[240px] sm:h-[260px] pt-2">
-                  {top5QualityTests.length > 0 ? (
+                <div className="w-full h-[250px] sm:h-[270px] pt-2">
+                  {top5Tests.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={top5QualityTests}
-                        margin={{ top: 22, right: 12, left: -18, bottom: 20 }}
+                        data={top5Tests}
+                        margin={{ top: 25, right: 12, left: -18, bottom: 20 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis
                           dataKey="name"
-                          tick={{ fontSize: 10, fill: '#475569', fontWeight: 500 }}
+                          tick={renderCustomXAxisTick}
                           tickLine={{ stroke: '#cbd5e1' }}
                           axisLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
-                          label={{
-                            value: 'Tests',
-                            position: 'insideBottom',
-                            offset: -12,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            fill: '#64748b',
-                          }}
+                          interval={0}
                         />
                         <YAxis
                           tick={{ fontSize: 10, fill: '#64748b' }}
@@ -614,62 +635,59 @@ const TFLOverallGraphPage = () => {
                             position="top"
                             content={renderCustomBarLabel}
                           />
-                          {top5QualityTests.map((entry, index) => (
+                          {top5Tests.map((entry, index) => (
                             <Cell key={`cell-test-${index}`} fill="#0891b2" />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                      No quality test readings recorded
+                    <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400">
+                      <p className="font-semibold text-slate-500">No data available</p>
+                      <p className="text-[11px] text-slate-400 mt-1">No test records found</p>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Categories with data: <strong className="text-slate-700">{top5QualityTests.length}</strong></span>
-                  <span>Top: <strong className="text-slate-800">{top5QualityTests[0]?.name || '—'}</strong></span>
+                  <span>Count: <strong className="text-slate-700">{top5Tests.length}</strong></span>
+                  <span>Top: <strong className="text-slate-800">{top5Tests[0]?.name || '—'}</strong></span>
                 </div>
               </div>
 
-              {/* ── Chart C: Top 5 Products / Chemicals ── */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0 md:col-span-2 lg:col-span-1">
+              {/* ── Chart 3: Top 5 Medicines ── */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between min-w-0 bg-white">
                 <div className="mb-2">
                   <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Top Products / Chemicals
-                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <Pill className="w-4 h-4 text-indigo-600" />
+                      <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Top 5 Medicines
+                      </h3>
+                    </div>
                     <span className="text-[10px] font-semibold text-slate-400">
-                      {top5Products.length > 0 ? `Showing ${top5Products.length}` : 'No data'}
+                      {top5Medicines.length > 0 ? `Showing ${top5Medicines.length}` : 'No data'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Outputs tracked in database records
+                    Most recorded medicines & products in database
                   </p>
                 </div>
 
-                <div className="w-full h-[240px] sm:h-[260px] pt-2">
-                  {top5Products.length > 0 ? (
+                <div className="w-full h-[250px] sm:h-[270px] pt-2">
+                  {top5Medicines.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={top5Products}
-                        margin={{ top: 22, right: 12, left: -18, bottom: 20 }}
+                        data={top5Medicines}
+                        margin={{ top: 25, right: 12, left: -18, bottom: 20 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis
                           dataKey="name"
-                          tick={{ fontSize: 10, fill: '#475569', fontWeight: 500 }}
+                          tick={renderCustomXAxisTick}
                           tickLine={{ stroke: '#cbd5e1' }}
                           axisLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
-                          label={{
-                            value: 'Chemicals / Products',
-                            position: 'insideBottom',
-                            offset: -12,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            fill: '#64748b',
-                          }}
+                          interval={0}
                         />
                         <YAxis
                           tick={{ fontSize: 10, fill: '#64748b' }}
@@ -678,7 +696,7 @@ const TFLOverallGraphPage = () => {
                           allowDecimals={false}
                         />
                         <Tooltip
-                          content={<CustomBarTooltip unit="batches" />}
+                          content={<CustomBarTooltip unit="entries" />}
                           cursor={{ fill: 'rgba(241, 245, 249, 0.6)' }}
                         />
                         <Bar
@@ -692,22 +710,23 @@ const TFLOverallGraphPage = () => {
                             position="top"
                             content={renderCustomBarLabel}
                           />
-                          {top5Products.map((entry, index) => (
-                            <Cell key={`cell-prod-${index}`} fill="#6366f1" />
+                          {top5Medicines.map((entry, index) => (
+                            <Cell key={`cell-med-${index}`} fill="#6366f1" />
                           ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                      No product analysis logged
+                    <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400">
+                      <p className="font-semibold text-slate-500">No data available</p>
+                      <p className="text-[11px] text-slate-400 mt-1">No medicine/product records found</p>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Categories with data: <strong className="text-slate-700">{top5Products.length}</strong></span>
-                  <span>Top: <strong className="text-slate-800">{top5Products[0]?.name || '—'}</strong></span>
+                  <span>Count: <strong className="text-slate-700">{top5Medicines.length}</strong></span>
+                  <span>Top: <strong className="text-slate-800">{top5Medicines[0]?.name || '—'}</strong></span>
                 </div>
               </div>
             </div>

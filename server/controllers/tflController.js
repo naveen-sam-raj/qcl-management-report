@@ -135,6 +135,8 @@ const fetchRealTFLRecords = async ({ fromDate, toDate, selectedPlants, userCompa
             testsLogged: evalResult.testsLogged,
             data: doc.data,
             submittedBy: doc.submittedBy || 'Plant Operator',
+            consultant: doc.consultant || doc.data?.consultant || doc.submittedBy || 'Plant Operator',
+            medicine: doc.medicine || doc.data?.medicine || doc.product || doc.data?.product || (doc.analysisType ? doc.analysisType.replace(/ Analysis$/i, '').trim() : 'Plant Product'),
             sourceCollection: 'plantanalysisrecords',
           });
         }
@@ -176,6 +178,8 @@ const fetchRealTFLRecords = async ({ fromDate, toDate, selectedPlants, userCompa
                 testsLogged: evalResult.testsLogged,
                 data: doc.rows,
                 submittedBy: doc.submittedBy || 'Plant Operator',
+                consultant: doc.consultant || doc.submittedBy || 'Plant Operator',
+                medicine: doc.medicine || 'Pure Salt',
                 sourceCollection: 'puresaltanalyses',
               });
             }
@@ -241,6 +245,9 @@ const getTFLOverallAnalytics = async (req, res) => {
           outOfLimitRecords: 0,
           overallCompliance: null, // N/A when 0 records
         },
+        top5Consultants: [],
+        top5Tests: [],
+        top5Medicines: [],
         plantWiseAnalysisCount: [],
         top5QualityTests: [],
         top5Products: [],
@@ -254,8 +261,9 @@ const getTFLOverallAnalytics = async (req, res) => {
     const plantCounts = { ACL: 0, SA: 0, OFFSET: 0, CO2: 0 };
     const plantNormals = { ACL: 0, SA: 0, OFFSET: 0, CO2: 0 };
     const plantOutOfLimits = { ACL: 0, SA: 0, OFFSET: 0, CO2: 0 };
+    const consultantsMap = {};
     const qualityTestsMap = {};
-    const productsMap = {};
+    const medicinesMap = {};
 
     records.forEach((rec) => {
       const code = rec.plantCode;
@@ -269,19 +277,54 @@ const getTFLOverallAnalytics = async (req, res) => {
         plantOutOfLimits[code] = (plantOutOfLimits[code] || 0) + 1;
       }
 
-      // Count tests that were actually logged in the database record
+      // 1. Consultant: derived from actual record submittedBy or consultant field
+      const consultantName = (rec.consultant || rec.data?.consultant || rec.submittedBy || 'Plant Operator').trim();
+      if (consultantName) {
+        consultantsMap[consultantName] = (consultantsMap[consultantName] || 0) + 1;
+      }
+
+      // 2. Tests: actual parameters tested in database
       (rec.testsLogged || []).forEach((testKey) => {
-        qualityTestsMap[testKey] = (qualityTestsMap[testKey] || 0) + 1;
+        if (testKey) {
+          qualityTestsMap[testKey] = (qualityTestsMap[testKey] || 0) + 1;
+        }
       });
 
-      // Product / chemical derived strictly from the analysis record
-      const prodName = rec.analysisType.replace(/ Analysis$/i, '').trim();
-      if (prodName) {
-        productsMap[prodName] = (productsMap[prodName] || 0) + 1;
+      // 3. Medicines / Products: actual recorded product/medicine
+      const medName = (rec.medicine || rec.data?.medicine || rec.product || rec.data?.product || rec.analysisType.replace(/ Analysis$/i, '')).trim();
+      if (medName) {
+        medicinesMap[medName] = (medicinesMap[medName] || 0) + 1;
       }
     });
 
     const overallCompliance = Number(((normalRecords / totalRecords) * 100).toFixed(1));
+
+    // Top 5 Consultants (Highest -> Lowest)
+    const top5Consultants = Object.entries(consultantsMap)
+      .map(([name, count]) => ({
+        name,
+        value: count,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    // Top 5 Tests (Highest -> Lowest)
+    const top5Tests = Object.entries(qualityTestsMap)
+      .map(([name, count]) => ({
+        name,
+        value: count,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    // Top 5 Medicines (Highest -> Lowest)
+    const top5Medicines = Object.entries(medicinesMap)
+      .map(([name, count]) => ({
+        name,
+        value: count,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
 
     // Chart A: Plant-wise Analysis Count (only for selected plants with real data)
     const plantWiseAnalysisCount = selectedPlants
@@ -294,25 +337,6 @@ const getTFLOverallAnalytics = async (req, res) => {
         };
       })
       .filter((p) => p.value > 0);
-
-    // Chart B: Top 5 Quality Tests (strictly derived from database records)
-    const top5QualityTests = Object.entries(qualityTestsMap)
-      .map(([name, count]) => ({
-        name,
-        value: count,
-      }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-
-    // Chart C: Top 5 Products / Chemicals (strictly derived from database records)
-    const top5Products = Object.entries(productsMap)
-      .map(([name, count]) => ({
-        name,
-        value: count,
-        unit: 'batches',
-      }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
 
     // Chart D & Breakdown Table: Plant-wise Compliance
     const plantComplianceList = selectedPlants
@@ -346,9 +370,12 @@ const getTFLOverallAnalytics = async (req, res) => {
         outOfLimitRecords,
         overallCompliance,
       },
+      top5Consultants,
+      top5Tests,
+      top5Medicines,
       plantWiseAnalysisCount,
-      top5QualityTests,
-      top5Products,
+      top5QualityTests: top5Tests,
+      top5Products: top5Medicines,
       plantComplianceList,
     });
   } catch (error) {
@@ -484,41 +511,57 @@ const getTFLPlantAnalytics = async (req, res) => {
         plantCode: canonicalCode,
         plantName: canonicalPlantName(canonicalCode),
         message: 'No data available for the selected date range.',
+        top5Consultants: [],
+        top5Tests: [],
+        top5Medicines: [],
         charts: {
-          options: [],
+          consultants: [],
           tests: [],
+          medicines: [],
+          top5Consultants: [],
+          top5Tests: [],
+          top5Medicines: [],
+          options: [],
           products: [],
         },
       });
     }
 
-    const optionsMap = {};
+    const consultantsMap = {};
     const testsMap = {};
-    const productsMap = {};
+    const medicinesMap = {};
 
     records.forEach((rec) => {
-      optionsMap[rec.analysisType] = (optionsMap[rec.analysisType] || 0) + 1;
+      // Consultant
+      const consultantName = (rec.consultant || rec.data?.consultant || rec.submittedBy || 'Plant Operator').trim();
+      if (consultantName) {
+        consultantsMap[consultantName] = (consultantsMap[consultantName] || 0) + 1;
+      }
+      // Tests
       (rec.testsLogged || []).forEach((t) => {
-        testsMap[t] = (testsMap[t] || 0) + 1;
+        if (t) {
+          testsMap[t] = (testsMap[t] || 0) + 1;
+        }
       });
-      const prodName = rec.analysisType.replace(/ Analysis$/i, '').trim();
-      if (prodName) {
-        productsMap[prodName] = (productsMap[prodName] || 0) + 1;
+      // Medicines / Products
+      const medName = (rec.medicine || rec.data?.medicine || rec.product || rec.data?.product || rec.analysisType.replace(/ Analysis$/i, '')).trim();
+      if (medName) {
+        medicinesMap[medName] = (medicinesMap[medName] || 0) + 1;
       }
     });
 
-    const topOptions = Object.entries(optionsMap)
+    const top5Consultants = Object.entries(consultantsMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    const topTests = Object.entries(testsMap)
+    const top5Tests = Object.entries(testsMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    const topProducts = Object.entries(productsMap)
-      .map(([name, value]) => ({ name, value, unit: 'batches' }))
+    const top5Medicines = Object.entries(medicinesMap)
+      .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
@@ -528,10 +571,18 @@ const getTFLPlantAnalytics = async (req, res) => {
       totalRecords,
       plantCode: canonicalCode,
       plantName: canonicalPlantName(canonicalCode),
+      top5Consultants,
+      top5Tests,
+      top5Medicines,
       charts: {
-        options: topOptions,
-        tests: topTests,
-        products: topProducts,
+        consultants: top5Consultants,
+        tests: top5Tests,
+        medicines: top5Medicines,
+        top5Consultants,
+        top5Tests,
+        top5Medicines,
+        options: top5Consultants,
+        products: top5Medicines,
       },
     });
   } catch (error) {
