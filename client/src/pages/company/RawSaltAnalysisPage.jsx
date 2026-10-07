@@ -77,8 +77,12 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
              // Leave default
           } else if (record.parameters) {
             setFormData(record.parameters);
-          } else if (record.data && !Array.isArray(record.data)) {
+          } else if (record.data && !Array.isArray(record.data) && Object.keys(record.data).length > 0) {
             setFormData(record.data);
+          } else if (Object.keys(record).length > 0 && !record.data && !record.parameters && !record.rows && !record.readings && !record.shifts) {
+            setFormData(record);
+          } else if (record.data && record.data.parameters) {
+            setFormData(record.data.parameters);
           } else {
             // Leave default
           }

@@ -109,6 +109,10 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
             setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
             setReadings(record.data);
+          } else if (Array.isArray(record) && record.length > 0) {
+            setReadings(record);
+          } else if (record.data && record.data.readings) {
+            setReadings(record.data.readings);
           } else {
             // Leave default
           }

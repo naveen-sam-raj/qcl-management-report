@@ -78,6 +78,10 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
             setParameters(record.parameters);
           } else if (record.data && Array.isArray(record.data)) {
             setParameters(record.data);
+          } else if (Array.isArray(record) && record.length > 0) {
+            setParameters(record);
+          } else if (record.data && record.data.parameters) {
+            setParameters(record.data.parameters);
           } else {
             // Leave default
           }

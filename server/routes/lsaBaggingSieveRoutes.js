@@ -158,8 +158,9 @@ router.get('/', async (req, res) => {
       try {
         if (PlantAnalysisRecord) {
           const query = { date };
-          
-          
+          if (req.user && req.user.company) {
+            query.company = req.user.company;
+          }
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
           if (doc && doc.data) {
             return res.status(200).json({

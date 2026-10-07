@@ -159,6 +159,9 @@ router.get('/', async (req, res) => {
         if (PlantAnalysisRecord) {
           const query = { date };
           query.analysisType = 'PCL/TCL Analysis';
+          if (req.user && req.user.company) {
+            query.company = req.user.company;
+          }
           
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
           if (doc && doc.data) {

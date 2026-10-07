@@ -186,6 +186,10 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
             setData(record.rows);
           } else if (record.data && !Array.isArray(record.data)) {
             setData(record.data);
+          } else if (Array.isArray(record) && record.length > 0) {
+            setData(record);
+          } else if (record.data && record.data.rows) {
+            setData(record.data.rows);
           } else {
             // Leave default
           }
