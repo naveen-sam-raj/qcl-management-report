@@ -48,8 +48,7 @@ router.post('/', protect, async (req, res) => {
 
     // ── Dynamic Plant-Wise User Resolution from MongoDB ──
     const plantTarget = payload.plant || 'ACL Plant';
-    const { primaryEmail: assignedEmail, assignedUser } = await getPlantAssignedUser(plantTarget, { analysisType: 'Pure Salt Analysis' });
-    const recipientEmail = assignedEmail || payload.email || payload.recipientEmail || '';
+    const { primaryEmail: assignedEmail } = await getPlantAssignedUser(plantTarget, { analysisType: 'Pure Salt Analysis' });
 
     const newAnalysisData = {
       date: payload.date,
@@ -60,9 +59,9 @@ router.post('/', protect, async (req, res) => {
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id || null,
       company: req.user?.company?._id || req.user?.company || null,
-      emailRecipient: recipientEmail,
-      emailStatus: 'Pending',
-      reportFileName,
+      emailRecipient: assignedEmail || '',
+      emailStatus: 'pending',
+      savedAt: new Date(),
     };
 
     // ── 3. Save to MongoDB Atlas First (MANDATORY BEFORE EMAIL) ───────────
@@ -70,9 +69,6 @@ router.post('/', protect, async (req, res) => {
     try {
       if (PureSaltAnalysis && typeof PureSaltAnalysis.create === 'function') {
         savedRecord = await PureSaltAnalysis.create(newAnalysisData);
-        if (savedRecord && typeof savedRecord.toObject === 'function') {
-          savedRecord = savedRecord.toObject();
-        }
       } else {
         savedRecord = {
           _id: 'psa_' + Date.now(),
@@ -91,119 +87,25 @@ router.post('/', protect, async (req, res) => {
     }
 
     // Cache in memory array as well
-    analysisRecords.unshift(savedRecord);
+    analysisRecords.unshift(savedRecord.toObject ? savedRecord.toObject() : savedRecord);
 
-    // ── 4. Generate Real Excel (.xlsx) Report via ExcelJS ─────────────────
-    let excelResult = null;
-    try {
-      excelResult = await generatePureSaltAnalysisExcel({
-        ...savedRecord,
-        date: payload.date,
-        plant: payload.plant || 'ACL Plant',
-        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-        submittedAt: new Date().toLocaleString('en-IN'),
-        rows: payload.rows,
-      });
-    } catch (excelErr) {
-      console.error('[PureSaltAnalysis] Excel generation error:', excelErr);
-      // MongoDB record is preserved!
-      return res.status(200).json({
-        success: true,
-        emailSent: false,
-        message: 'Data saved, but report generation failed.',
-        data: savedRecord,
-        excelError: excelErr.message,
-      });
-    }
+    // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: plantTarget,
+      analysisType: 'Pure Salt Analysis',
+      unit: '',
+      shift: payload.shift || 'All Shifts (I, II, III)',
+      date: payload.date,
+      data: payload.rows,
+      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+      submittedById: req.user?._id || null,
+      company: req.user?.company?._id || req.user?.company || null,
+      explicitRecord: savedRecord,
+      rawBody: payload,
+    });
 
-    // ── 5. Send Email with .xlsx Attachment via Nodemailer ─────────────────
-    let emailSent = false;
-    let emailErrorMessage = null;
-
-    if (recipientEmail && excelResult?.buffer) {
-      try {
-        const emailSendResult = await sendPureSaltAnalysisReport({
-          recipientEmail,
-          date: payload.date,
-          plant: payload.plant || 'ACL Plant',
-          shift: payload.shift || 'All Shifts (I, II, III)',
-          reportType: 'Pure Salt Analysis',
-          excelBuffer: excelResult.buffer,
-          excelFileName: excelResult.filename,
-        });
-
-        if (emailSendResult.success) {
-          emailSent = true;
-          // Update email status in MongoDB
-          if (savedRecord._id && PureSaltAnalysis.findByIdAndUpdate) {
-            await PureSaltAnalysis.findByIdAndUpdate(savedRecord._id, { emailStatus: 'Sent' });
-            savedRecord.emailStatus = 'Sent';
-          }
-        } else {
-          emailErrorMessage = emailSendResult.error || 'Nodemailer dispatch failed';
-          if (savedRecord._id && PureSaltAnalysis.findByIdAndUpdate) {
-            await PureSaltAnalysis.findByIdAndUpdate(savedRecord._id, { emailStatus: 'Failed' });
-            savedRecord.emailStatus = 'Failed';
-          }
-        }
-      } catch (mailErr) {
-        console.error('[PureSaltAnalysis] Email sending exception:', mailErr);
-        emailErrorMessage = mailErr.message;
-        if (savedRecord._id && PureSaltAnalysis.findByIdAndUpdate) {
-          await PureSaltAnalysis.findByIdAndUpdate(savedRecord._id, { emailStatus: 'Failed' });
-          savedRecord.emailStatus = 'Failed';
-        }
-      }
-    }
-
-    // ── 6. Log Activity ──────────────────────────────────────────────────
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'PURE_SALT_ANALYSIS_SAVED',
-          user: req.user?._id || null,
-          userName: req.user?.name || 'Plant Operator',
-          userEmail: req.user?.email || '',
-          role: req.user?.role || 'company_admin',
-          company: req.user?.company?._id || req.user?.company || null,
-          details: `Pure Salt Analysis saved for date: ${payload.date}. Excel report generated: ${excelResult.filename}. Email recipient: ${recipientEmail || 'N/A'}. Emailed: ${emailSent}.`,
-          timestamp: new Date(),
-        });
-      }
-    } catch (logErr) {
-      console.warn('[ActivityLog] Could not log activity:', logErr.message);
-    }
-
-    // ── 7. Return Result to Frontend ─────────────────────────────────────
-    if (emailSent) {
-      return res.status(201).json({
-        success: true,
-        emailSent: true,
-        message: 'Saved & Emailed Successfully ✓',
-        data: savedRecord,
-        excel: {
-          fileName: excelResult.filename,
-          base64: excelResult.base64,
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          sizeBytes: excelResult.buffer.length,
-        },
-      });
-    } else {
-      // MongoDB save succeeded and Excel generated, but email sending failed
-      return res.status(201).json({
-        success: true,
-        emailSent: false,
-        message: 'Data saved and Excel generated, but email sending failed.',
-        data: savedRecord,
-        emailError: emailErrorMessage,
-        excel: {
-          fileName: excelResult.filename,
-          base64: excelResult.base64,
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          sizeBytes: excelResult.buffer.length,
-        },
-      });
-    }
+    return res.status(201).json(result);
   } catch (error) {
     console.error('[PureSaltAnalysis API] Error saving data:', error);
     return res.status(500).json({
@@ -222,7 +124,6 @@ router.post('/', protect, async (req, res) => {
 router.post('/:id/retry-email', protect, async (req, res) => {
   try {
     const { id } = req.params;
-    const { recipientEmail } = req.body;
 
     let record = null;
     if (PureSaltAnalysis && typeof PureSaltAnalysis.findById === 'function') {
@@ -236,41 +137,21 @@ router.post('/:id/retry-email', protect, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Analysis record not found.' });
     }
 
-    const excelResult = await generatePureSaltAnalysisExcel(record);
-    const plantTarget = record.plant || 'ACL Plant';
-    const { primaryEmail: assignedEmail } = await getPlantAssignedUser(plantTarget, { analysisType: 'Pure Salt Analysis' });
-    const targetEmail = assignedEmail || recipientEmail || record.emailRecipient;
-
-    const emailSendResult = await sendPureSaltAnalysisReport({
-      recipientEmail: targetEmail,
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: record.plant || 'ACL Plant',
+      analysisType: record.analysisType || 'Pure Salt Analysis',
+      unit: record.unit || '',
+      shift: record.shift || 'All Shifts',
       date: record.date,
-      plant: record.plant,
-      shift: record.shift,
-      reportType: 'Pure Salt Analysis',
-      excelBuffer: excelResult.buffer,
-      excelFileName: excelResult.filename,
+      data: record.rows || record.data,
+      submittedBy: record.submittedBy || req.user?.name || 'Plant Operator',
+      submittedById: req.user?._id || record.submittedById,
+      company: req.user?.company?._id || req.user?.company || record.company,
+      explicitRecord: record,
     });
 
-    if (emailSendResult.success) {
-      if (PureSaltAnalysis.findByIdAndUpdate) {
-        await PureSaltAnalysis.findByIdAndUpdate(id, {
-          emailStatus: 'Sent',
-          emailRecipient: targetEmail,
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        emailSent: true,
-        message: 'Saved & Emailed Successfully ✓',
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        emailSent: false,
-        message: 'Data saved and Excel generated, but email sending failed.',
-        error: emailSendResult.error,
-      });
-    }
+    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
   } catch (error) {
     console.error('[Retry Email] Error:', error);
     return res.status(500).json({ success: false, message: error.message });

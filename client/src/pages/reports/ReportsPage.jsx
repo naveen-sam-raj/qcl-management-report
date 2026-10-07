@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
-import { MOCK_REPORTS, MOCK_PLANTS } from '../../services/mockData';
 import api from '../../services/api';
 import {
   FileSpreadsheet,
@@ -54,64 +53,48 @@ const ReportsPage = () => {
   const fetchReports = async () => {
     try {
       setLoading(true);
-      await new Promise((r) => setTimeout(r, 300));
-      const companyCode = user?.company?.code;
-      let filtered = companyCode
-        ? MOCK_REPORTS.filter((r) => r.company.code === companyCode)
-        : MOCK_REPORTS;
+      const params = new URLSearchParams();
+      if (plantId && plantId !== 'all') params.append('plantId', plantId);
+      if (reportType && reportType !== 'all' && reportType !== 'All Types') params.append('reportType', reportType);
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      if (searchTerm) params.append('search', searchTerm);
 
-      // Strict Plant Scoping for Normal Plant Operators
-      if (user?.role === 'user') {
-        const assignedCode = (
-          user?.plant?.code ||
-          user?.plant?.name ||
-          user?.plant?._id ||
-          'ACL'
-        ).toUpperCase();
-
-        filtered = filtered.filter((r) => {
-          const rPlant = (r.plant?.code || r.plant?.name || '').toUpperCase();
-          if (assignedCode.includes('ACL')) return rPlant.includes('ACL');
-          if (assignedCode.includes('SA')) return rPlant.includes('SA');
-          if (assignedCode.includes('OFFSET') || assignedCode.includes('OFFSITE')) {
-            return rPlant.includes('OFFSET') || rPlant.includes('OFFSITE');
-          }
-          if (assignedCode.includes('CO2') || assignedCode.includes('C02')) {
-            return rPlant.includes('CO2') || rPlant.includes('C02');
-          }
-          return true;
-        });
+      const res = await api.get(`/api/reports?${params.toString()}`);
+      if (res.data?.success && Array.isArray(res.data.reports)) {
+        setReports(res.data.reports);
       } else {
-        if (plantId !== 'all') filtered = filtered.filter((r) => r.plant?._id === plantId || r.plant?.code === plantId);
+        setReports([]);
       }
-
-      if (reportType !== 'all' && reportType !== 'All Types') filtered = filtered.filter((r) => r.reportType === reportType);
-      if (searchTerm) filtered = filtered.filter((r) => r.title.toLowerCase().includes(searchTerm.toLowerCase()));
-      setReports(filtered);
     } catch (err) {
-      showToast('Error loading reports', 'error');
+      console.warn('[ReportsPage] Fetch error:', err.message);
+      setReports([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Load filter metadata from backend
     const loadMetadata = async () => {
-      const companyCode = user?.company?.code;
-      const companyPlants = companyCode
-        ? MOCK_PLANTS.filter((p) => p.company.code === companyCode)
-        : MOCK_PLANTS;
-      setPlants(companyPlants);
-
       try {
-        const usersRes = await api.get('/users');
-        if (usersRes.data?.success && Array.isArray(usersRes.data.users)) {
-          setUsersList(usersRes.data.users.filter((u) => u.role === 'user'));
+        const [plantsRes, usersRes] = await Promise.allSettled([
+          api.get('/api/plants'),
+          api.get('/api/users'),
+        ]);
+
+        if (plantsRes.status === 'fulfilled' && plantsRes.value.data?.success && Array.isArray(plantsRes.value.data.plants)) {
+          setPlants(plantsRes.value.data.plants);
+        } else {
+          setPlants([]);
+        }
+
+        if (usersRes.status === 'fulfilled' && usersRes.value.data?.success && Array.isArray(usersRes.value.data.users)) {
+          setUsersList(usersRes.value.data.users.filter((u) => u.role === 'user'));
         } else {
           setUsersList([]);
         }
       } catch (err) {
+        setPlants([]);
         setUsersList([]);
       }
     };
@@ -376,8 +359,8 @@ const ReportsPage = () => {
 
       {/* Reports Table Preview */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-left text-xs min-w-[850px] xl:min-w-full">
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
               <tr>
                 <th className="px-6 py-3.5">Report Title</th>

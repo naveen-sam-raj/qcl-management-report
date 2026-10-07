@@ -479,8 +479,8 @@ const UserManagementPage = () => {
 
       {/* Users Table */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-left text-xs min-w-[750px] xl:min-w-full">
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
               <tr>
                 <th className="px-6 py-3.5">User <span className="normal-case font-normal text-blue-500 text-[10px]">(click to view dashboard)</span></th>

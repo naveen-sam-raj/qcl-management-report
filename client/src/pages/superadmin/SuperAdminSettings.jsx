@@ -46,12 +46,22 @@ const SuperAdminSettings = () => {
   // ── Verify session on mount ──
   useEffect(() => {
     const token = localStorage.getItem('spic_auth_token');
+
+    // No token at all → redirect to login
     if (!token) {
       navigate('/login/super-admin', { replace: true });
       return;
     }
 
-    // Fetch current Super Admin profile
+    // If user is already in auth context as super_admin, populate from context
+    // and try to verify with backend. If backend is unreachable or returns 401
+    // (e.g. mock fallback token), gracefully keep the user on the page.
+    const userRole = (user?.role || '').toLowerCase();
+    if (userRole === 'super_admin' && user?.username) {
+      setCurrentUsername(user.username);
+    }
+
+    // Fetch current Super Admin profile from backend to sync latest username
     api
       .get('/super-admin/me')
       .then((res) => {
@@ -59,12 +69,19 @@ const SuperAdminSettings = () => {
           setCurrentUsername(res.data.user.username);
         }
       })
-      .catch(() => {
-        // If token expired or invalid, redirect to login
-        logout();
-        navigate('/login/super-admin', { replace: true });
+      .catch((err) => {
+        const status = err?.response?.status;
+        // 401 from /super-admin/me means the backend couldn't verify the token
+        // (e.g. mock fallback / no DB record). If user is in auth context, stay on page.
+        // Only redirect if truly unauthenticated in context too.
+        if (status === 401 && userRole !== 'super_admin') {
+          navigate('/login/super-admin', { replace: true });
+        }
+        // Otherwise: keep the user on the settings page — they are still authenticated
+        // in the React context (token is set, user object exists).
       });
-  }, [navigate, logout]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Password Validation Rules ──
   const passwordChecks = {

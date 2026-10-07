@@ -288,7 +288,7 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
       )}
 
       {/* ── Main Data Entry Section (Exact Match to ACL Product Card) ──────── */}
-      <div className="max-w-4xl mx-auto">
+      <div className="w-full">
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
           {/* Card Header (Identical dark gradient theme as ACL Product) */}
           <div className="px-4 py-2 sm:px-5 sm:py-2.5 border-b border-slate-100 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex flex-wrap items-center justify-between gap-2">

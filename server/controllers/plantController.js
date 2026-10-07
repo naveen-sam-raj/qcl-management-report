@@ -191,9 +191,63 @@ const notifyPlantUpdate = async (req, res) => {
   }
 };
 
+// @desc    Retry sending analysis email with Excel attachment for any plant analysis record
+// @route   POST /api/plants/retry-email
+// @access  Private
+const retryPlantAnalysisEmail = async (req, res) => {
+  try {
+    const { recordId, plant, analysisType } = req.body;
+    if (!recordId) {
+      return res.status(400).json({ success: false, message: 'Record ID is required for retry.' });
+    }
+
+    const { PlantAnalysisRecord, PureSaltAnalysis } = require('../models');
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+
+    let savedRecord = null;
+    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
+      try {
+        savedRecord = await PlantAnalysisRecord.findById(recordId);
+      } catch (e) {}
+    }
+
+    if (!savedRecord && PureSaltAnalysis && typeof PureSaltAnalysis.findById === 'function') {
+      try {
+        savedRecord = await PureSaltAnalysis.findById(recordId);
+      } catch (e) {}
+    }
+
+    if (!savedRecord) {
+      return res.status(404).json({ success: false, message: 'Saved analysis record not found.' });
+    }
+
+    const targetPlant = plant || savedRecord.plant || savedRecord.plantName || savedRecord.plantCode;
+    const targetType = analysisType || savedRecord.analysisType || 'Plant Analysis';
+
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: targetPlant,
+      analysisType: targetType,
+      unit: savedRecord.unit || '',
+      shift: savedRecord.shift || 'All Shifts',
+      date: savedRecord.date,
+      data: savedRecord.data || savedRecord.rows,
+      submittedBy: savedRecord.submittedBy || req.user?.name || 'Plant Operator',
+      submittedById: savedRecord.submittedById || req.user?._id,
+      company: savedRecord.company || req.user?.company,
+      explicitRecord: savedRecord,
+    });
+
+    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
+  } catch (error) {
+    console.error('[Retry Plant Analysis Email] Error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getPlants,
   getPlantById,
   updatePlantParameters,
   notifyPlantUpdate,
+  retryPlantAnalysisEmail,
 };

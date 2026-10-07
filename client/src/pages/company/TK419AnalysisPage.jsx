@@ -371,7 +371,7 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
       )}
 
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden max-w-2xl mx-auto lg:mx-0">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
 
         {/* Table header with Integrated Date Selector */}
         <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
@@ -428,8 +428,8 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
         </div>
 
         {/* Scrollable table wrapper */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-sm min-w-[700px] xl:min-w-full">
             {/* Column headers */}
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">

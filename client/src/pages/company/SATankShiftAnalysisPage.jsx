@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
@@ -137,7 +137,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           <button onClick={() => setSaveSuccess(false)} className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0" aria-label="Dismiss">x</button>
         </div>
       )}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden max-w-3xl mx-auto lg:mx-0">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
         <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-4 rounded-full bg-blue-600" />
@@ -145,8 +145,8 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           </div>
           <span className="text-[11px] font-bold text-slate-500">3 Shifts</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-sm min-w-[700px] xl:min-w-full">
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
                 <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-24 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">SHIFT</th>

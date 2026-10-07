@@ -15,6 +15,7 @@ import UserManagementPage from '../pages/company/UserManagementPage';
 import UserProfileDashboard from '../pages/company/UserProfileDashboard';
 import UserDashboard from '../pages/user/UserDashboard';
 import ReportsPage from '../pages/reports/ReportsPage';
+import TFLOverallGraphPage from '../pages/company/TFLOverallGraphPage';
 
 const AppRoutes = () => {
   return (
@@ -45,8 +46,10 @@ const AppRoutes = () => {
       {/* ── TFL Admin Protected Routes ── */}
       <Route path="/admin/tfl" element={<DashboardLayout requiredRole="company_admin" requiredCompany="TFL" />}>
         <Route index element={<TFLAdminDashboard />} />
+        <Route path="overall-graph" element={<TFLOverallGraphPage />} />
         <Route path="plants" element={<TFLAdminDashboard />} />
         <Route path="plants/:id" element={<PlantAnalysisPage />} />
+        <Route path="plants/:id/graph" element={<PlantAnalysisPage />} />
         <Route path="plants/:id/options/:optionName" element={<PlantAnalysisPage />} />
         <Route path="users" element={<UserManagementPage />} />
         <Route path="users/:userId" element={<UserProfileDashboard />} />
@@ -79,6 +82,7 @@ const AppRoutes = () => {
         <Route index element={<PlantAnalysisPage />} />
         <Route path="plants" element={<PlantAnalysisPage />} />
         <Route path="plants/:id" element={<PlantAnalysisPage />} />
+        <Route path="plants/:id/graph" element={<PlantAnalysisPage />} />
         <Route path="plants/:id/options/:optionName" element={<PlantAnalysisPage />} />
         <Route path="reports" element={<ReportsPage />} />
         {/* Redirect any other portal sub-routes back to dashboard */}

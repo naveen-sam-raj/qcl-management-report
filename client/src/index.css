@@ -51,6 +51,23 @@
   transform: translateY(-3px);
 }
 
+/* Responsive Table & Container Helpers */
+.table-responsive-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Responsive typography utilities */
+@layer utilities {
+  .fluid-title {
+    font-size: clamp(1.125rem, 1rem + 0.6vw, 1.75rem);
+  }
+  .fluid-subtitle {
+    font-size: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  }
+}
+
 /* ── View-Only User Portal Rules ─────────────────────────────────────────── */
 /* Automatically hides all save, submit, reset, and edit triggers for view-only operators */
 .portal-view-only button[id*="save"],
@@ -78,4 +95,3 @@
   cursor: default !important;
   box-shadow: none !important;
 }
-

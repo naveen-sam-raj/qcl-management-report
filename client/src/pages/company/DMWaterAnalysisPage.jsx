@@ -345,43 +345,43 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
 
-        {/* The Table - Clean proportional widths, inputs centered, no horizontal scrolling */}
-        <div className="overflow-x-auto w-full">
-          <table className="w-full text-center border-collapse">
+        {/* The Table - Fully responsive: expands close to available width on desktop/large displays, horizontally scrollable on mobile/tablet */}
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-center border-collapse min-w-[900px] xl:min-w-full">
             <thead>
               <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider border-b border-slate-800">
-                <th className="py-3 px-2 w-10 text-center text-slate-400 font-semibold border-r border-slate-800">
+                <th className="py-3 px-2 w-12 min-w-[48px] text-center text-slate-400 font-semibold border-r border-slate-800">
                   #
                 </th>
-                <th className="py-2.5 px-3 w-[20%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-3 min-w-[160px] w-[18%] text-center border-r border-slate-800">
                   Unit / Stream
                 </th>
-                <th className="py-2.5 px-2 w-[11%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2 min-w-[100px] w-[11%] text-center border-r border-slate-800">
                   <div className="flex items-center justify-center gap-1">
                     <Clock className="w-3.5 h-3.5 text-slate-400" />
                     <span>Time</span>
                   </div>
                 </th>
-                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2.5 min-w-[120px] w-[14%] text-center border-r border-slate-800">
                   <div className="font-extrabold text-blue-300">pH</div>
                 </th>
-                <th className="py-2.5 px-2.5 w-[15%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2.5 min-w-[130px] w-[15%] text-center border-r border-slate-800">
                   <div className="font-extrabold text-cyan-300">Cond</div>
                   <div className="text-[10px] text-slate-300 font-normal normal-case">(umho/cm)</div>
                 </th>
-                <th className="py-2.5 px-2 w-[12%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2 min-w-[110px] w-[12%] text-center border-r border-slate-800">
                   <div className="font-extrabold text-amber-300">TH</div>
                   <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2.5 min-w-[120px] w-[14%] text-center border-r border-slate-800">
                   <div className="font-extrabold text-emerald-300">Alk</div>
                   <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-2.5 px-2.5 w-[14%] text-center border-r border-slate-800">
+                <th className="py-2.5 px-2.5 min-w-[120px] w-[14%] text-center border-r border-slate-800">
                   <div className="font-extrabold text-indigo-300">SiO₂</div>
                   <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-2.5 px-2 w-12 text-center">
+                <th className="py-2.5 px-2 w-14 min-w-[56px] text-center">
                   Action
                 </th>
               </tr>
@@ -463,7 +463,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         const isNormal = valRes.isNormal;
 
                         return (
-                          <div className="flex flex-col items-center gap-1 w-full">
+                          <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
                             <div className="relative w-full">
                               <input
                                 id={`dm-water-input-${row.id}-ph`}
@@ -533,7 +533,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         const isNormal = valRes.isNormal;
 
                         return (
-                          <div className="flex flex-col items-center gap-1 w-full">
+                          <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
                             <div className="relative w-full">
                               <input
                                 id={`dm-water-input-${row.id}-cond`}
@@ -600,7 +600,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         const hasVal = row.th !== '' && row.th !== null && row.th !== undefined;
 
                         return (
-                          <div className="flex flex-col items-center gap-1 w-full">
+                          <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
                             <input
                               id={`dm-water-input-${row.id}-th`}
                               type="text"
@@ -639,7 +639,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         const isNormal = valRes.isNormal;
 
                         return (
-                          <div className="flex flex-col items-center gap-1 w-full">
+                          <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
                             <div className="relative w-full">
                               <input
                                 id={`dm-water-input-${row.id}-alk`}
@@ -709,7 +709,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         const isNormal = valRes.isNormal;
 
                         return (
-                          <div className="flex flex-col items-center gap-1 w-full">
+                          <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
                             <div className="relative w-full">
                               <input
                                 id={`dm-water-input-${row.id}-sio2`}
@@ -792,26 +792,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </table>
         </div>
 
-        {/* Footer Summary / Quick Actions */}
-        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+        {/* Footer Summary */}
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">Total Stream Rows: {readings.length}</span>
             <span>•</span>
             <span className="text-slate-500">Frequency: <strong className="text-slate-700">Day</strong></span>
             <span>•</span>
             <span>Click any cell to edit numeric values</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save Changes</span>
-            </button>
           </div>
         </div>
       </div>

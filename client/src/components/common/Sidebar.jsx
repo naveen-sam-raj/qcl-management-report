@@ -27,7 +27,12 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   const handleLogout = () => {
     logout();
-    navigate('/');
+    const role = (user?.role || '').toLowerCase();
+    if (role === 'super_admin') {
+      navigate('/login/super-admin');
+    } else {
+      navigate('/');
+    }
   };
 
   // Define navigation based on user role

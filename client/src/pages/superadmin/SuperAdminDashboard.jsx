@@ -733,8 +733,8 @@ const SuperAdminDashboard = () => {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto w-full table-responsive-container">
+            <table className="w-full min-w-[850px] xl:min-w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Admin</th>

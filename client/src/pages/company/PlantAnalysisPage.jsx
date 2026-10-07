@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Factory, Flame, Globe, Gauge, Inbox, Layers, FileSpreadsheet, BarChart3 } from 'lucide-react';
 import PureSaltAnalysisPage from './PureSaltAnalysisPage';
@@ -221,6 +221,7 @@ const PlantAnalysisPage = () => {
   const { id, optionName } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const location = useLocation();
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
@@ -277,20 +278,22 @@ const PlantAnalysisPage = () => {
     navigate(`${basePath}/plants/${plantKey}/options/${encodeURIComponent(option)}`);
   };
 
+  const isGraphRoute =
+    decodedOptionName?.toLowerCase() === 'graph' ||
+    decodedOptionName?.toLowerCase() === 'graphs' ||
+    decodedOptionName?.toLowerCase() === 'analytics' ||
+    location.pathname.endsWith('/graph') ||
+    location.pathname.endsWith('/graphs');
+
+  if (isGraphRoute) {
+    return <PlantAnalyticsGraphPage plantId={id || plantKey} plantTitle={plant.title} />;
+  }
+
   // ── VIEW 1: Dedicated module or empty state for a clicked option ──
   if (decodedOptionName) {
     // ── Reports → dedicated centralized ACL Plant reporting dashboard ──
     if (decodedOptionName.toLowerCase() === 'reports') {
       return <ACLPlantReportsPage plantId={id} />;
-    }
-
-    // ── Graph / Trend Analytics with Limit Violation Detection ──
-    if (
-      decodedOptionName.toLowerCase() === 'graph' ||
-      decodedOptionName.toLowerCase() === 'graphs' ||
-      decodedOptionName.toLowerCase() === 'analytics'
-    ) {
-      return <PlantAnalyticsGraphPage plantId={id || plantKey} plantTitle={plant.title} />;
     }
 
     // ── Pure Salt Analysis → dedicated full-featured module ──
@@ -1018,7 +1021,7 @@ const PlantAnalysisPage = () => {
 
       {/* Content Area */}
       {plant.options.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-4.5">
           {plant.options.map((name, index) => (
             <div
               key={index}

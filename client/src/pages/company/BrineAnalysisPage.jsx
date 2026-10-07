@@ -477,25 +477,10 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Table footer hint */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
             All values are in <strong>grams per liter (g/L)</strong>. Frequency: <strong>WEEK</strong>. Enter analysis values for <strong>TK 109</strong> and <strong>TK 110</strong>. Numeric values only. Leave blank if not applicable.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-brine-save-bottom"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
-          </div>
         </div>
       </div>
 

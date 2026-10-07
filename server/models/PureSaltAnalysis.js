@@ -80,6 +80,10 @@ const pureSaltAnalysisSchema = new mongoose.Schema(
       ref: 'Company',
       default: null,
     },
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
     emailRecipient: {
       type: String,
       trim: true,
@@ -87,8 +91,8 @@ const pureSaltAnalysisSchema = new mongoose.Schema(
     },
     emailStatus: {
       type: String,
-      enum: ['Pending', 'Sent', 'Failed', 'Skipped'],
-      default: 'Pending',
+      enum: ['Pending', 'Sent', 'Failed', 'Skipped', 'pending', 'sent', 'failed', 'skipped'],
+      default: 'pending',
     },
     reportFileName: {
       type: String,

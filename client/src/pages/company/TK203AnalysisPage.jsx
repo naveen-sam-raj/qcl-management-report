@@ -491,25 +491,10 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Table footer hint */}
-        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
             Values for <strong>TK 203</strong>. Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>. Enter numeric values only. Leave blank if not applicable.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-tk203-save-bottom"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
-          </div>
         </div>
       </div>
 

@@ -2,19 +2,33 @@ const { Company, Plant, User, Report, ActivityLog } = require('../models');
 
 const seedDatabase = async () => {
   try {
-    // Only ensure root Super Admin exists so admin can log in and manage
-    const existingSuperAdmin = await User.findOne({ role: 'super_admin' });
-    if (!existingSuperAdmin) {
-      await User.create({
-        name: 'Super Admin',
-        email: 'superadmin@spicglobal.com',
-        username: 'superadmin',
-        password: 'Admin@123',
-        mobile: '+91 98400 11001',
-        role: 'super_admin',
-        status: 'active',
-      });
-      console.log('[Seed] ✅ Root Super Admin "superadmin" initialized.');
+    const SUPERADMIN_EMAIL = 'superadmin@spicglobal.com';
+
+    // 1. Check whether a user already exists with email = 'superadmin@spicglobal.com'
+    const existingSuperAdmin = await User.findOne({ email: SUPERADMIN_EMAIL });
+
+    if (existingSuperAdmin) {
+      console.log('[Seed] ℹ️ Default Super Admin already exists. Skipping creation.');
+    } else {
+      try {
+        await User.create({
+          name: 'Super Admin',
+          email: SUPERADMIN_EMAIL,
+          username: 'superadmin',
+          password: 'Admin@123',
+          mobile: '+91 98400 11001',
+          role: 'super_admin',
+          status: 'active',
+        });
+        console.log('[Seed] ✅ Root Super Admin "superadmin" initialized.');
+      } catch (createErr) {
+        // Handle race conditions safely if two startup processes seed concurrently
+        if (createErr.code === 11000 || (createErr.message && createErr.message.includes('E11000'))) {
+          console.log('[Seed] ℹ️ Default Super Admin already exists. Skipping creation.');
+        } else {
+          throw createErr;
+        }
+      }
     }
 
     const existingCompanies = await Company.countDocuments();
@@ -24,7 +38,7 @@ const seedDatabase = async () => {
 
     console.log('[Seed] Initializing clean enterprise platform (SPIC, TFL, Greenstar)...');
 
-    // 1. Create Companies (SPIC, TFL, Greenstar)
+    // 2. Create Companies (SPIC, TFL, Greenstar)
     const spic = await Company.create({
       name: 'SPIC',
       code: 'SPIC',
@@ -61,7 +75,7 @@ const seedDatabase = async () => {
       primaryColor: '#0D9488',
     });
 
-    // 2. Create the 4 Plant Units for TFL
+    // 3. Create the 4 Plant Units for TFL
     await Plant.create({
       company: tfl._id,
       name: 'ACL Plant',
@@ -154,12 +168,10 @@ const seedDatabase = async () => {
       },
     });
 
-
-
-    // 4. Initial System Log
+    // 4. Initial System Log (Super Admin user is already verified above)
     await ActivityLog.create({
       userName: 'Super Admin',
-      userEmail: 'superadmin@spicglobal.com',
+      userEmail: SUPERADMIN_EMAIL,
       role: 'super_admin',
       companyName: 'Corporate HQ',
       action: 'SYSTEM_INITIALIZATION',
@@ -169,7 +181,11 @@ const seedDatabase = async () => {
 
     console.log('[Seed] Clean system successfully initialized with all company credentials.');
   } catch (err) {
-    console.error('[Seed] Error initializing system:', err);
+    if (err.code === 11000 || (err.message && err.message.includes('E11000'))) {
+      console.log('[Seed] ℹ️ Concurrently initialized or record already exists.');
+    } else {
+      console.error('[Seed] Error initializing system:', err.message);
+    }
   }
 };
 

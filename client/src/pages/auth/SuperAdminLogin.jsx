@@ -118,41 +118,33 @@ const SuperAdminLogin = () => {
   };
 
   return (
-    <div className="h-screen max-h-screen bg-slate-900 flex flex-col justify-center py-4 px-4 sm:px-6 lg:px-8 selection:bg-purple-600 selection:text-white relative overflow-hidden">
+    <div className="h-screen max-h-screen relative flex flex-col font-sans selection:bg-blue-600 selection:text-white overflow-hidden">
       {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 left-10 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Back to Home Link */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md mb-2">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Subsidiary Selection</span>
-        </Link>
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <img src="/plant-bg.jpg" alt="SPIC Plant Background" className="w-full h-full object-cover object-center filter blur-[4px] scale-105 opacity-80" />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
       </div>
 
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        {/* Shield Icon Badge */}
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-xl shadow-purple-600/30 mb-2 border border-purple-400/30">
-          <ShieldCheck className="w-6 h-6" />
-        </div>
 
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Super Admin Console
-        </h2>
-        <p className="mt-1 text-xs text-slate-400">
-          Central Corporate Governance • SPIC • TFL • Greenstar
-        </p>
-      </div>
-
-      <div className="mt-4 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-800/80 backdrop-blur-xl py-6 px-6 sm:px-8 shadow-2xl rounded-2xl border border-slate-700/80">
+      <div className="flex-1 flex items-center justify-center px-4 py-2 z-10 overflow-hidden">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="flex justify-center items-center gap-6 mb-4">
+              <img src="/spic-logo.png" alt="SPIC" className="max-h-12 w-auto object-contain" />
+              <img src="/tfl-logo.png" alt="TFL" className="max-h-12 w-auto object-contain" />
+              <img src="/greenstar-logo.png" alt="Greenstar" className="max-h-12 w-auto object-contain" />
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+              Super Admin Login
+            </h2>
+            <p className="mt-1 text-xs text-slate-500 font-medium">
+              Centralized Administration Portal
+            </p>
+          </div>
+          <div className="bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.12)]">
           {errorMsg && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
-              {errorMsg}
+            <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center gap-2">
+              <span>{errorMsg}</span>
             </div>
           )}
 
@@ -161,11 +153,11 @@ const SuperAdminLogin = () => {
             <div>
               <label
                 htmlFor="identifier"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5"
+                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
               >
                 Username
               </label>
-              <div className="relative rounded-xl shadow-sm">
+              <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <User className="w-4 h-4" />
                 </div>
@@ -176,7 +168,7 @@ const SuperAdminLogin = () => {
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   placeholder="QCL_ADMIN"
-                  className="block w-full pl-10 pr-3 py-2.5 text-sm bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition shadow-2xs font-medium"
                 />
               </div>
             </div>
@@ -186,7 +178,7 @@ const SuperAdminLogin = () => {
               <div className="flex items-center justify-between mb-1.5">
                 <label
                   htmlFor="password"
-                  className="block text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  className="block text-xs font-bold uppercase tracking-wider text-slate-700"
                 >
                   Password
                 </label>
@@ -196,12 +188,12 @@ const SuperAdminLogin = () => {
                     setForgotSuccess('');
                     setIsForgotModalOpen(true);
                   }}
-                  className="text-xs font-semibold text-purple-400 hover:text-purple-300 transition"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition cursor-pointer"
                 >
                   Forgot Password?
                 </button>
               </div>
-              <div className="relative rounded-xl shadow-sm">
+              <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
                 </div>
@@ -212,13 +204,13 @@ const SuperAdminLogin = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="block w-full pl-10 pr-10 py-2.5 text-sm bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition font-mono"
+                  className="w-full pl-10 pr-11 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition shadow-2xs font-mono font-medium"
                 />
                 <button
                   type="button"
                   id="btn-toggle-password"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition cursor-pointer"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -227,8 +219,8 @@ const SuperAdminLogin = () => {
             </div>
 
             {/* Security Notice */}
-            <div className="p-3 bg-slate-900/50 rounded-xl border border-slate-700/50 text-[11px] text-slate-400 flex items-start gap-2">
-              <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+            <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-[11px] text-blue-700 flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
               <span>
                 Protected under Zero-Trust RBAC. Access events are cryptographically audited in compliance with corporate IT policies.
               </span>
@@ -239,12 +231,13 @@ const SuperAdminLogin = () => {
               id="btn-submit-login"
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 transition shadow-lg shadow-purple-600/30 disabled:opacity-50"
+              className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.99] transition shadow-md shadow-blue-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Lock className="w-4 h-4" />
-              <span>{loading ? 'Authenticating...' : 'Secure Sign In'}</span>
+              <span>{loading ? 'Authenticating...' : 'Sign In to Super Admin Portal'}</span>
             </button>
           </form>
+          </div>
         </div>
       </div>
 

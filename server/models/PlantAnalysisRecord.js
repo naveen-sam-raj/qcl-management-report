@@ -61,6 +61,10 @@ const plantAnalysisRecordSchema = new mongoose.Schema(
       ref: 'Company',
       default: null,
     },
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
     emailRecipient: {
       type: String,
       default: '',
@@ -68,8 +72,8 @@ const plantAnalysisRecordSchema = new mongoose.Schema(
     },
     emailStatus: {
       type: String,
-      enum: ['Pending', 'Sent', 'Failed', 'Skipped'],
-      default: 'Pending',
+      enum: ['Pending', 'Sent', 'Failed', 'Skipped', 'pending', 'sent', 'failed', 'skipped'],
+      default: 'pending',
     },
     emailMessageId: {
       type: String,

@@ -1,13 +1,13 @@
-const { getPlantAssignedUser, sendPlantUpdateNotification } = require('../services/plantNotificationService');
-const { PlantAnalysisRecord } = require('../models');
-const { generatePlantReportExcel } = require('../services/excelService');
+const { executeSaveAndEmailWorkflow, resolvePlant } = require('../services/plantNotificationService');
 
-// Map of route URL fragments to Plant Codes
+// Map of route URL fragments to Plant Codes and Analysis Labels
 const ROUTE_TO_PLANT = [
   // ACL Plant routes
+  { pattern: /pure-salt-sieve/i, plant: 'ACL', label: 'Pure Salt Sieve Analysis' },
   { pattern: /pure-salt/i, plant: 'ACL', label: 'Pure Salt Analysis' },
   { pattern: /brine/i, plant: 'ACL', label: 'Brine Analysis' },
   { pattern: /tk-?203/i, plant: 'ACL', label: 'TK 203 Analysis' },
+  { pattern: /tk-?204-?tk-?209/i, plant: 'ACL', label: 'TK 204 / TK 209 Analysis' },
   { pattern: /tk-?204/i, plant: 'ACL', label: 'TK 204 Analysis' },
   { pattern: /tk-?209/i, plant: 'ACL', label: 'TK 209 Analysis' },
   { pattern: /tk-?205/i, plant: 'ACL', label: 'TK 205 Analysis' },
@@ -21,6 +21,14 @@ const ROUTE_TO_PLANT = [
   { pattern: /cacl2/i, plant: 'ACL', label: 'CaCl2 Analysis' },
 
   // SA Plant routes
+  { pattern: /sa-?tk-?401/i, plant: 'SA', label: 'SA TK 401 Analysis' },
+  { pattern: /sa-?tk-?405/i, plant: 'SA', label: 'SA TK 405 Analysis' },
+  { pattern: /sa-?tk-?414/i, plant: 'SA', label: 'SA TK 414 TSC Analysis' },
+  { pattern: /sa-?p-?413/i, plant: 'SA', label: 'SA P 413 WSC Analysis' },
+  { pattern: /sa-?tk-?419/i, plant: 'SA', label: 'SA TK 419 SC Analysis' },
+  { pattern: /sa-?p-?417-?1/i, plant: 'SA', label: 'SA P 417-1 Analysis' },
+  { pattern: /sa-?p-?417-?2/i, plant: 'SA', label: 'SA P 417-2 Analysis' },
+  { pattern: /sa-?p-?417-?3/i, plant: 'SA', label: 'SA P 417-3 Analysis' },
   { pattern: /t-?401/i, plant: 'SA', label: 'T 401 Analysis' },
   { pattern: /tk-?419/i, plant: 'SA', label: 'TK 419 Analysis' },
   { pattern: /lsa-?500/i, plant: 'SA', label: 'LSA 500# Analysis' },
@@ -47,9 +55,10 @@ const ROUTE_TO_PLANT = [
 
   // CO2 Plant routes
   { pattern: /bl-?1204|bl-?1203/i, plant: 'CO2', label: 'BL1204/BL1203 Analysis' },
-  { pattern: /absorber-?drain/i, plant: 'CO2', label: 'ABSORBER DRAIN LIQ Analysis' },
+  { pattern: /absorber-?drain/i, plant: 'CO2', label: 'Absorber Drain Liq Analysis' },
   { pattern: /absorber-?inlet|absorber/i, plant: 'CO2', label: 'Absorber Inlet Analysis' },
   { pattern: /outlet/i, plant: 'CO2', label: 'Outlet Analysis' },
+  { pattern: /lean-?weekly/i, plant: 'CO2', label: 'Lean Weekly Analysis' },
   { pattern: /lean/i, plant: 'CO2', label: 'Lean Analysis' },
   { pattern: /rich/i, plant: 'CO2', label: 'Rich Analysis' },
   { pattern: /wash-?water/i, plant: 'CO2', label: 'Washwater Analysis' },
@@ -57,39 +66,16 @@ const ROUTE_TO_PLANT = [
   { pattern: /reflux/i, plant: 'CO2', label: 'Reflux Analysis' },
   { pattern: /tk-?1251/i, plant: 'CO2', label: 'TK1251 Analysis' },
   { pattern: /tk-?1252/i, plant: 'CO2', label: 'TK1252 Analysis' },
-  { pattern: /dcc-?drain/i, plant: 'CO2', label: 'DCC DRAIN LIQ Analysis' },
-  { pattern: /sox-?drain/i, plant: 'CO2', label: 'SOX DRAIN LIQ Analysis' },
+  { pattern: /dcc-?drain/i, plant: 'CO2', label: 'DCC Drain Liq Analysis' },
+  { pattern: /sox-?drain/i, plant: 'CO2', label: 'SOX Drain Liq Analysis' },
   { pattern: /co2/i, plant: 'CO2', label: 'CO2 Plant Analysis' },
 ];
 
 /**
- * Extracts a human-readable summary of the payload submitted by Admin
- */
-const summarizePayload = (payload) => {
-  if (!payload || typeof payload !== 'object') return '';
-
-  const parts = [];
-  if (payload.date) parts.push(`Date: ${payload.date}`);
-  if (payload.shift) parts.push(`Shift: ${payload.shift}`);
-  if (payload.unit) parts.push(`Unit: ${payload.unit}`);
-
-  if (payload.rows && typeof payload.rows === 'object') {
-    const rowKeys = Object.keys(payload.rows);
-    parts.push(`Rows: ${rowKeys.join(', ')}`);
-  } else if (payload.shifts && typeof payload.shifts === 'object') {
-    const shiftKeys = Object.keys(payload.shifts);
-    parts.push(`Shifts: ${shiftKeys.join(', ')}`);
-  } else if (payload.readings && Array.isArray(payload.readings)) {
-    parts.push(`Readings: ${payload.readings.length} row(s) entered`);
-  }
-
-  return parts.join(' | ');
-};
-
-/**
  * Middleware that monitors all plant data save/update requests.
- * When an edit/save succeeds (HTTP 200/201), it automatically dispatches
- * an email notification to the registered user assigned to that plant in MongoDB.
+ * When an edit/save succeeds (HTTP 200/201), it executes the centralized
+ * Save -> Server Timestamp -> Assigned Plant User -> Excel -> Nodemailer workflow
+ * and provides accurate email confirmation or failure response to the frontend.
  */
 const autoPlantEmailMiddleware = (req, res, next) => {
   // Only intercept write methods (POST, PUT, PATCH)
@@ -99,8 +85,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
 
   const url = req.originalUrl || req.url || '';
 
-  // Skip auth, login, reports listing, user management, and pure-salt-analysis
-  // (Pure Salt Analysis already has its dedicated Excel attachment workflow in its route)
+  // Skip auth, login, reports listing, user management, and retry endpoints
+  // Pure Salt Analysis has its dedicated endpoint that calls executeSaveAndEmailWorkflow directly
   if (
     url.includes('/auth') ||
     url.includes('/login') ||
@@ -108,32 +94,50 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/users') ||
     url.includes('/admin/company-admins') ||
     url.includes('/pure-salt-analysis') ||
-    url.includes('/notify-update')
+    url.includes('/notify-update') ||
+    url.includes('/retry-email')
   ) {
     return next();
   }
 
-  // Intercept the response JSON method to trigger notification after successful database save
+  // Intercept the response JSON method to trigger workflow before completing response
   const originalJson = res.json;
-  res.json = function (data) {
-    // Check if the response was successful
+  res.json = async function (data) {
     if (res.statusCode >= 200 && res.statusCode < 300 && data && data.success !== false) {
-      setImmediate(async () => {
-        try {
-          await dispatchAutoNotification(req, url, data);
-        } catch (err) {
-          console.warn('[AutoPlantEmail] Exception sending notification:', err.message);
+      try {
+        const workflowResult = await dispatchAutoNotification(req, url, data);
+        if (workflowResult) {
+          data.emailSent = workflowResult.emailSent;
+          data.emailStatus = workflowResult.emailStatus;
+          if (workflowResult.message) {
+            data.message = workflowResult.message;
+          }
+          if (workflowResult.excel) {
+            data.excel = workflowResult.excel;
+          }
+          if (workflowResult.data) {
+            data.data = workflowResult.data;
+          }
+          if (workflowResult.emailError) {
+            data.emailError = workflowResult.emailError;
+          }
         }
-      });
+      } catch (err) {
+        console.warn('[AutoPlantEmail] Exception in workflow:', err.message);
+        data.emailSent = false;
+        data.emailStatus = 'failed';
+        data.message = 'Data saved and Excel generated, but email sending failed.';
+        data.emailError = err.message;
+      }
     }
-    return originalJson.apply(this, arguments);
+    return originalJson.call(this, data);
   };
 
   next();
 };
 
 /**
- * Identifies the plant and dispatches the notification to the assigned plant user
+ * Identifies the plant and dispatches the centralized Save -> Email workflow
  */
 const dispatchAutoNotification = async (req, url, resBody) => {
   let detectedPlant = req.body?.plant || null;
@@ -158,23 +162,19 @@ const dispatchAutoNotification = async (req, url, resBody) => {
   }
 
   if (!detectedPlant) {
-    return;
+    return null;
   }
 
-  // 3. Resolve Plant and its Assigned User from MongoDB
-  const plantInfo = await getPlantAssignedUser(detectedPlant, { analysisType: updateLabel });
-  if (!plantInfo.plant || (!plantInfo.primaryEmail && (!plantInfo.recipientEmails || plantInfo.recipientEmails.length === 0))) {
-    console.log(
-      `[AutoPlantEmail] No assigned user found for plant "${detectedPlant}". Skipping automatic notification.`
-    );
-    return;
+  // Resolve plantDoc to confirm plant exists
+  const plantDoc = await resolvePlant(detectedPlant, { analysisType: updateLabel });
+  if (!plantDoc) {
+    return null;
   }
 
-  const adminName = req.user?.name || req.body?.submittedBy || 'Plant Administrator';
-  const summary = summarizePayload(req.body);
+  const plantName = plantDoc.name;
+  const adminName = req.user?.name || req.body?.submittedBy || 'Plant Operator';
 
-  // 4. MANDATORY REQUIREMENT: Save data successfully to MongoDB Atlas first
-  let savedRecord = null;
+  // Extract payload
   const targetDate = req.body?.date || new Date().toISOString().split('T')[0];
   const targetUnit = req.body?.unit || req.body?.tower || '';
   const targetShift = req.body?.shift || 'All Shifts';
@@ -188,87 +188,20 @@ const dispatchAutoNotification = async (req, url, resBody) => {
     req.body ||
     {};
 
-  try {
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.create === 'function') {
-      savedRecord = await PlantAnalysisRecord.create({
-        plant: plantInfo.plant._id,
-        plantName: plantInfo.plant.name,
-        plantCode: plantInfo.plant.code,
-        analysisType: updateLabel || `${plantInfo.plant.name} Data`,
-        unit: targetUnit,
-        date: targetDate,
-        shift: targetShift,
-        data: payloadData,
-        submittedBy: adminName,
-        submittedById: req.user?._id || null,
-        company: req.user?.company?._id || req.user?.company || plantInfo.plant.company || null,
-        emailRecipient: plantInfo.recipientEmails?.join(', ') || plantInfo.primaryEmail,
-        emailStatus: 'Pending',
-      });
-
-      console.log(
-        `[AutoPlantEmail] ✅ MongoDB Atlas persistence succeeded (Collection: "plantanalysisrecords", Record ID: ${savedRecord._id})`
-      );
-    }
-  } catch (dbErr) {
-    console.error(
-      `[AutoPlantEmail] ❌ MongoDB save failed for ${plantInfo.plant.name}:`,
-      dbErr.message
-    );
-    // RULE: "If the save/update fails, do NOT send the email."
-    return;
-  }
-
-  // 5. Generate authentic .xlsx Excel workbook using ExcelJS
-  let excelResult = null;
-  try {
-    excelResult = await generatePlantReportExcel({
-      plantName: plantInfo.plant.name,
-      plantCode: plantInfo.plant.code,
-      analysisType: updateLabel || `${plantInfo.plant.name} Data`,
-      unit: targetUnit,
-      date: targetDate,
-      shift: targetShift,
-      submittedBy: adminName,
-      data: payloadData,
-      rawBody: req.body,
-    });
-
-    console.log(
-      `[AutoPlantEmail] 📊 Excel report generated: "${excelResult.filename}" (${excelResult.buffer ? excelResult.buffer.length : 0} bytes)`
-    );
-  } catch (excelErr) {
-    console.warn('[AutoPlantEmail] ⚠️ Excel report generation warning:', excelErr.message);
-  }
-
-  // 6. Send Email ONLY after database save succeeds, with the .xlsx file attached
-  const recipientTarget = plantInfo.recipientEmails?.join(', ') || plantInfo.primaryEmail;
-  console.log(
-    `[AutoPlantEmail] 🚀 Auto-triggering notification for plant "${plantInfo.plant.name}" (${plantInfo.plant.code}) to assigned user(s): ${recipientTarget} with attachment "${excelResult?.filename || 'None'}"`
-  );
-
-  const emailResult = await sendPlantUpdateNotification({
-    plant: plantInfo.plant,
-    whatUpdated: updateLabel || `${plantInfo.plant.name} Data Saved`,
-    updatedBy: adminName,
-    dateTime: new Date(),
-    details: summary || 'Data successfully updated and recorded in plant database.',
-    excelBuffer: excelResult?.buffer,
-    excelFileName: excelResult?.filename,
+  // Execute centralized Save -> Server Timestamp -> Assigned User -> Excel -> Nodemailer Workflow
+  return await executeSaveAndEmailWorkflow({
+    plantIdentifier: plantDoc._id,
+    analysisType: updateLabel || `${plantName} Analysis`,
+    unit: targetUnit,
+    shift: targetShift,
+    date: targetDate,
+    data: payloadData,
+    submittedBy: adminName,
+    submittedById: req.user?._id || null,
+    company: req.user?.company?._id || req.user?.company || plantDoc.company || null,
+    explicitRecord: resBody?.data && resBody.data._id ? resBody.data : null,
+    rawBody: req.body,
   });
-
-  // 7. Update record with email dispatch status and reportFileName in MongoDB
-  if (savedRecord && savedRecord._id) {
-    try {
-      await PlantAnalysisRecord.findByIdAndUpdate(savedRecord._id, {
-        emailStatus: emailResult.success ? 'Sent' : 'Failed',
-        emailMessageId: emailResult.messageId || '',
-        reportFileName: excelResult?.filename || '',
-      });
-    } catch (updateErr) {
-      console.warn('[AutoPlantEmail] Could not update email status on record:', updateErr.message);
-    }
-  }
 };
 
 module.exports = autoPlantEmailMiddleware;

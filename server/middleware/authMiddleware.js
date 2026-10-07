@@ -46,13 +46,46 @@ const superAdminAuth = async (req, res, next) => {
       });
     }
 
-    // Verify SuperAdmin in database
+    // Verify SuperAdmin in database — try SuperAdmin collection first
     let admin = null;
     if (decoded.id) {
-      admin = await SuperAdmin.findById(decoded.id);
+      try {
+        admin = await SuperAdmin.findById(decoded.id);
+      } catch (_) { /* invalid ObjectId format — skip */ }
     }
     if (!admin && decoded.username) {
       admin = await SuperAdmin.findOne({ username: decoded.username });
+    }
+
+    // Fallback: token may have been issued for a User-collection record with role super_admin
+    if (!admin) {
+      const { User } = require('../models');
+      let userAdmin = null;
+      if (decoded.id) {
+        try {
+          userAdmin = await User.findById(decoded.id);
+        } catch (_) { /* skip */ }
+      }
+      if (!userAdmin && decoded.username) {
+        userAdmin = await User.findOne({
+          $or: [
+            { username: decoded.username },
+            { email: decoded.username },
+          ],
+          role: 'super_admin',
+        });
+      }
+      // Accept if role matches
+      if (userAdmin && (userAdmin.role === 'super_admin' || userAdmin.role === 'SUPER_ADMIN')) {
+        // Wrap in a compatible admin object so downstream handlers work
+        req.superAdmin = userAdmin;
+        req.user = {
+          id: userAdmin._id || userAdmin.id,
+          username: userAdmin.username,
+          role: 'SUPER_ADMIN',
+        };
+        return next();
+      }
     }
 
     if (!admin) {

@@ -586,23 +586,10 @@ const TK401SAAnalysisPage = ({ plantId = "sa" }) => {
         </div>
 
         {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">TK 401 Shift Analysis:</span>
             <span>Frequency: Once in a Shift • Parameters: FNH₃, CNH₃, TCl, PCl, TCaO</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-tk401-save-bottom"
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save TK 401</span>
-            </button>
           </div>
         </div>
       </div>

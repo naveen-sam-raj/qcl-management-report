@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Plant, User, ActivityLog } = require('../models');
+const { Plant, User, ActivityLog, PlantAnalysisRecord } = require('../models');
 const { createNodemailerTransporter } = require('./emailService');
 
 // Map of analysis types / keywords to plant codes for intelligent inference
@@ -52,6 +52,7 @@ const ANALYSIS_PLANT_MAPPING = {
   // OFFSITE Plant
   'dm water': 'OFFSITE',
   'boiler': 'OFFSITE',
+  'bfw': 'OFFSITE',
   'super heated steam': 'OFFSITE',
   'raw water': 'OFFSITE',
   'cbd': 'OFFSITE',
@@ -108,6 +109,47 @@ const ANALYSIS_PLANT_MAPPING = {
   'lean weekly': 'CO2',
   'lean-weekly': 'CO2',
   'lean weekly analysis': 'CO2',
+};
+
+/**
+ * Formats a Date/timestamp into Asia/Kolkata timezone representations:
+ * - dateFormatted: '06 Oct 2026'
+ * - timeFormatted: '05:24 PM'
+ * - fullIST: '06 Oct 2026 05:24 PM IST'
+ * - filenameDate: '06-10-2026'
+ */
+const formatISTDateTime = (dateObj) => {
+  const d = dateObj ? new Date(dateObj) : new Date();
+
+  // Validate date object
+  const validDate = isNaN(d.getTime()) ? new Date() : d;
+
+  const dateFormatted = validDate.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  }); // e.g. "06 Oct 2026"
+
+  const timeFormatted = validDate.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  }); // e.g. "05:24 PM"
+
+  const day = validDate.toLocaleDateString('en-GB', { day: '2-digit', timeZone: 'Asia/Kolkata' });
+  const month = validDate.toLocaleDateString('en-GB', { month: '2-digit', timeZone: 'Asia/Kolkata' });
+  const year = validDate.toLocaleDateString('en-GB', { year: 'numeric', timeZone: 'Asia/Kolkata' });
+  const filenameDate = `${day}-${month}-${year}`; // e.g. "06-10-2026"
+
+  return {
+    dateFormatted,
+    timeFormatted,
+    fullIST: `${dateFormatted} ${timeFormatted} IST`,
+    filenameDate,
+    rawDate: validDate,
+  };
 };
 
 /**
@@ -174,11 +216,21 @@ const resolvePlant = async (plantIdentifier, options = {}) => {
 };
 
 /**
- * Resolves the registered plant user(s) assigned to a given plant in MongoDB.
+ * Resolves the registered plant user assigned to a given plant in MongoDB.
+ *
+ * STRICT ROUTING RULE:
+ * ACL Plant    → send ONLY to the user assigned to ACL Plant.
+ * SA Plant     → send ONLY to the user assigned to SA Plant.
+ * CO2 Plant    → send ONLY to the user assigned to CO2 Plant.
+ * OFFSET Plant → send ONLY to the user assigned to OFFSET Plant.
+ *
+ * If no user is assigned to the plant in MongoDB:
+ * Returns error: "No user is assigned to this plant."
+ * NO fallback to MAIL_USER or any other email address.
  *
  * @param {string|Object} plantIdentifier
  * @param {Object} [options]
- * @returns {Promise<{ plant: Object|null, users: Array, primaryEmail: string|null, recipientEmails: Array<string> }>}
+ * @returns {Promise<{ plant: Object|null, users: Array, primaryEmail: string|null, recipientEmails: Array<string>, assignedUser: Object|null, error?: string }>}
  */
 const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
   const plant = await resolvePlant(plantIdentifier, options);
@@ -189,300 +241,517 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
       users: [],
       primaryEmail: null,
       recipientEmails: [],
+      assignedUser: null,
+      error: `Could not identify plant for: "${plantIdentifier}".`,
     };
   }
 
-  // Find all registered operators/users assigned to this plant in MongoDB
+  // Find users assigned to this plant in MongoDB
   const users = await User.find({
     plant: plant._id,
   }).sort({ createdAt: 1 });
 
   const recipientEmails = users.map((u) => u.email).filter(Boolean);
 
+  if (recipientEmails.length === 0) {
+    return {
+      plant,
+      users: [],
+      primaryEmail: null,
+      recipientEmails: [],
+      assignedUser: null,
+      error: 'No user is assigned to this plant.',
+    };
+  }
+
   return {
     plant,
     users,
-    primaryEmail: recipientEmails[0] || null,
+    primaryEmail: recipientEmails[0],
     recipientEmails,
-    assignedUser: users[0] || null,
+    assignedUser: users[0],
   };
 };
 
 /**
- * Sends plant-wise automatic email notification when an Admin edits/saves plant data.
- * The email is delivered ONLY to the registered email address of the plant's assigned user.
+ * Sends plant analysis notification email with attached Excel file.
+ * The email content strictly adheres to the required format:
  *
- * Rules strictly followed:
- * 1. ACL Plant Admin edits/saves → send email ONLY to the ACL Plant user's registered email.
- * 2. SA Plant Admin edits/saves → send email ONLY to the SA Plant user's registered email.
- * 3. CO2 Plant Admin edits/saves → send email ONLY to the CO2 Plant user's registered email.
- * 4. Offsite Plant Admin edits/saves → send email ONLY to the Offsite Plant user's registered email.
+ * Subject: [PLANT NAME] Analysis Saved - [DATE]
+ * Example: ACL Plant Analysis Saved - 06 Oct 2026
+ *
+ * Body:
+ * Plant:
+ * [PLANT NAME]
+ *
+ * Analysis:
+ * [ANALYSIS NAME]
+ *
+ * Saved Date:
+ * [DATE]
+ *
+ * Saved Time:
+ * [TIME]
+ *
+ * Status:
+ * Saved Successfully
+ *
+ * Record ID:
+ * <actual MongoDB record ID>
  *
  * @param {Object} params
- * @param {string|Object} params.plant - Plant name, code, or ObjectId (e.g. 'ACL Plant', 'SA Plant', 'CO2 Plant', 'OFFSITE Plant')
- * @param {string} params.whatUpdated - Description of what was updated/saved
- * @param {string} [params.updatedBy] - Admin/user who performed the update
- * @param {string|Date} [params.dateTime] - Date and time of the update
- * @param {string} [params.details] - Optional extra details/summary of values changed
- * @param {Buffer|Object} [params.attachment] - Optional attachment buffer or object { filename, content, contentType }
- * @param {Buffer} [params.excelBuffer] - Optional generated Excel report buffer
- * @param {string} [params.excelFileName] - Optional Excel filename
- * @returns {Promise<{ success: boolean, plant?: string, recipient?: string, messageId?: string, error?: string }>}
+ * @param {Object} params.plantDoc - Plant document
+ * @param {Object} params.assignedUser - Assigned User document
+ * @param {string} params.analysisType - Name of analysis
+ * @param {Object} params.savedRecord - The actual saved database record
+ * @param {Buffer} params.excelBuffer - The generated Excel file buffer
+ * @param {string} params.excelFileName - The Excel filename
+ * @returns {Promise<{ success: boolean, emailStatus: string, messageId?: string, error?: string }>}
  */
-const sendPlantUpdateNotification = async ({
-  plant: plantIdentifier,
-  whatUpdated,
-  updatedBy = 'Plant Administrator',
-  dateTime = new Date(),
-  details = '',
-  attachment,
+const sendPlantAnalysisEmail = async ({
+  plantDoc,
+  assignedUser,
+  analysisType,
+  savedRecord,
   excelBuffer,
   excelFileName,
 }) => {
-  try {
-    // 1. Resolve Plant and its registered assigned user from MongoDB
-    const { plant, primaryEmail, assignedUser, recipientEmails } = await getPlantAssignedUser(
-      plantIdentifier,
-      { analysisType: whatUpdated }
-    );
+  if (!assignedUser || !assignedUser.email) {
+    return {
+      success: false,
+      emailStatus: 'failed',
+      error: 'No user is assigned to this plant.',
+    };
+  }
 
-    if (!plant) {
-      console.warn(`[PlantNotification] Plant could not be identified for: "${plantIdentifier}"`);
-      return {
-        success: false,
-        error: `Could not identify plant for: "${plantIdentifier}".`,
-      };
-    }
+  // Extract exact server-generated timestamp from saved MongoDB record
+  const serverTimestamp = savedRecord?.createdAt || savedRecord?.savedAt || new Date();
+  const { dateFormatted, timeFormatted, fullIST } = formatISTDateTime(serverTimestamp);
 
-    if (!primaryEmail && (!recipientEmails || recipientEmails.length === 0)) {
-      console.warn(
-        `[PlantNotification] No registered operator user assigned to plant "${plant.name}" (${plant.code}) in MongoDB.`
-      );
-      return {
-        success: false,
-        plant: plant.name,
-        error: `No registered user found assigned to ${plant.name}. Please assign a user to this plant in User Management.`,
-      };
-    }
+  const plantName = plantDoc.name || 'Industrial Plant';
+  const recordId = String(savedRecord?._id || savedRecord?.id || 'N/A');
 
-    // 2. Format Date/Time
-    const formattedDate =
-      dateTime instanceof Date
-        ? dateTime.toLocaleString('en-IN', {
-            dateStyle: 'full',
-            timeStyle: 'medium',
-            timeZone: 'Asia/Kolkata',
-          })
-        : String(dateTime);
+  // Exact Subject: [PLANT NAME] Analysis Saved - [DATE]
+  const subject = `[${plantName}] Analysis Saved - ${dateFormatted}`;
 
-    // 3. Prepare Email Transporter
-    const transporter = createNodemailerTransporter();
-    if (!transporter) {
-      console.error('[PlantNotification] Nodemailer transporter could not be initialized from server/.env.');
-      return {
-        success: false,
-        plant: plant.name,
-        recipient: primaryEmail,
-        error: 'SMTP credentials not configured in server/.env.',
-      };
-    }
+  // Exact Body format
+  const textBody = `Plant:
+${plantName}
 
-    const fromAddress =
-      process.env.MAIL_FROM || process.env.MAIL_USER || '"ACL Plant Management" <no-reply@spic.co.in>';
+Analysis:
+${analysisType}
 
-    // 4. Resolve Attachment (Excel .xlsx report)
-    const mailAttachments = [];
-    let resolvedBuffer = excelBuffer;
-    let resolvedFileName = excelFileName;
+Saved Date:
+${dateFormatted}
 
-    if (attachment) {
-      if (Buffer.isBuffer(attachment)) {
-        resolvedBuffer = attachment;
-      } else if (attachment.content) {
-        resolvedBuffer = Buffer.isBuffer(attachment.content)
-          ? attachment.content
-          : Buffer.from(attachment.content, 'base64');
-        resolvedFileName = attachment.filename || resolvedFileName;
-      }
-    }
+Saved Time:
+${timeFormatted}
 
-    // Fail-safe: if no Excel buffer passed, auto-generate authentic .xlsx report
-    if (!resolvedBuffer) {
-      try {
-        const { generatePlantReportExcel } = require('./excelService');
-        const genResult = await generatePlantReportExcel({
-          plantName: plant.name,
-          plantCode: plant.code,
-          analysisType: whatUpdated || `${plant.name} Report`,
-          date: new Date().toISOString().split('T')[0],
-          submittedBy: updatedBy,
-          data: details ? { summary: details } : {},
-        });
-        resolvedBuffer = genResult.buffer;
-        resolvedFileName = resolvedFileName || genResult.filename;
-      } catch (genErr) {
-        console.warn('[PlantNotification] Could not auto-generate fallback Excel:', genErr.message);
-      }
-    }
+Status:
+Saved Successfully
 
-    const finalFileName =
-      resolvedFileName ||
-      `${plant.code}_Plant_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+Record ID:
+${recordId}
 
-    if (resolvedBuffer) {
-      mailAttachments.push({
-        filename: finalFileName,
-        content: Buffer.isBuffer(resolvedBuffer) ? resolvedBuffer : Buffer.from(resolvedBuffer, 'base64'),
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      console.log(`[PlantNotification] 📎 Attached Excel report: "${finalFileName}" (${mailAttachments[0].content.length} bytes)`);
-    }
+Timezone: Asia/Kolkata (${fullIST})
+Attachment: ${excelFileName}
+`;
 
-    const subject = `[${plant.name}] Plant Data Update Notification - ${new Date().toLocaleDateString('en-IN')}`;
-
-    const textBody = `Dear ${assignedUser?.name || 'Plant Operator'},
-
-Plant data has been updated and saved by an Administrator.
-
-• Plant Name: ${plant.name} (${plant.code})
-• What Was Updated: ${whatUpdated}
-• Date & Time: ${formattedDate}
-• Updated By: ${updatedBy}
-${mailAttachments.length > 0 ? `• Attached Report: ${finalFileName}\n` : ''}${details ? `\nSummary / Changes:\n${details}\n` : ''}
-Please find the attached Excel (.xlsx) report containing the recorded plant operations data.
-You can also log in to the SPIC / TFL Plant Management Portal to review the updated records.
-
-Regards,
-ACL & Industrial Plant Management System
-Southern Petrochemical Industries Corporation (SPIC / TFL)`;
-
-    const htmlBody = `
+  const htmlBody = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 24px; }
-    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-    .header { background: linear-gradient(135deg, #1e3a8a 0%, #0284c7 100%); color: #ffffff; padding: 24px; text-align: left; }
-    .header h2 { margin: 0 0 6px 0; font-size: 20px; font-weight: 700; }
-    .header p { margin: 0; opacity: 0.9; font-size: 13px; }
-    .content { padding: 24px; }
-    .badge { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; border-radius: 9999px; background: #e0f2fe; color: #0369a1; margin-bottom: 16px; }
-    .table-details { width: 100%; border-collapse: collapse; margin: 16px 0; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
-    .table-details td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-    .table-details tr:last-child td { border-bottom: none; }
-    .label { font-weight: 600; color: #64748b; width: 38%; }
-    .value { font-weight: 700; color: #0f172a; }
-    .attachment-box { margin-top: 16px; padding: 12px 16px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
-    .attachment-icon { font-size: 18px; }
-    .attachment-text { font-size: 13px; font-weight: 600; color: #065f46; }
-    .notes-box { background: #f1f5f9; border-left: 4px solid #0284c7; padding: 12px 16px; margin-top: 16px; border-radius: 4px; font-size: 13px; color: #334155; }
-    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 24px; text-align: center; font-size: 12px; color: #94a3b8; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 24px; }
+    .card { max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #0f2e5a; color: #ffffff; padding: 20px 24px; border-bottom: 3px solid #0284c7; }
+    .header h2 { margin: 0 0 4px 0; font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+    .header p { margin: 0; font-size: 12px; opacity: 0.85; }
+    .body-content { padding: 24px; }
+    .field-group { margin-bottom: 16px; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
+    .field-group:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .field-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 4px; }
+    .field-value { font-size: 15px; font-weight: 600; color: #0f172a; }
+    .status-badge { display: inline-block; padding: 4px 10px; font-size: 12px; font-weight: 700; border-radius: 6px; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .attachment-card { margin-top: 20px; padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
+    .attachment-name { font-size: 13px; font-weight: 600; color: #0369a1; }
+    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 14px 24px; font-size: 11px; color: #94a3b8; text-align: center; }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="card">
     <div class="header">
-      <h2>Plant Data Update Notification</h2>
+      <h2>${plantName} Analysis Saved</h2>
       <p>SPIC / TFL Plant Management System</p>
     </div>
-    <div class="content">
-      <div class="badge">${plant.name}</div>
-      <p style="font-size: 14px; margin-top: 0;">Dear <strong>${assignedUser?.name || 'Plant Operator'}</strong>,</p>
-      <p style="font-size: 14px; line-height: 1.5; color: #475569;">
-        This automated notification is to inform you that operational data has been saved/updated for your assigned plant.
-      </p>
-      <table class="table-details">
-        <tr>
-          <td class="label">Plant</td>
-          <td class="value">${plant.name} (${plant.code})</td>
-        </tr>
-        <tr>
-          <td class="label">What Was Updated</td>
-          <td class="value" style="color: #0284c7;">${whatUpdated}</td>
-        </tr>
-        <tr>
-          <td class="label">Date & Time</td>
-          <td class="value">${formattedDate}</td>
-        </tr>
-        <tr>
-          <td class="label">Updated By</td>
-          <td class="value">${updatedBy}</td>
-        </tr>
-        ${mailAttachments.length > 0 ? `
-        <tr>
-          <td class="label">Attached Report</td>
-          <td class="value" style="color: #059669;">📎 ${finalFileName}</td>
-        </tr>` : ''}
-      </table>
-      ${mailAttachments.length > 0 ? `
-      <div class="attachment-box">
-        <span class="attachment-icon">📊</span>
-        <span class="attachment-text">Excel Report Attached: <strong>${finalFileName}</strong></span>
-      </div>` : ''}
-      ${details ? `<div class="notes-box"><strong>Update Details:</strong><br>${details.replace(/\n/g, '<br>')}</div>` : ''}
+    <div class="body-content">
+      <div class="field-group">
+        <div class="field-label">Plant</div>
+        <div class="field-value">${plantName}</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Analysis</div>
+        <div class="field-value">${analysisType}</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Saved Date</div>
+        <div class="field-value">${dateFormatted}</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Saved Time</div>
+        <div class="field-value">${timeFormatted} IST</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Status</div>
+        <div class="field-value"><span class="status-badge">Saved Successfully</span></div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Record ID</div>
+        <div class="field-value" style="font-family: monospace; font-size: 13px; color: #334155;">${recordId}</div>
+      </div>
+      <div class="attachment-card">
+        <span style="font-size: 18px;">📊</span>
+        <div class="attachment-name">Attached Excel Report: <strong>${excelFileName}</strong></div>
+      </div>
     </div>
     <div class="footer">
-      This is an automated notification sent exclusively to the assigned plant operator. The Excel report is attached directly to this email.
+      Sent to assigned plant operator (${assignedUser.email}). Generated from saved database record.
     </div>
   </div>
 </body>
 </html>
 `;
 
-    const targetRecipients =
-      recipientEmails && recipientEmails.length > 0
-        ? [...new Set(recipientEmails)].join(', ')
-        : primaryEmail;
+  // Transporter
+  const transporter = createNodemailerTransporter();
+  if (!transporter) {
+    return {
+      success: false,
+      emailStatus: 'failed',
+      error: 'SMTP credentials not configured in server/.env.',
+      recipient: assignedUser.email,
+    };
+  }
 
-    const mailOptions = {
+  const fromAddress = process.env.MAIL_FROM || process.env.MAIL_USER || '"Plant Management" <no-reply@spic.co.in>';
+
+  try {
+    const info = await transporter.sendMail({
       from: fromAddress,
-      to: targetRecipients,
+      to: assignedUser.email.trim(),
       subject,
       text: textBody,
       html: htmlBody,
-      attachments: mailAttachments,
-    };
+      attachments: [
+        {
+          filename: excelFileName,
+          content: Buffer.isBuffer(excelBuffer) ? excelBuffer : Buffer.from(excelBuffer, 'base64'),
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      ],
+    });
 
-    const info = await transporter.sendMail(mailOptions);
     console.log(
-      `[PlantNotification] ✅ Sent for plant "${plant.name}" ONLY to assigned user "${primaryEmail}" (MessageId: ${info.messageId})`
+      `[PlantNotification] ✅ Nodemailer confirmation: sent to ${assignedUser.email} (MessageId: ${info.messageId})`
     );
-
-    // 5. Activity Log Entry
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'PLANT_USER_NOTIFICATION_SENT',
-          userName: updatedBy || 'System Administrator',
-          role: 'admin',
-          details: `Automatic notification sent to assigned user (${primaryEmail}) for plant "${plant.name}". Update: "${whatUpdated}". Admin: "${updatedBy}".`,
-          timestamp: new Date(),
-        });
-      }
-    } catch (logErr) {
-      console.warn('[PlantNotification] ActivityLog error:', logErr.message);
-    }
-
     return {
       success: true,
-      plant: plant.name,
-      recipient: primaryEmail,
-      recipientName: assignedUser?.name,
+      emailStatus: 'sent',
       messageId: info.messageId,
+      recipient: assignedUser.email,
     };
-  } catch (error) {
-    console.error('[PlantNotification] Error dispatching notification:', error);
+  } catch (mailErr) {
+    console.error(`[PlantNotification] ❌ Nodemailer delivery failed: ${mailErr.message}`);
     return {
       success: false,
-      error: error.message,
+      emailStatus: 'failed',
+      error: mailErr.message,
+      recipient: assignedUser.email,
     };
   }
 };
 
+/**
+ * Centralized Save → Email workflow for ALL plant analysis pages.
+ *
+ * 1. Validate data (done prior or here)
+ * 2. Save to MongoDB (creates or accepts saved database record)
+ * 3. Record exact current date and time of the save operation (Asia/Kolkata)
+ * 4. Generate Excel file from saved database record
+ * 5. Resolve user assigned to that plant in MongoDB
+ * 6. Send email via Nodemailer with attached Excel
+ * 7. Mark emailStatus = 'sent' ONLY after Nodemailer confirms; otherwise 'failed'
+ * 8. Return unified response to frontend
+ */
+const executeSaveAndEmailWorkflow = async ({
+  plantIdentifier,
+  analysisType,
+  unit = '',
+  shift = '',
+  date = '',
+  data = {},
+  submittedBy = 'Plant Operator',
+  submittedById = null,
+  company = null,
+  explicitRecord = null,
+  rawBody = {},
+}) => {
+  // 1. Resolve Plant from MongoDB
+  const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit });
+  if (!plantDoc) {
+    return {
+      success: false,
+      emailSent: false,
+      emailStatus: 'failed',
+      message: `Plant could not be identified for: "${plantIdentifier}".`,
+    };
+  }
+
+  const plantName = plantDoc.name;
+  const plantCode = plantDoc.code;
+
+  // 2. Resolve Assigned User from MongoDB
+  const { assignedUser, primaryEmail, error: userError } = await getPlantAssignedUser(plantDoc._id);
+
+  // 3. Save to MongoDB Atlas (if not already saved explicitly)
+  let savedRecord = explicitRecord;
+  if (!savedRecord) {
+    const targetDate = date || rawBody.date || new Date().toISOString().split('T')[0];
+    const targetShift = shift || rawBody.shift || 'All Shifts';
+    const targetUnit = unit || rawBody.unit || '';
+    const payloadData =
+      data ||
+      rawBody.shifts ||
+      rawBody.rows ||
+      rawBody.readings ||
+      rawBody.units ||
+      rawBody.data ||
+      rawBody;
+
+    try {
+      savedRecord = await PlantAnalysisRecord.create({
+        plant: plantDoc._id,
+        plantName,
+        plantCode,
+        analysisType: analysisType || `${plantName} Analysis`,
+        unit: targetUnit,
+        date: targetDate,
+        shift: targetShift,
+        data: payloadData,
+        submittedBy,
+        submittedById,
+        company: company || plantDoc.company || null,
+        emailRecipient: primaryEmail || '',
+        emailStatus: 'pending',
+        savedAt: new Date(),
+      });
+      console.log(`[SaveAndEmail] ✅ Saved to MongoDB Atlas (Collection: "plantanalysisrecords", ID: ${savedRecord._id})`);
+    } catch (saveErr) {
+      console.error(`[SaveAndEmail] ❌ Database save failed: ${saveErr.message}`);
+      return {
+        success: false,
+        emailSent: false,
+        emailStatus: 'failed',
+        message: 'Unable to save the data. Please try again.',
+        error: saveErr.message,
+      };
+    }
+  }
+
+  // 4. Capture Server-Generated Timestamp
+  const serverTimestamp = savedRecord.createdAt || savedRecord.savedAt || new Date();
+  const { dateFormatted, timeFormatted, filenameDate } = formatISTDateTime(serverTimestamp);
+
+  // 5. Generate Excel (.xlsx) using saved database record
+  let excelResult = null;
+  const cleanCode = plantCode.replace(/[^a-zA-Z0-9]/g, '');
+  const cleanType = (analysisType || 'Analysis').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
+  const excelFileName = `${cleanCode}_Plant_${cleanType}_${filenameDate}.xlsx`;
+
+  try {
+    if (analysisType === 'Pure Salt Analysis' || cleanType.toLowerCase().includes('pure_salt')) {
+      const { generatePureSaltAnalysisExcel } = require('./excelService');
+      excelResult = await generatePureSaltAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else {
+      const { generatePlantReportExcel } = require('./excelService');
+      excelResult = await generatePlantReportExcel({
+        plantName,
+        plantCode,
+        analysisType: analysisType || `${plantName} Analysis`,
+        unit: savedRecord.unit || unit,
+        date: savedRecord.date || date,
+        shift: savedRecord.shift || shift,
+        submittedBy,
+        data: savedRecord.data || data,
+        rawBody,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    }
+  } catch (excelErr) {
+    console.warn(`[SaveAndEmail] ⚠️ Excel generation warning: ${excelErr.message}`);
+  }
+
+  // 6. Security Check: Assigned plant user
+  if (!primaryEmail || !assignedUser) {
+    console.warn(`[SaveAndEmail] No user assigned to plant "${plantName}". Skipping email dispatch.`);
+
+    // Record emailStatus in MongoDB as failed
+    const ModelToUpdate = explicitRecord?.constructor?.findByIdAndUpdate
+      ? explicitRecord.constructor
+      : PlantAnalysisRecord;
+
+    try {
+      if (savedRecord._id && ModelToUpdate.findByIdAndUpdate) {
+        await ModelToUpdate.findByIdAndUpdate(savedRecord._id, {
+          emailStatus: 'failed',
+          reportFileName: excelResult?.filename || excelFileName,
+        });
+        savedRecord.emailStatus = 'failed';
+      }
+    } catch (uErr) {}
+
+    return {
+      success: true,
+      emailSent: false,
+      emailStatus: 'failed',
+      message: 'No user is assigned to this plant.',
+      data: savedRecord,
+      excel: excelResult
+        ? {
+            fileName: excelResult.filename,
+            base64: excelResult.base64,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            sizeBytes: excelResult.buffer?.length,
+          }
+        : null,
+    };
+  }
+
+  // 7. Dispatch Email with Excel Attachment via Nodemailer
+  let emailResult = { success: false, emailStatus: 'failed', error: 'Excel generation failed' };
+  if (excelResult?.buffer) {
+    emailResult = await sendPlantAnalysisEmail({
+      plantDoc,
+      assignedUser,
+      analysisType: analysisType || `${plantName} Analysis`,
+      savedRecord,
+      excelBuffer: excelResult.buffer,
+      excelFileName: excelResult.filename || excelFileName,
+    });
+  }
+
+  // 8. Update emailStatus in MongoDB (ONLY "sent" after Nodemailer confirms; otherwise "failed")
+  const finalEmailStatus = emailResult.success ? 'sent' : 'failed';
+  const ModelToUpdate = explicitRecord?.constructor?.findByIdAndUpdate
+    ? explicitRecord.constructor
+    : PlantAnalysisRecord;
+
+  try {
+    if (savedRecord._id && ModelToUpdate.findByIdAndUpdate) {
+      await ModelToUpdate.findByIdAndUpdate(savedRecord._id, {
+        emailStatus: finalEmailStatus,
+        emailRecipient: assignedUser.email,
+        emailMessageId: emailResult.messageId || '',
+        reportFileName: excelResult?.filename || excelFileName,
+      });
+      savedRecord.emailStatus = finalEmailStatus;
+    }
+  } catch (upErr) {
+    console.warn(`[SaveAndEmail] Could not update record status: ${upErr.message}`);
+  }
+
+  // 9. Activity Log Entry
+  try {
+    if (ActivityLog && typeof ActivityLog.create === 'function') {
+      await ActivityLog.create({
+        action: 'PLANT_ANALYSIS_SAVED',
+        user: submittedById,
+        userName: submittedBy,
+        details: `${analysisType || 'Analysis'} saved for ${plantName}. Email ${
+          emailResult.success ? 'sent to ' + assignedUser.email : 'failed: ' + (emailResult.error || 'N/A')
+        }.`,
+        timestamp: new Date(),
+      });
+    }
+  } catch (logErr) {}
+
+  // 10. Return Response
+  if (emailResult.success) {
+    return {
+      success: true,
+      emailSent: true,
+      emailStatus: 'sent',
+      message: 'Saved & Emailed Successfully ✓',
+      data: savedRecord,
+      excel: excelResult
+        ? {
+            fileName: excelResult.filename,
+            base64: excelResult.base64,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            sizeBytes: excelResult.buffer?.length,
+          }
+        : null,
+    };
+  } else {
+    return {
+      success: true,
+      emailSent: false,
+      emailStatus: 'failed',
+      message: 'Data saved and Excel generated, but email sending failed.',
+      emailError: emailResult.error,
+      data: savedRecord,
+      excel: excelResult
+        ? {
+            fileName: excelResult.filename,
+            base64: excelResult.base64,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            sizeBytes: excelResult.buffer?.length,
+          }
+        : null,
+    };
+  }
+};
+
+/**
+ * Legacy wrapper for backwards compatibility
+ */
+const sendPlantUpdateNotification = async (params) => {
+  const { plant, whatUpdated, updatedBy, dateTime, details, excelBuffer, excelFileName } = params;
+  const plantDoc = await resolvePlant(plant, { analysisType: whatUpdated });
+  if (!plantDoc) return { success: false, error: `Could not identify plant for "${plant}"` };
+
+  const { assignedUser, primaryEmail } = await getPlantAssignedUser(plantDoc._id);
+  if (!assignedUser || !primaryEmail) {
+    return { success: false, error: 'No user is assigned to this plant.' };
+  }
+
+  return sendPlantAnalysisEmail({
+    plantDoc,
+    assignedUser,
+    analysisType: whatUpdated || `${plantDoc.name} Update`,
+    savedRecord: { createdAt: dateTime || new Date(), _id: 'rec_' + Date.now() },
+    excelBuffer,
+    excelFileName: excelFileName || `${plantDoc.code}_Report.xlsx`,
+  });
+};
+
 module.exports = {
+  ANALYSIS_PLANT_MAPPING,
+  formatISTDateTime,
   resolvePlant,
   getPlantAssignedUser,
+  sendPlantAnalysisEmail,
+  executeSaveAndEmailWorkflow,
   sendPlantUpdateNotification,
 };

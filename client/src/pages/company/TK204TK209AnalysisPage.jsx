@@ -225,7 +225,7 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Main Comparison Table Matching Screenshot ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden max-w-3xl">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
         {/* Table Header Bar with Integrated Date Selector */}
         <div className="px-5 py-2.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 flex-wrap">
@@ -265,8 +265,8 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* The Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-left border-collapse min-w-[700px] xl:min-w-full">
             <thead>
               <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
                 <th className="py-3 px-6 w-48 border-r border-slate-800">
@@ -347,23 +347,11 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Footer Summary / Quick Actions */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">Tanks: TK 204 & TK 209</span>
             <span>•</span>
             <span>Click any cell to edit numeric values</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save Changes</span>
-            </button>
           </div>
         </div>
       </div>

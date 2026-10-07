@@ -26,8 +26,12 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
     );
   }
 
-  // Not logged in → go to landing
+  // Not logged in → send super-admin attempts back to their login page, everyone else to landing
   if (!isAuthenticated) {
+    // If the requested route is under /super-admin, redirect to super-admin login
+    if (location.pathname.startsWith('/super-admin')) {
+      return <Navigate to="/login/super-admin" state={{ from: location }} replace />;
+    }
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
@@ -81,8 +85,14 @@ const DashboardLayout = ({ requiredRole = null, requiredCompany = null }) => {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-2 sm:px-4 sm:py-2.5 max-w-7xl w-full mx-auto ${user?.role === 'user' ? 'portal-view-only' : ''}`}>
-          <Outlet />
+        <main
+          className={`flex-1 overflow-y-auto overflow-x-hidden min-h-0 w-full p-3 sm:p-5 lg:p-6 2xl:p-8 ${
+            user?.role === 'user' ? 'portal-view-only' : ''
+          }`}
+        >
+          <div className="w-full max-w-none">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

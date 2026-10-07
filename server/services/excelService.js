@@ -130,8 +130,11 @@ const generatePureSaltAnalysisExcel = async (data) => {
     worksheet.getRow(rowNum).height = 20;
   };
 
-  addMetaRow(4, 'Plant:', data.plant || 'ACL Plant', 'Analysis Date:', data.date || formattedDate);
-  addMetaRow(5, 'Schedule:', data.shift || 'All Shifts & Day Composite', 'Submitted By:', data.submittedBy || 'Admin');
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+  addMetaRow(4, 'Plant:', data.plant || 'ACL Plant', 'Saved At:', savedDateTimeDisplay);
+  addMetaRow(5, 'Analysis:', data.analysisType || 'Pure Salt Analysis', 'Date / Shift:', `${data.date || formattedDate} (${data.shift || 'All Shifts'})`);
 
   // ── 4. Main Table Header (Row 7) ──
   const headers = [
@@ -990,7 +993,7 @@ const generatePlantReportExcel = async ({
     dateCell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
   }
 
-  // Row 5: Shift / Unit & Submitted By
+  // Row 5: Shift / Unit & Saved Date/Time
   worksheet.getCell('A5').value = 'Unit / Shift:';
   worksheet.getCell('A5').font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
   worksheet.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
@@ -998,16 +1001,20 @@ const generatePlantReportExcel = async ({
   worksheet.getCell('B5').value = unit ? `${unit} – ${shift}` : shift || 'All Shifts';
   worksheet.getCell('B5').font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
 
-  worksheet.getCell(`${midColLetter}5`).value = 'Recorded By:';
+  worksheet.getCell(`${midColLetter}5`).value = 'Saved At:';
   worksheet.getCell(`${midColLetter}5`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
   worksheet.getCell(`${midColLetter}5`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+  const savedTimeDisplay = data?.savedTimeFormatted || '';
+  const savedDateDisplay = data?.savedDateFormatted || formattedDate;
+  const savedFull = savedTimeDisplay ? `${savedDateDisplay} ${savedTimeDisplay} IST` : savedDateDisplay;
 
   if (midColIndex + 1 <= colCount) {
     if (midColIndex + 1 < colCount) {
       worksheet.mergeCells(`${midPlusOneLetter}5:${lastColLetter}5`);
     }
     const userCell = worksheet.getCell(`${midPlusOneLetter}5`);
-    userCell.value = submittedBy || 'Plant Administrator';
+    userCell.value = savedFull;
     userCell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
   }
 

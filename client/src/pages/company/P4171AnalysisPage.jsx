@@ -554,23 +554,10 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
         </div>
 
         {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">P417 Shift Analysis:</span>
             <span>Frequency: Shift Twice • Parameters: FNH₃ (Limit: 1.98–2.18 Kgm/m³), CNH₃, TCl, NaCl</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-p417-save-bottom"
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save P417</span>
-            </button>
           </div>
         </div>
       </div>

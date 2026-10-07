@@ -16,8 +16,13 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
+    const role = (user?.role || '').toLowerCase();
     logout();
-    navigate('/');
+    if (role === 'super_admin') {
+      navigate('/login/super-admin');
+    } else {
+      navigate('/');
+    }
   };
 
   const getRoleBadge = () => {
@@ -48,7 +53,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-4 sm:px-6 bg-white border-b border-slate-200/80 shadow-xs">
+    <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-3 sm:px-5 lg:px-6 2xl:px-8 bg-white border-b border-slate-200/80 shadow-xs">
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}

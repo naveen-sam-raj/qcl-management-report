@@ -544,23 +544,10 @@ const TK209AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">TK 209 Tolerance Limits:</span>
             <span>FNH₃: 0.58–0.78 • CNH₃: 2.26–2.46 • TCl: 2.94–3.14 • PCl: 0.58–0.78 Kgm/m³</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-tk209-save-bottom"
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition shadow-xs text-xs disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save TK 209</span>
-            </button>
           </div>
         </div>
       </div>

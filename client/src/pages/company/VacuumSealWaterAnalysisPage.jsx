@@ -256,9 +256,9 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
       </div>
 
       {/* ── MAIN CONTENT: Vacuum Seal Water Table ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden max-w-4xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
+        <div className="overflow-x-auto w-full table-responsive-container">
+          <table className="w-full text-left border-collapse min-w-[750px] xl:min-w-full">
             <thead>
               <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider font-extrabold select-none">
                 <th className="py-3 px-3 w-12 text-center border-r border-slate-700">#</th>
