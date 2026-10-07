@@ -20,12 +20,10 @@ const GreenstarLogin = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState('');
 
-  // Redirect if already logged in for GSFL or Super Admin
+  // Redirect if already logged in for GSFL
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (user.role === 'super_admin') {
-        navigate('/super-admin');
-      } else if (user.company?.code?.toUpperCase() === 'GSFL') {
+      if (user.company?.code?.toUpperCase() === 'GSFL') {
         if (user.role === 'company_admin') {
           navigate('/admin/greenstar');
         } else {

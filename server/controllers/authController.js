@@ -26,9 +26,6 @@ const login = async (req, res) => {
 
     if (superAdmin) {
       let isMatch = await superAdmin.comparePassword(password);
-      if (!isMatch && (password === 'Admin@QCL2026!' || password === 'Admin@123')) {
-        isMatch = true;
-      }
 
       if (!isMatch) {
         return res.status(401).json({

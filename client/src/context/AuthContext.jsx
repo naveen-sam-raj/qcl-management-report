@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { MOCK_USERS } from '../services/mockData';
 import api from '../services/api';
 
 const AuthContext = createContext(null);
@@ -66,58 +65,12 @@ export const AuthProvider = ({ children }) => {
       }
 
       // If no response received (network error / offline)
-      if (import.meta.env.DEV) {
-        console.warn('Backend login network error in DEV mode, attempting local fallback:', apiErr.message);
-      } else {
-        return {
-          success: false,
-          message: 'Unable to connect to authentication server. Please check your network connection.',
-        };
-      }
+      return {
+        success: false,
+        message: 'Unable to connect to authentication server. Please check your network connection.',
+      };
     }
 
-    // 2. Fallback to mock data if offline
-    await new Promise((r) => setTimeout(r, 400));
-    const matched = MOCK_USERS.find(
-      (u) =>
-        (u.username?.toLowerCase() === identifier.trim().toLowerCase() ||
-          u.email?.toLowerCase() === identifier.trim().toLowerCase()) &&
-        u.password === password
-    );
-
-    if (matched) {
-      if (matched.status === 'inactive' || matched.status === 'disabled') {
-        return { success: false, message: 'Your account has been disabled. Please contact administrator.' };
-      }
-
-      // Role check
-      if (expectedRole && matched.role !== expectedRole) {
-        return {
-          success: false,
-          message: `Unauthorized portal. This portal requires ${expectedRole.replace('_', ' ')} privileges.`,
-        };
-      }
-
-      // Company isolation check
-      if (companyCode && matched.role !== 'super_admin') {
-        const userCompanyCode = (matched.company?.code || matched.company || '').toString().toUpperCase();
-        const reqCompanyCode = companyCode.trim().toUpperCase();
-        if (userCompanyCode !== reqCompanyCode) {
-          const compName = matched.company?.name || userCompanyCode || 'another company';
-          return {
-            success: false,
-            message: `Access denied. This account is registered under ${compName}. You cannot log in to the ${reqCompanyCode} portal.`,
-          };
-        }
-      }
-
-      const { password: _, ...safeUser } = matched;
-      setUser(safeUser);
-      localStorage.setItem('spic_auth_user', JSON.stringify(safeUser));
-      return { success: true, user: safeUser };
-    }
-
-    return { success: false, message: 'Invalid username/email or password.' };
   };
 
   const logout = () => {

@@ -97,9 +97,6 @@ const login = async (req, res) => {
 
     if (admin) {
       let isMatch = await admin.comparePassword(password);
-      if (!isMatch && (password === 'Admin@QCL2026!' || password === 'Admin@123')) {
-        isMatch = true;
-      }
 
       if (!isMatch) {
         return res.status(401).json({
@@ -142,9 +139,6 @@ const login = async (req, res) => {
 
     if (userAdmin) {
       let isMatch = await userAdmin.matchPassword(password);
-      if (!isMatch && (password === 'Admin@QCL2026!' || password === 'Admin@123')) {
-        isMatch = true;
-      }
 
       if (!isMatch) {
         return res.status(401).json({
@@ -362,9 +356,7 @@ const changePassword = async (req, res) => {
       : typeof admin.matchPassword === 'function'
         ? await admin.matchPassword(currentPassword)
         : false;
-    const demoPasswords = ['Admin@QCL2026!', 'Admin@123'];
-    const finalPasswordValid = isPasswordValid || demoPasswords.includes(currentPassword);
-    if (!finalPasswordValid) {
+    if (!isPasswordValid) {
       return res.status(400).json({
         success: false,
         message: 'Current password is incorrect',

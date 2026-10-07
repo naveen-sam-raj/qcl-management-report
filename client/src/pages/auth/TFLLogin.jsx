@@ -20,12 +20,10 @@ const TFLLogin = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState('');
 
-  // Redirect if already logged in for TFL or Super Admin
+  // Redirect if already logged in for TFL
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (user.role === 'super_admin') {
-        navigate('/super-admin');
-      } else if (user.company?.code?.toUpperCase() === 'TFL') {
+      if (user.company?.code?.toUpperCase() === 'TFL') {
         if (user.role === 'company_admin') {
           navigate('/admin/tfl');
         } else {

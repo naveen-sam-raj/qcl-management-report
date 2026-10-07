@@ -20,12 +20,10 @@ const SPICLogin = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState('');
 
-  // Redirect if already logged in for SPIC or Super Admin
+  // Redirect if already logged in for SPIC
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (user.role === 'super_admin') {
-        navigate('/super-admin');
-      } else if (user.company?.code?.toUpperCase() === 'SPIC') {
+      if (user.company?.code?.toUpperCase() === 'SPIC') {
         if (user.role === 'company_admin') {
           navigate('/admin/spic');
         } else {
