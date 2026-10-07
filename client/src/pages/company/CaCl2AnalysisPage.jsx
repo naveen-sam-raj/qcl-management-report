@@ -76,12 +76,17 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
       try {
         const response = await api.get(`/api/cacl2-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
-          if (response.data.data.readings && response.data.data.readings.length > 0) {
-            setReadings(response.data.data.readings);
-          } else if (response.data.data.data && Array.isArray(response.data.data.data) && response.data.data.data.length > 0) {
-            setReadings(response.data.data.data);
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          
+          if (!record) {
+             // Leave default
+          } else if (record.readings && record.readings.length > 0) {
+            setReadings(record.readings);
+          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
+            setReadings(record.data);
           } else {
-             // Let it be default
+            // Leave default
           }
         }
       } catch (err) {

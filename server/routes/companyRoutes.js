@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getCompanies, getCompanyById, updateCompanyStatus } = require('../controllers/companyController');
 const { protect } = require('../middleware/auth');
+const { PlantAnalysisRecord } = require('../models');
 const { authorizeRoles } = require('../middleware/rbac');
 
 // Public or authenticated access to company list

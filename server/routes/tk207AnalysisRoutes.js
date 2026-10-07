@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { ActivityLog } = require('../models');
+const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for TK 207 analysis records
 const tk207Records = [];
@@ -64,6 +64,34 @@ router.post('/', async (req, res) => {
 
     tk207Records.unshift(record);
 
+    // Persist to MongoDB PlantAnalysisRecord
+    try {
+      if (PlantAnalysisRecord) {
+        await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
+          },
+          {
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    } catch (dbErr) {
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+    }
+
+
     // Activity log entry
     try {
       if (ActivityLog && typeof ActivityLog.create === 'function') {
@@ -103,6 +131,26 @@ router.get('/', async (req, res) => {
     const { date, startDate, endDate } = req.query;
 
     let results = [...tk207Records];
+
+    if (date) {
+      try {
+        if (PlantAnalysisRecord) {
+          const query = { date };
+          query.analysisType = 'TK 207 Analysis';
+          
+          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+          if (doc && doc.data) {
+            return res.status(200).json({
+              success: true,
+              data: [doc.data] // return as array because the frontend usually expects array or we modified it to handle both
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.warn('MongoDB lookup note:', dbErr.message);
+      }
+    }
+
 
     if (date) {
       results = results.filter((r) => r.date === date);

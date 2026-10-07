@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { ActivityLog } = require('../models');
+const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for Raw Water Analysis records
 const rawWaterRecords = [
@@ -99,6 +99,34 @@ router.post('/', async (req, res) => {
       rawWaterRecords[existingIndex] = { ...rawWaterRecords[existingIndex], ...record };
     } else {
       rawWaterRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
+    try {
+      if (PlantAnalysisRecord) {
+        await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
+          },
+          {
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    } catch (dbErr) {
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+    }
+
     }
 
     // Keep memory cache under 50 records
@@ -149,6 +177,24 @@ router.get('/', (req, res) => {
     const { date, plant } = req.query;
 
     if (date) {
+
+      try {
+        if (PlantAnalysisRecord) {
+          const query = { date };
+          
+          
+          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+          if (doc && doc.data) {
+            return res.status(200).json({
+              success: true,
+              data: doc.data
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.warn('MongoDB lookup note:', dbErr.message);
+      }
+
       const match = rawWaterRecords.find(
         (r) => r.date === date && (!plant || r.plant.toLowerCase() === plant.toLowerCase())
       );

@@ -8,6 +8,7 @@ const {
   retryPlantAnalysisEmail,
 } = require('../controllers/plantController');
 const { protect } = require('../middleware/auth');
+const { PlantAnalysisRecord } = require('../models');
 const { authorizeRoles } = require('../middleware/rbac');
 
 router.use(protect);

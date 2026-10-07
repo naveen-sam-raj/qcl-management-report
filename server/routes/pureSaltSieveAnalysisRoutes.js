@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { ActivityLog } = require('../models');
+const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 
 // In-memory / cache storage for pure salt sieve records
@@ -50,6 +50,34 @@ router.post('/', async (req, res) => {
     };
 
     sieveRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
+    try {
+      if (PlantAnalysisRecord) {
+        await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
+          },
+          {
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    } catch (dbErr) {
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+    }
+
 
     // Activity log entry
     try {

@@ -69,12 +69,17 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
       try {
         const response = await api.get(`/api/tk204-tk209-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
-          if (response.data.data.parameters) {
-            setParameters(response.data.data.parameters);
-          } else if (response.data.data.data && Array.isArray(response.data.data.data)) {
-            setParameters(response.data.data.data);
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          
+          if (!record) {
+             // Leave default
+          } else if (record.parameters) {
+            setParameters(record.parameters);
+          } else if (record.data && Array.isArray(record.data)) {
+            setParameters(record.data);
           } else {
-             // Let it be default
+            // Leave default
           }
         }
       } catch (err) {

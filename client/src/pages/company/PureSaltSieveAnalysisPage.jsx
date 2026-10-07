@@ -109,12 +109,17 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       try {
         const response = await api.get(`/api/pure-salt-sieve-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
-          if (response.data.data.rows) {
-            setData(response.data.data.rows);
-          } else if (response.data.data.data && !Array.isArray(response.data.data.data)) {
-            setData(response.data.data.data);
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          
+          if (!record) {
+             // Leave default
+          } else if (record.rows) {
+            setData(record.rows);
+          } else if (record.data && !Array.isArray(record.data)) {
+            setData(record.data);
           } else {
-             // Let it be default
+            // Leave default
           }
         }
       } catch (err) {

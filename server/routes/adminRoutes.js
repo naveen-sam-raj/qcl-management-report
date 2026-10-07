@@ -9,6 +9,7 @@ const {
   deleteCompanyAdmin,
 } = require('../controllers/adminController');
 const { protect } = require('../middleware/auth');
+const { PlantAnalysisRecord } = require('../models');
 const { authorizeRoles } = require('../middleware/rbac');
 
 // All admin routes strictly require Super Admin authorization

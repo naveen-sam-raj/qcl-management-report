@@ -70,12 +70,17 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
       try {
         const response = await api.get(`/api/raw-salt-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
-          if (response.data.data.parameters) {
-            setFormData(response.data.data.parameters);
-          } else if (response.data.data.data && !Array.isArray(response.data.data.data)) {
-            setFormData(response.data.data.data);
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          
+          if (!record) {
+             // Leave default
+          } else if (record.parameters) {
+            setFormData(record.parameters);
+          } else if (record.data && !Array.isArray(record.data)) {
+            setFormData(record.data);
           } else {
-             // Let it be default
+            // Leave default
           }
         }
       } catch (err) {
