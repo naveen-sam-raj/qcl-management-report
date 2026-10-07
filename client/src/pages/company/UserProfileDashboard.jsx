@@ -74,15 +74,45 @@ const UserProfileDashboard = () => {
         setTelemetry(mockTelemetry);
       }
 
-      // Filter reports for this user's company/plant
-      const companyCode = safeUser.company?.code;
-      const plantCode = safeUser.plant?.code;
-      const reports = MOCK_REPORTS.filter(
-        (r) =>
-          (!companyCode || r.company.code === companyCode) &&
-          (!plantCode || r.plant?.code === plantCode)
-      );
-      setUserReports(reports);
+      // Fetch real reports for this user
+      try {
+        const [reportsRes, psaRes] = await Promise.allSettled([
+          api.get(`/api/reports?userId=${userId}`),
+          api.get('/api/pure-salt-analysis')
+        ]);
+
+        let dbReports = [];
+        if (reportsRes.status === 'fulfilled' && reportsRes.value.data?.success) {
+          dbReports = reportsRes.value.data.reports;
+        }
+
+        let mappedPsa = [];
+        if (psaRes.status === 'fulfilled' && psaRes.value.data?.success) {
+          const psaData = psaRes.value.data.data || [];
+          // Filter Pure Salt Analysis for this user
+          const userPsa = psaData.filter(r => 
+            r.submittedById === userId || 
+            (r.submittedBy && r.submittedBy === safeUser.name)
+          );
+          
+          mappedPsa = userPsa.map(r => ({
+            _id: r._id || r.id,
+            title: `${r.plant || 'Plant'} - ${r.analysisType || 'Analysis'}`,
+            reportType: r.analysisType || 'Analysis',
+            period: r.shift || 'Daily',
+            status: 'completed',
+            createdAt: r.createdAt || r.savedAt || r.date || new Date(),
+          }));
+        }
+
+        const combinedReports = [...dbReports, ...mappedPsa].sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
+        setUserReports(combinedReports);
+      } catch (err) {
+        console.warn('Error fetching user reports:', err);
+        setUserReports([]);
+      }
       } catch (err) {
         navigate(-1);
       } finally {
@@ -91,7 +121,7 @@ const UserProfileDashboard = () => {
     };
 
     loadProfile();
-  }, [userId, navigate]);
+  }, [userId, navigate, adminUser]);
 
   // Determine the back URL based on the admin's company
   const getBackUrl = () => {
