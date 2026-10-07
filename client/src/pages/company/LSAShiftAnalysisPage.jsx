@@ -115,6 +115,29 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
   const [data, setData] = useState(buildEmptyData());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+
+  // Fetch existing data when date changes
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/lsa-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data) {
+          if (response.data.data.rows) {
+            setData(response.data.data.rows);
+          } else if (response.data.data.data && !Array.isArray(response.data.data.data)) {
+            setData(response.data.data.data);
+          } else {
+             // Let it be default
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
 

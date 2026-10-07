@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -68,6 +68,29 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
+
+  // Fetch existing data when date changes
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/cacl2-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data) {
+          if (response.data.data.readings && response.data.data.readings.length > 0) {
+            setReadings(response.data.data.readings);
+          } else if (response.data.data.data && Array.isArray(response.data.data.data) && response.data.data.data.length > 0) {
+            setReadings(response.data.data.data);
+          } else {
+             // Let it be default
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {

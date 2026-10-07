@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -144,6 +144,29 @@ const TK209AnalysisPage = ({ plantId = 'acl' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Fetch existing data when date changes
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/tk-209-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data) {
+          if (response.data.data.rows) {
+            setData(response.data.data.rows);
+          } else if (response.data.data.data && !Array.isArray(response.data.data.data)) {
+            setData(response.data.data.data);
+          } else {
+             // Let it be default
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Cell Value Change Handler ──
   const handleCellChange = useCallback((shiftKey, paramKey, value) => {

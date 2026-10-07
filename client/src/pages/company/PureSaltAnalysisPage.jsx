@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -144,6 +144,35 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [savePhase, setSavePhase] = useState('idle');
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
   const [lastExcelData, setLastExcelData] = useState(null);
+
+    // Fetch existing data when date changes
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/pure-salt-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data) {
+          const records = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+          const record = records.find(r => r.date === date) || records[0];
+          
+          if (record && record.rows) {
+            setData(record.rows);
+          } else if (record && record.data && !Array.isArray(record.data)) {
+            setData(record.data);
+          } else {
+            setData(buildEmptyData());
+          }
+        } else {
+          setData(buildEmptyData());
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+        setData(buildEmptyData());
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Real-time input change (Accepts exact values without limits/tolerances) ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
