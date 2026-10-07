@@ -100,34 +100,20 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     return next();
   }
 
-  // Intercept the response JSON method to trigger workflow before completing response
+  // Intercept the response JSON method to trigger workflow in the background
   const originalJson = res.json;
-  res.json = async function (data) {
+  res.json = function (data) {
     if (res.statusCode >= 200 && res.statusCode < 300 && data && data.success !== false) {
-      try {
-        const workflowResult = await dispatchAutoNotification(req, url, data);
-        if (workflowResult) {
-          data.emailSent = workflowResult.emailSent;
-          data.emailStatus = workflowResult.emailStatus;
-          if (workflowResult.message) {
-            data.message = workflowResult.message;
-          }
-          if (workflowResult.excel) {
-            data.excel = workflowResult.excel;
-          }
-          if (workflowResult.data) {
-            data.data = workflowResult.data;
-          }
-          if (workflowResult.emailError) {
-            data.emailError = workflowResult.emailError;
-          }
-        }
-      } catch (err) {
-        console.warn('[AutoPlantEmail] Exception in workflow:', err.message);
-        data.emailSent = false;
-        data.emailStatus = 'failed';
-        data.message = 'Data saved and Excel generated, but email sending failed.';
-        data.emailError = err.message;
+      // Fire and forget: execute email workflow in background
+      dispatchAutoNotification(req, url, data).catch((err) => {
+        console.warn('[AutoPlantEmail] Exception in background workflow:', err.message);
+      });
+      
+      // Provide immediate feedback to the frontend
+      data.emailSent = false;
+      data.emailStatus = 'processing';
+      if (data.message && typeof data.message === 'string' && !data.message.includes('Email')) {
+        data.message += ' (Email notification is processing in background).';
       }
     }
     return originalJson.call(this, data);

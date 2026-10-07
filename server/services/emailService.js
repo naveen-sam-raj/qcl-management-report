@@ -65,21 +65,32 @@ const getMicrosoftGraphAccessToken = async () => {
   params.append('grant_type', 'client_credentials');
   params.append('client_secret', clientSecret);
 
-  const response = await fetch(tokenEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Microsoft 365 token error: ${errorText}`);
+  try {
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Microsoft 365 token error: ${errorText}`);
+    }
+
+    const data = await response.json();
+    cachedM365Token = data.access_token;
+    m365TokenExpiresAt = Date.now() + ((data.expires_in || 3600) * 1000);
+    return cachedM365Token;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw new Error(`Microsoft 365 token fetch failed: ${err.message}`);
   }
-
-  const data = await response.json();
-  cachedM365Token = data.access_token;
-  m365TokenExpiresAt = Date.now() + ((data.expires_in || 3600) * 1000);
-  return cachedM365Token;
 };
 
 /**
@@ -208,6 +219,9 @@ ACL Plant`;
         saveToSentItems: true,
       };
 
+      const sendController = new AbortController();
+      const sendTimeoutId = setTimeout(() => sendController.abort(), 10000);
+
       const response = await fetch(graphEndpoint, {
         method: 'POST',
         headers: {
@@ -215,7 +229,10 @@ ACL Plant`;
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(emailPayload),
+        signal: sendController.signal,
       });
+
+      clearTimeout(sendTimeoutId);
 
       if (response.ok) {
         console.log(`[Microsoft Graph] ✅ Excel report emailed to ${recipientEmail} via Graph API`);
