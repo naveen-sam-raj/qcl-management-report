@@ -357,7 +357,41 @@ Timezone: Asia/Kolkata (${fullIST})
 Attachment: ${excelFileName}
 `;
 
-  const htmlBody = `
+  // Extract data values
+  let dataHtml = '';
+  if (savedRecord?.data) {
+    let dataEntries = [];
+    const extractEntries = (obj, prefix = '') => {
+      for (const [key, val] of Object.entries(obj)) {
+        if (key === 'id' || key === 'plant' || key === 'date' || key === 'analysisType' || key === 'company' || key === '_id' || key === 'submittedBy' || key === 'submittedById') continue;
+        if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+          extractEntries(val, prefix + key + '.');
+        } else if (Array.isArray(val)) {
+          dataEntries.push({ key: prefix + key, val: \`[Array of \${val.length} items]\` });
+        } else if (val !== '' && val !== null && val !== undefined) {
+          dataEntries.push({ key: prefix + key, val: String(val) });
+        }
+      }
+    };
+    extractEntries(savedRecord.data);
+
+    if (dataEntries.length > 0) {
+      dataHtml = \`
+      <div class="field-group">
+        <div class="field-label">Entered Values</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px;">
+          \${dataEntries.map(e => \`
+            <tr>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 600; color: #475569; width: 50%;">\${e.key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; color: #0f172a;">\${e.val}</td>
+            </tr>
+          \`).join('')}
+        </table>
+      </div>\`;
+    }
+  }
+
+  const htmlBody = \`
 <!DOCTYPE html>
 <html>
 <head>
@@ -382,46 +416,47 @@ Attachment: ${excelFileName}
 <body>
   <div class="card">
     <div class="header">
-      <h2>${plantName} Analysis Saved</h2>
+      <h2>\${plantName} Analysis Saved</h2>
       <p>SPIC / TFL Plant Management System</p>
     </div>
     <div class="body-content">
       <div class="field-group">
         <div class="field-label">Plant</div>
-        <div class="field-value">${plantName}</div>
+        <div class="field-value">\${plantName}</div>
       </div>
       <div class="field-group">
         <div class="field-label">Analysis</div>
-        <div class="field-value">${analysisType}</div>
+        <div class="field-value">\${analysisType}</div>
       </div>
       <div class="field-group">
         <div class="field-label">Saved Date</div>
-        <div class="field-value">${dateFormatted}</div>
+        <div class="field-value">\${dateFormatted}</div>
       </div>
       <div class="field-group">
         <div class="field-label">Saved Time</div>
-        <div class="field-value">${timeFormatted} IST</div>
+        <div class="field-value">\${timeFormatted} IST</div>
       </div>
+      \${dataHtml}
       <div class="field-group">
         <div class="field-label">Status</div>
         <div class="field-value"><span class="status-badge">Saved Successfully</span></div>
       </div>
       <div class="field-group">
         <div class="field-label">Record ID</div>
-        <div class="field-value" style="font-family: monospace; font-size: 13px; color: #334155;">${recordId}</div>
+        <div class="field-value" style="font-family: monospace; font-size: 13px; color: #334155;">\${recordId}</div>
       </div>
       <div class="attachment-card">
         <span style="font-size: 18px;">📊</span>
-        <div class="attachment-name">Attached Excel Report: <strong>${excelFileName}</strong></div>
+        <div class="attachment-name">Attached Excel Report: <strong>\${excelFileName}</strong></div>
       </div>
     </div>
     <div class="footer">
-      Sent to assigned plant operator (${assignedUser.email}). Generated from saved database record.
+      Sent to assigned plant operator (\${assignedUser.email}). Generated from saved database record.
     </div>
   </div>
 </body>
 </html>
-`;
+\`;
 
   // Transporter
   const transporter = createNodemailerTransporter();
