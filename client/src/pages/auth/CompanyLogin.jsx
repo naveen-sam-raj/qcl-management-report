@@ -126,8 +126,9 @@ const CompanyLogin = () => {
     );
   }
 
-  const displayCode = company?.code || 'Company';
+  const displayCode = company?.name || 'Company';
   const displayName = company?.name || 'Company Portal';
+  const emailPrefix = (company?.name || 'company').split(' ')[0].toLowerCase();
 
   return (
     <div className="h-screen max-h-screen relative flex flex-col font-sans selection:bg-blue-600 selection:text-white overflow-hidden">
@@ -203,7 +204,7 @@ const CompanyLogin = () => {
                     required
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder={`admin@${displayCode.toLowerCase()}.in`}
+                    placeholder={`admin@${emailPrefix}.in`}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:blue-500 focus:border-transparent transition shadow-2xs font-medium"
                   />
                 </div>
@@ -295,7 +296,7 @@ const CompanyLogin = () => {
                 required
                 value={forgotEmail}
                 onChange={(e) => setForgotEmail(e.target.value)}
-                placeholder={`admin@${displayCode.toLowerCase()}.in`}
+                placeholder={`admin@${emailPrefix}.in`}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>

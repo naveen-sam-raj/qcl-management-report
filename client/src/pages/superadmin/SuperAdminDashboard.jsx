@@ -961,7 +961,7 @@ const SuperAdminDashboard = () => {
             >
               <option value="">— Select a company —</option>
               {companies.map((c) => (
-                <option key={c._id} value={c._id}>{c.name} ({c.code})</option>
+                <option key={c._id} value={c._id}>{c.name}</option>
               ))}
             </select>
           </div>
