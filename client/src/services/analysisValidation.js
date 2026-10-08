@@ -2206,7 +2206,9 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
                                                                                     ? 'cbd'
                                                                             : isOffsetRawWater
                                                                               ? 'raw-water'
-                                                                          : isOffsetDMWater
+                                                                          : isOffsetCoolingWater
+                                                                              ? 'cooling-water'
+                                                                            : isOffsetDMWater
                                                                             ? 'dm-water'
                                                                           : isOffsetBFW
                                                                             ? 'bfw'
