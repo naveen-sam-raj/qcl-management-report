@@ -99,8 +99,46 @@ const updateCompanyStatus = async (req, res) => {
   }
 };
 
+// @desc    Create new company
+// @route   POST /api/companies
+// @access  Private (Super Admin)
+const createCompany = async (req, res) => {
+  try {
+    const { name, logo } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Company name is required.' });
+    }
+    if (!logo) {
+      return res.status(400).json({ success: false, message: 'Company logo is required.' });
+    }
+
+    const code = name.toUpperCase().replace(/\s+/g, '_').substring(0, 10) + '_' + Date.now().toString().slice(-4);
+
+    const existing = await Company.findOne({ name: { $regex: new RegExp('^' + name + '$', 'i') } });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Company name already exists.' });
+    }
+
+    const company = await Company.create({
+      name,
+      code,
+      logo,
+      status: 'active'
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Company created successfully',
+      company
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getCompanies,
   getCompanyById,
   updateCompanyStatus,
+  createCompany,
 };

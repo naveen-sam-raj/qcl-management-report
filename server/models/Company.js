@@ -44,6 +44,10 @@ const companySchema = new mongoose.Schema(
       type: String,
       default: '#1E40AF',
     },
+    logo: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

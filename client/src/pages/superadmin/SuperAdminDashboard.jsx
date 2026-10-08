@@ -35,6 +35,12 @@ const SuperAdminDashboard = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all');
 
+  // Create Company Modal
+  const [isCreateCompanyModalOpen, setIsCreateCompanyModalOpen] = useState(false);
+  const [createCompanyData, setCreateCompanyData] = useState({ name: '', logo: '' });
+  const [createCompanySubmitting, setCreateCompanySubmitting] = useState(false);
+  const [createCompanyError, setCreateCompanyError] = useState('');
+
   // Create Admin Modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [adminFormData, setAdminFormData] = useState({
@@ -271,6 +277,64 @@ const SuperAdminDashboard = () => {
     setFormError('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+  };
+
+  // CREATE Company
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/jpg', 'image/webp'].includes(file.type)) {
+      setCreateCompanyError('Invalid image format. Only JPG, PNG, WebP are allowed.');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setCreateCompanyError('Logo size must be less than 2MB.');
+      return;
+    }
+
+    setCreateCompanyError('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setCreateCompanyData((prev) => ({ ...prev, logo: event.target.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateCompany = async (e) => {
+    e.preventDefault();
+    setCreateCompanyError('');
+
+    if (!createCompanyData.name.trim()) {
+      setCreateCompanyError('Company name is required.');
+      return;
+    }
+    if (!createCompanyData.logo) {
+      setCreateCompanyError('Company logo is required.');
+      return;
+    }
+
+    setCreateCompanySubmitting(true);
+    try {
+      const res = await api.post('/companies', {
+        name: createCompanyData.name.trim(),
+        logo: createCompanyData.logo
+      });
+      if (res.data?.success && res.data.company) {
+        setCompanies((prev) => [...prev, res.data.company]);
+        showToast('Company created successfully!', 'success');
+        setIsCreateCompanyModalOpen(false);
+        setCreateCompanyData({ name: '', logo: '' });
+        
+        // Refresh full lists to be safe
+        fetchData();
+      }
+    } catch (err) {
+      setCreateCompanyError(err.response?.data?.message || 'Failed to create company.');
+    } finally {
+      setCreateCompanySubmitting(false);
+    }
   };
 
   // CREATE admin
@@ -619,12 +683,21 @@ const SuperAdminDashboard = () => {
           </button>
 
           <button
+            id="btn-create-company"
+            onClick={() => { setCreateCompanyData({ name: '', logo: '' }); setCreateCompanyError(''); setIsCreateCompanyModalOpen(true); }}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/25 transition"
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Create Company</span>
+          </button>
+
+          <button
             id="btn-create-company-admin"
             onClick={() => { resetCreateForm(); setIsCreateModalOpen(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/25 transition"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Create Company Admin</span>
+            <span>Create Admin</span>
           </button>
         </div>
       </div>
@@ -1364,6 +1437,80 @@ const SuperAdminDashboard = () => {
                 </>
               ) : (
                 <span>Change Password</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ===================== CREATE COMPANY MODAL ===================== */}
+      <Modal
+        isOpen={isCreateCompanyModalOpen}
+        onClose={() => setIsCreateCompanyModalOpen(false)}
+        title="Create New Company"
+        icon={<Building2 className="w-5 h-5 text-blue-600" />}
+      >
+        <form onSubmit={handleCreateCompany} className="p-6 space-y-5">
+          {createCompanyError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <p className="text-xs font-semibold text-rose-800">{createCompanyError}</p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+              Company Name <span className="text-blue-600">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Test Fertilizer Company"
+              value={createCompanyData.name}
+              onChange={(e) => setCreateCompanyData({ ...createCompanyData, name: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+              Company Logo <span className="text-blue-600">*</span>
+            </label>
+            <input
+              type="file"
+              accept="image/jpeg, image/png, image/jpg, image/webp"
+              onChange={handleLogoUpload}
+              required={!createCompanyData.logo}
+              className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+            {createCompanyData.logo && (
+              <div className="mt-3 p-3 border border-slate-200 rounded-xl bg-slate-50 flex items-center justify-center h-24">
+                <img src={createCompanyData.logo} alt="Preview" className="max-h-full max-w-full object-contain" />
+              </div>
+            )}
+            <p className="mt-1.5 text-[10px] text-slate-500">Max size 2MB. JPG, PNG, or WebP.</p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsCreateCompanyModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createCompanySubmitting}
+              className="inline-flex items-center gap-2 px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-md shadow-blue-600/20 disabled:opacity-50"
+            >
+              {createCompanySubmitting ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Creating...</span>
+                </>
+              ) : (
+                <span>Create Company</span>
               )}
             </button>
           </div>
