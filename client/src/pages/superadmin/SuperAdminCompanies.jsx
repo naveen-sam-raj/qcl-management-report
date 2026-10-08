@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
@@ -33,6 +33,9 @@ const SuperAdminCompanies = () => {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const statusFilter = queryParams.get('status') || 'all';
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all');
 
   // Create Company Modal
@@ -776,7 +779,7 @@ const SuperAdminCompanies = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {companies.map((c) => (
+              {companies.filter(c => statusFilter === 'all' || c.status === statusFilter).map((c) => (
                 <tr key={c._id} className="hover:bg-slate-50/80 transition duration-150">
                   <td className="px-6 py-4">
                     <img src={c.logo || '/default-company.png'} alt={c.name} className="w-10 h-10 object-contain rounded-lg shadow-sm border border-slate-200" />
@@ -849,7 +852,7 @@ const SuperAdminCompanies = () => {
               className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
             >
               <option value="">— Select a company —</option>
-              {companies.map((c) => (
+              {companies.filter(c => statusFilter === 'all' || c.status === statusFilter).map((c) => (
                 <option key={c._id} value={c._id}>{c.name}</option>
               ))}
             </select>
@@ -1072,3 +1075,4 @@ const SuperAdminCompanies = () => {
   );
 };
 export default SuperAdminCompanies;
+

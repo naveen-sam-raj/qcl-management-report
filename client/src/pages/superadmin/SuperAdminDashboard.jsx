@@ -704,21 +704,48 @@ const SuperAdminDashboard = () => {
 
       {/* Stats Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        {/* 1. Registered Companies */}
+        <div 
+          className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm cursor-pointer hover:border-blue-400 hover:shadow-md transition"
+          onClick={() => navigate('/super-admin/companies')}
+        >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-              <Users className="w-5 h-5 text-purple-600" />
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+              <Building2 className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <div className="text-2xl font-extrabold text-slate-900">{admins.length}</div>
-              <div className="text-xs text-slate-500 font-medium">Total Company Admins</div>
+              <div className="text-2xl font-extrabold text-slate-900">{companies.length}</div>
+              <div className="text-xs text-slate-500 font-medium">Registered Companies</div>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        
+        {/* 2. Active Companies */}
+        <div 
+          className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm cursor-pointer hover:border-emerald-400 hover:shadow-md transition"
+          onClick={() => navigate('/super-admin/companies?status=active')}
+        >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
               <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <div className="text-2xl font-extrabold text-slate-900">
+                {companies.filter((c) => c.status === 'active').length}
+              </div>
+              <div className="text-xs text-slate-500 font-medium">Active Companies</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Active Admins */}
+        <div 
+          className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm cursor-pointer hover:border-purple-400 hover:shadow-md transition"
+          onClick={() => navigate('/super-admin/admins?status=active')}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
+              <Users className="w-5 h-5 text-purple-600" />
             </div>
             <div>
               <div className="text-2xl font-extrabold text-slate-900">
@@ -728,15 +755,84 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold text-slate-900">{companies.length}</div>
-              <div className="text-xs text-slate-500 font-medium">Registered Companies</div>
-            </div>
+      </div>
+
+      {/* Dashboard Data Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+        {/* Companies Overview */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-5 py-4 border-b border-slate-200">
+            <h2 className="text-sm font-bold text-slate-900">Companies Overview</h2>
+          </div>
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company Name</th>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Admins</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {companies.map((c) => {
+                  const companyAdminsCount = admins.filter(a => a.company && (a.company._id === c._id || a.company.code === c.code)).length;
+                  return (
+                    <tr key={c._id} className="hover:bg-slate-50 transition">
+                      <td className="px-5 py-3 font-medium text-slate-900 text-xs">{c.name}</td>
+                      <td className="px-5 py-3">
+                        {c.status === 'active' ? (
+                          <span className="text-emerald-600 font-bold text-[10px]">Active</span>
+                        ) : (
+                          <span className="text-slate-500 font-bold text-[10px] capitalize">{c.status}</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs font-semibold text-slate-700">{companyAdminsCount}</td>
+                    </tr>
+                  );
+                })}
+                {companies.length === 0 && (
+                  <tr><td colSpan="3" className="px-5 py-4 text-center text-xs text-slate-500">No companies found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Recent Admins */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-5 py-4 border-b border-slate-200">
+            <h2 className="text-sm font-bold text-slate-900">Recent Admins</h2>
+          </div>
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Admin Name</th>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company</th>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Created Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {[...admins].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 5).map((a) => (
+                  <tr key={a._id} className="hover:bg-slate-50 transition">
+                    <td className="px-5 py-3 font-medium text-slate-900 text-xs">{a.name}</td>
+                    <td className="px-5 py-3 text-xs text-slate-600">{a.company?.name || 'Unknown'}</td>
+                    <td className="px-5 py-3">
+                      {a.status === 'active' ? (
+                        <span className="text-emerald-600 font-bold text-[10px]">Active</span>
+                      ) : (
+                        <span className="text-slate-500 font-bold text-[10px] capitalize">{a.status}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-[10px] text-slate-500">{formatDateDisplay(a.createdAt)}</td>
+                  </tr>
+                ))}
+                {admins.length === 0 && (
+                  <tr><td colSpan="4" className="px-5 py-4 text-center text-xs text-slate-500">No admins found.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

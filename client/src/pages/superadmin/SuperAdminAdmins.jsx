@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
@@ -33,6 +33,9 @@ const SuperAdminAdmins = () => {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const urlStatusFilter = queryParams.get('status');
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all');
 
   // Create Company Modal
@@ -247,7 +250,8 @@ const SuperAdminAdmins = () => {
       selectedCompanyFilter === 'all' ||
       a.company?._id === selectedCompanyFilter ||
       a.company?.code?.toLowerCase() === selectedCompanyFilter.toLowerCase();
-    return matchSearch && matchCompany;
+    const matchStatus = !urlStatusFilter || a.status === urlStatusFilter;
+    return matchSearch && matchCompany && matchStatus;
   });
 
   // Get company badge color
@@ -1457,3 +1461,4 @@ const SuperAdminAdmins = () => {
 };
 
 export default SuperAdminAdmins;
+
