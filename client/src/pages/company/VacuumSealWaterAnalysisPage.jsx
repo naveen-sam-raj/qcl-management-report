@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -19,9 +20,9 @@ import {
 
 // Default initial readings matching the user's legacy screenshot
 const DEFAULT_READINGS = [
-  { id: '1', time: '07:00', fnh3: '1530', cnh3: '0' },
-  { id: '2', time: '15:00', fnh3: '', cnh3: '' },
-  { id: '3', time: '23:00', fnh3: '', cnh3: '' },
+  { id: '1', time: '07:00', fnh3: '1530', cnh3: '0', ca: 'Nil' },
+  { id: '2', time: '15:00', fnh3: '', cnh3: '', ca: '' },
+  { id: '3', time: '23:00', fnh3: '', cnh3: '', ca: '' },
 ];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -308,11 +309,23 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                   <div>CNH₃</div>
                   <div className="text-[10px] font-normal text-indigo-300 normal-case">ppm (Combined Ammonia)</div>
                 </th>
+                <th className="py-3 px-5 text-center border-r border-slate-700">
+                  <div>Ca</div>
+                  <div className="text-[10px] font-normal text-teal-300 normal-case">Limit: NIL</div>
+                </th>
                 <th className="py-3 px-2 w-16 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {readings.map((row, idx) => (
+              {readings.map((row, idx) => {
+                const fnh3Limit = getCellLimit('offset', 'vacuum-seal-water', 'Day', 'fnh3');
+                const fnh3Valid = fnh3Limit && row.fnh3 !== '' ? validateCellValue(row.fnh3, fnh3Limit) : { isOutOfLimit: false };
+
+                const caLimit = getCellLimit('offset', 'vacuum-seal-water', 'Day', 'ca');
+                const isCaNil = row.ca !== undefined && ['nil', 'n', 'ni', 'none', '-'].includes(String(row.ca).toLowerCase().trim());
+                const caValid = caLimit && row.ca !== '' ? (isCaNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
+
+                return (
                 <tr
                   key={row.id}
                   className="hover:bg-sky-50/30 transition-colors"
@@ -342,14 +355,25 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                        errors[`${row.id}_fnh3`]
+                        errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
                           ? 'border-red-500 bg-red-50 text-red-900'
                           : row.fnh3 !== '' && row.fnh3 !== '0'
                           ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {fnh3Limit.formattedLabel || `Limit: ${fnh3Limit.min}-${fnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && row.fnh3 === '' && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {fnh3Limit.formattedRange || `${fnh3Limit.min}-${fnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* CNH3 */}
                   <td className="py-3 px-4 text-center border-r border-slate-100">
@@ -368,6 +392,32 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       }`}
                     />
                   </td>
+                  {/* Ca */}
+                  <td className="py-3 px-4 text-center border-r border-slate-100">
+                    <input
+                      type="text"
+                      value={row.ca !== undefined ? row.ca : ''}
+                      onChange={(e) => handleCellChange(row.id, 'ca', e.target.value)}
+                      placeholder="Nil"
+                      className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
+                        errors[`${row.id}_ca`] || caValid.isOutOfLimit
+                          ? 'border-red-500 bg-red-50 text-red-900'
+                          : row.ca !== undefined && row.ca !== ''
+                          ? 'border-teal-300 bg-teal-50/30 font-bold text-teal-950 focus:border-teal-600'
+                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                      }`}
+                    />
+                      {caValid.isOutOfLimit && !errors[`${row.id}_ca`] && caLimit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          Limit: NIL
+                        </div>
+                      )}
+                      {!caValid.isOutOfLimit && !errors[`${row.id}_ca`] && caLimit && (row.ca === '' || row.ca === undefined) && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          NIL
+                        </div>
+                      )}
+                  </td>
 
                   {/* ACTION */}
                   <td className="py-3 px-2 text-center">
@@ -381,7 +431,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     </button>
                   </td>
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
         </div>
