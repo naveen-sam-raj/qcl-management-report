@@ -1201,19 +1201,13 @@ export const ANALYSIS_LIMITS_REGISTRY = {
   offset: {
     'sewer-water': {
       shift: {
-        sec200: {
-          fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-          cnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-        },
-        sec400: {
-          fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-          cnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-        },
-        finalOutlet: {
-          fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-          cnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
-          pcl: { paramName: 'PCL', frequency: 'Shift', formattedRange: 'NIL', formattedLabel: 'Limit: NIL' },
-        },
+        sec200fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        sec200cnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        sec400fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        sec400cnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        finaloutletfnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        finaloutletcnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'CNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
+        finaloutletpcl: { paramName: 'PCL', frequency: 'Shift', formattedRange: 'NIL', formattedLabel: 'Limit: NIL' },
       },
     },
     'vacuum-seal-water': {

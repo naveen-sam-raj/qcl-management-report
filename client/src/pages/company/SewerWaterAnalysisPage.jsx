@@ -449,7 +449,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((row, idx) => {
-                const getLimit = (category, param) => getCellLimit('offset', 'sewer-water', 'Shift', param, category);
+                const getLimit = (category, param) => getCellLimit('offset', 'sewer-water', 'Shift', `${category}_${param}`);
                 
                 const sec200Fnh3Limit = getLimit('sec200', 'fnh3');
                 const sec200Cnh3Limit = getLimit('sec200', 'cnh3');
