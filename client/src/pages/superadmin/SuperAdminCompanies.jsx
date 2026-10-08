@@ -763,43 +763,43 @@ const SuperAdminCompanies = () => {
 
       {/* Companies Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
-          <h2 className="text-sm font-bold text-slate-900">Registered Companies</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{companies.length} company/companies found</p>
+        <div className="px-6 py-5 border-b border-slate-200">
+          <h2 className="text-lg font-bold text-slate-900">Registered Companies</h2>
+          <p className="text-sm text-slate-500 mt-1">{companies.length} company/companies found</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+          <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Logo</th>
-                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company Name</th>
-                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Created On</th>
-                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Logo</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Company Name</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Created On</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {companies.filter(c => statusFilter === 'all' || c.status === statusFilter).map((c) => (
                 <tr key={c._id} className="hover:bg-slate-50/80 transition duration-150">
                   <td className="px-6 py-4">
-                    <img src={c.logo || '/default-company.png'} alt={c.name} className="w-10 h-10 object-contain rounded-lg shadow-sm border border-slate-200" />
+                    <img src={c.logo || '/default-company.png'} alt={c.name} className="w-12 h-12 object-contain rounded-lg shadow-sm border border-slate-200" />
                   </td>
                   <td className="px-6 py-4">
-                    <div className="font-bold text-slate-900 text-[13px]">{c.name}</div>
-                    <div className="text-[11px] font-medium text-slate-500 mt-0.5">Code: {c.code}</div>
+                    <div className="font-bold text-slate-900 text-[15px]">{c.name}</div>
+                    <div className="text-[13px] font-medium text-slate-500 mt-1">Code: {c.code}</div>
                   </td>
                   <td className="px-6 py-4">
                     {c.status === 'active' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
                         <span className="w-1 h-1 rounded-full bg-emerald-500" /> Active
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold">
-                        <AlertCircle className="w-3 h-3" /> {c.status}
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold">
+                        <AlertCircle className="w-4 h-4" /> {c.status}
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-[11px] font-medium text-slate-600">
+                  <td className="px-6 py-4 text-sm font-medium text-slate-600">
                     {formatDateDisplay(c.createdAt)}
                   </td>
                   <td className="px-6 py-4">
@@ -807,16 +807,16 @@ const SuperAdminCompanies = () => {
                       <button
                         onClick={() => openEditCompanyModal(c)}
                         title="Edit company"
-                        className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                        className="p-2.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => openDeleteCompanyModal(c)}
                         title="Delete/Deactivate company"
-                        className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                        className="p-2.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>
@@ -1075,4 +1075,5 @@ const SuperAdminCompanies = () => {
   );
 };
 export default SuperAdminCompanies;
+
 
