@@ -1199,6 +1199,14 @@ export const ANALYSIS_LIMITS_REGISTRY = {
     },
   },
   offset: {
+    'distiller-waste': {
+      'onceIn1Hour': {
+        exCao: { min: -0.72, max: 1.28, unit: 'g/L', paramName: 'Ex.CaO', frequency: '1 Hrs Once', target: 0.28, tolerance: 1.0 },
+        fnh3: { min: 250, max: 450, unit: 'ppm', paramName: 'FNH3', frequency: '1 Hrs Once', target: 350, tolerance: 100 },
+        cnh3: { min: 400, max: 600, unit: 'ppm', paramName: 'CNH3', frequency: '1 Hrs Once', target: 500, tolerance: 100 },
+        tnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'TNH3', frequency: '1 Hrs Once', target: 1000, tolerance: 100 },
+      },
+    },
     'fly-ash': {
       day: {
         combustible: { unit: '%', paramName: 'Combustibles', label: 'Combustibles', frequency: 'Day', isDirectRange: true, formattedRange: '5.0 %', formattedLabel: 'Limit: 5.0 %' },
@@ -1938,6 +1946,11 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'gas-concentration-analysis' ||
     cleanAnalysis === 'sa-gas-conc' ||
     cleanAnalysis === 'sa-gas-conc-analysis';
+  const isOffsetDistillerWaste =
+    cleanAnalysis === 'distiller-waste' ||
+    cleanAnalysis === 'distillerwaste' ||
+    cleanAnalysis === 'distiller-waste-analysis' ||
+    cleanAnalysis === 'offset-distiller-waste';
   const isOffsetFlyAsh =
     cleanAnalysis === 'fly-ash' ||
     cleanAnalysis === 'flyash' ||
@@ -1982,7 +1995,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'acl-cacl2-analysis' ||
     cleanAnalysis.includes('cacl2');
 
-  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
+  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetDistillerWaste && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
     return null;
   }
 
@@ -2040,7 +2053,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
     return null;
   }
-  if ((isOffsetFlyAsh || isOffsetBottomAsh || isOffsetCBD || isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
+  if ((isOffsetDistillerWaste || isOffsetFlyAsh || isOffsetBottomAsh || isOffsetCBD || isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
     return null;
   }
 
@@ -2129,12 +2142,14 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
                                                                       ? 'e501-t501'
                                                                       : isSAGasConc
                                                                         ? 'gas-conc'
-                                                                        : isOffsetFlyAsh
-                                                                          ? 'fly-ash'
-                                                                          : isOffsetBottomAsh
-                                                                            ? 'bottom-ash'
-                                                                            : isOffsetCBD
-                                                                              ? 'cbd'
+                                                                        : isOffsetDistillerWaste
+                                                                          ? 'distiller-waste'
+                                                                          : isOffsetFlyAsh
+                                                                            ? 'fly-ash'
+                                                                            : isOffsetBottomAsh
+                                                                              ? 'bottom-ash'
+                                                                              : isOffsetCBD
+                                                                                ? 'cbd'
                                                                             : isOffsetRawWater
                                                                               ? 'raw-water'
                                                                           : isOffsetDMWater

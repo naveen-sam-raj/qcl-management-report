@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -354,7 +355,20 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {readings.map((row, idx) => (
+              {readings.map((row, idx) => {
+                const exCaoLimit = getCellLimit('offset', 'distiller-waste', '1 Hrs Once', 'exCao');
+                const exCaoValid = exCaoLimit && row.exCao !== '' ? validateCellValue(row.exCao, exCaoLimit) : { isOutOfLimit: false };
+
+                const fnh3Limit = getCellLimit('offset', 'distiller-waste', '1 Hrs Once', 'fnh3');
+                const fnh3Valid = fnh3Limit && row.fnh3 !== '' ? validateCellValue(row.fnh3, fnh3Limit) : { isOutOfLimit: false };
+
+                const cnh3Limit = getCellLimit('offset', 'distiller-waste', '1 Hrs Once', 'cnh3');
+                const cnh3Valid = cnh3Limit && row.cnh3 !== '' ? validateCellValue(row.cnh3, cnh3Limit) : { isOutOfLimit: false };
+
+                const tnh3Limit = getCellLimit('offset', 'distiller-waste', '1 Hrs Once', 'tnh3');
+                const tnh3Valid = tnh3Limit && row.tnh3 !== '' ? validateCellValue(row.tnh3, tnh3Limit) : { isOutOfLimit: false };
+
+                return (
                 <tr
                   key={row.id}
                   className="hover:bg-violet-50/30 transition-colors"
@@ -384,14 +398,25 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'exCao', e.target.value)}
                       placeholder="00.00"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_exCao`]
+                        errors[`${row.id}_exCao`] || exCaoValid.isOutOfLimit
                           ? 'border-red-500 bg-red-50'
                           : row.exCao !== '' && row.exCao !== '00.00' && row.exCao !== '0'
                           ? 'border-amber-300 bg-amber-50/30 font-bold text-amber-950 focus:border-amber-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {exCaoValid.isOutOfLimit && !errors[`${row.id}_exCao`] && exCaoLimit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {exCaoLimit.formattedLabel || `Limit: ${exCaoLimit.min}-${exCaoLimit.max}`}
+                        </div>
+                      )}
+                      {!exCaoValid.isOutOfLimit && !errors[`${row.id}_exCao`] && exCaoLimit && row.exCao === '' && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {exCaoLimit.formattedRange || `${exCaoLimit.min}-${exCaoLimit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* FNH3 */}
                   <td className="py-2.5 px-2 text-center border-r border-slate-100">
@@ -402,14 +427,25 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_fnh3`]
+                        errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
                           ? 'border-red-500 bg-red-50'
                           : row.fnh3 !== '' && row.fnh3 !== '0'
                           ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {fnh3Limit.formattedLabel || `Limit: ${fnh3Limit.min}-${fnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && row.fnh3 === '' && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {fnh3Limit.formattedRange || `${fnh3Limit.min}-${fnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* CNH3 */}
                   <td className="py-2.5 px-2 text-center border-r border-slate-100">
@@ -420,14 +456,25 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_cnh3`]
+                        errors[`${row.id}_cnh3`] || cnh3Valid.isOutOfLimit
                           ? 'border-red-500 bg-red-50'
                           : row.cnh3 !== '' && row.cnh3 !== '0'
                           ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {cnh3Valid.isOutOfLimit && !errors[`${row.id}_cnh3`] && cnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {cnh3Limit.formattedLabel || `Limit: ${cnh3Limit.min}-${cnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!cnh3Valid.isOutOfLimit && !errors[`${row.id}_cnh3`] && cnh3Limit && row.cnh3 === '' && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {cnh3Limit.formattedRange || `${cnh3Limit.min}-${cnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* TNH3 (Total NH3) */}
                   <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/40">
@@ -438,14 +485,25 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'tnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_tnh3`]
+                        errors[`${row.id}_tnh3`] || tnh3Valid.isOutOfLimit
                           ? 'border-red-500 bg-red-50'
                           : row.tnh3 !== '' && row.tnh3 !== '0'
                           ? 'border-emerald-300 bg-emerald-50/40 font-black text-emerald-950 focus:border-emerald-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {tnh3Valid.isOutOfLimit && !errors[`${row.id}_tnh3`] && tnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {tnh3Limit.formattedLabel || `Limit: ${tnh3Limit.min}-${tnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!tnh3Valid.isOutOfLimit && !errors[`${row.id}_tnh3`] && tnh3Limit && row.tnh3 === '' && idx === 0 && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {tnh3Limit.formattedRange || `${tnh3Limit.min}-${tnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* NaHCO3 */}
                   <td className="py-2.5 px-2 text-center border-r border-slate-100">
@@ -477,7 +535,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                     </button>
                   </td>
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
         </div>
