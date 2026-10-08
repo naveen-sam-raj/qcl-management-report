@@ -512,8 +512,8 @@ export const ANALYSIS_LIMITS_REGISTRY = {
       },
       composition: {
         nacl: { target: 92.00, tolerance: 0.10, unit: '%' }, // Allowed: 91.90% – 92.10%
-        ca: { target: 0.10, tolerance: 0.05, unit: '%' }, // Allowed: 0.05% – 0.15%
-        mg: { target: 0.04, tolerance: 0.05, unit: '%' }, // Allowed: 0.00% – 0.09%
+        ca: { target: 0.14, tolerance: 0.05, unit: '%' }, // Allowed: 0.09% – 0.19%
+        mg: { target: 0.05, tolerance: 0.05, unit: '%' }, // Allowed: 0.00% – 0.10%
         so4: { target: 0.46, tolerance: 0.10, unit: '%' }, // Allowed: 0.36% – 0.56%
         ir: { target: 0.30, tolerance: 0.20, unit: '%' }, // Allowed: 0.10% – 0.50%
         h2o: { target: 7.00, tolerance: 1.00, unit: '%' }, // Allowed: 6.00% – 8.00%
@@ -714,17 +714,7 @@ export const ANALYSIS_LIMITS_REGISTRY = {
       },
     },
   },
-  acl: {
-    'cacl2': {
-      day: {
-        ph: { target: 7.7, tolerance: 1.0, min: 6.7, max: 8.7, unit: '', paramName: 'pH', label: 'pH', frequency: 'Day', formattedRange: '6.7 – 8.7', formattedTarget: '7.7', formattedTolerance: '±1', referenceDisplay: '7.7 ± 1 (6.7 – 8.7)' },
-        conc: { target: 20, tolerance: 5.0, min: 15, max: 25, unit: '%', paramName: 'CONC', label: 'CONC', frequency: 'Day', formattedRange: '15% – 25%', formattedTarget: '20%', formattedTolerance: '±5.0%', referenceDisplay: '20% ± 5.0% (15% – 25%)' },
-        fnh3: { target: 1000, tolerance: 50, min: 950, max: 1050, unit: 'PPM', paramName: 'FNH3', label: 'FNH₃', frequency: 'Day', formattedRange: '950 – 1050 PPM', formattedTarget: '1000 PPM', formattedTolerance: '±50 PPM', referenceDisplay: '1000 ± 50 PPM (950 – 1050 PPM)' },
-        cnh3: { target: 500, tolerance: 100, min: 400, max: 600, unit: 'PPM', paramName: 'CNH3', label: 'CNH₃', frequency: 'Day', formattedRange: '400 – 600 PPM', formattedTarget: '500 PPM', formattedTolerance: '±100 PPM', referenceDisplay: '500 ± 100 PPM (400 – 600 PPM)' },
-        ss: { target: 60, tolerance: 10, min: 50, max: 70, unit: 'PPM', paramName: 'SS', label: 'SS', frequency: 'Day', formattedRange: '50 – 70 PPM', formattedTarget: '60 PPM', formattedTolerance: '±10 PPM', referenceDisplay: '60 ± 10 PPM (50 – 70 PPM)' },
-      },
-    },
-  },
+
   sa: {
     'tk401': {
       // Applied strictly to SA Plant - TK 401 Analysis - Frequency: Once in a shift (I Shift, II Shift, III Shift)
