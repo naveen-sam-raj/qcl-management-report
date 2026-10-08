@@ -1199,6 +1199,24 @@ export const ANALYSIS_LIMITS_REGISTRY = {
     },
   },
   offset: {
+    'cooling-water': {
+      day: {
+        ph: { min: 7.2, max: 7.9, unit: '', paramName: 'pH', frequency: 'Day' },
+        frc: { min: 0.2, max: 0.5, unit: 'ppm', paramName: 'FRC', frequency: 'Day' },
+        cl: { min: 600, max: 800, unit: 'ppm', paramName: 'Cl', frequency: 'Day', target: 700, tolerance: 100 },
+        opo4: { min: 6, max: 8, unit: 'ppm', paramName: 'O-PO4', frequency: 'Day' },
+        turbidity: { min: 40, max: 60, unit: 'NTU', paramName: 'Turbidity', frequency: 'Day', target: 50, tolerance: 10 },
+        tds: { min: 1800, max: 2500, unit: 'ppm', paramName: 'TDS', frequency: 'Day' },
+        fe: { min: 1.8, max: 2.2, unit: 'ppm', paramName: 'Fe', frequency: 'Day', target: 2, tolerance: 0.2 },
+        sio2: { min: 60, max: 80, unit: 'ppm', paramName: 'SiO2', frequency: 'Day', target: 70, tolerance: 10 },
+        alk: { min: 250, max: 350, unit: 'ppm', paramName: 'ALK', frequency: 'Day', target: 300, tolerance: 50 },
+        so4: { min: 450, max: 550, unit: 'ppm', paramName: 'SO4', frequency: 'Day', target: 500, tolerance: 50 },
+        th: { min: 450, max: 550, unit: 'ppm', paramName: 'TH', frequency: 'Day', target: 500, tolerance: 50 },
+        cah: { min: 250, max: 350, unit: 'ppm', paramName: 'CaH', frequency: 'Day', target: 300, tolerance: 50 },
+        mgh: { min: 150, max: 250, unit: 'ppm', paramName: 'MgH', frequency: 'Day', target: 200, tolerance: 50 },
+        ammn: { paramName: 'Amm.N', frequency: 'Day', formattedRange: 'NIL', formattedLabel: 'Limit: NIL' },
+      },
+    },
     'sewer-water': {
       shift: {
         sec200fnh3: { min: 900, max: 1100, unit: 'ppm', paramName: 'FNH3', frequency: 'Shift', target: 1000, tolerance: 100 },
@@ -1998,6 +2016,11 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'raw-water-analysis' ||
     cleanAnalysis === 'rawwater-analysis' ||
     cleanAnalysis === 'offset-raw-water';
+  const isOffsetCoolingWater =
+    cleanAnalysis === 'cooling-water' ||
+    cleanAnalysis === 'coolingwater' ||
+    cleanAnalysis === 'cooling-water-analysis' ||
+    cleanAnalysis === 'offset-cooling-water';
   const isOffsetDMWater =
     cleanAnalysis === 'dm-water' ||
     cleanAnalysis === 'dmwater' ||
@@ -2022,7 +2045,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'acl-cacl2-analysis' ||
     cleanAnalysis.includes('cacl2');
 
-  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetSewerWater && !isOffsetVacuumSealWater && !isOffsetDistillerWaste && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
+  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetSewerWater && !isOffsetVacuumSealWater && !isOffsetDistillerWaste && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetCoolingWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
     return null;
   }
 
@@ -2080,7 +2103,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
     return null;
   }
-  if ((isOffsetSewerWater || isOffsetVacuumSealWater || isOffsetDistillerWaste || isOffsetFlyAsh || isOffsetBottomAsh || isOffsetCBD || isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
+  if ((isOffsetSewerWater || isOffsetVacuumSealWater || isOffsetDistillerWaste || isOffsetFlyAsh || isOffsetBottomAsh || isOffsetCBD || isOffsetRawWater || isOffsetCoolingWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
     return null;
   }
 
