@@ -240,6 +240,12 @@ export const ANALYSIS_LIMITS_REGISTRY = {
         tss: { target: 10, tolerance: 10, min: 0, max: 20, unit: 'PPM', paramName: 'TSS', frequency: 'Once in a Week', formattedRange: '0–20 PPM', formattedTarget: '10 PPM', formattedTolerance: '±10 PPM' },
       },
     },
+    'lsa-at-500#': {
+      onceIn2Hrs: SA_LSA_500_LIMITS,
+    },
+    'lsa-500': {
+      onceIn2Hrs: SA_LSA_500_LIMITS,
+    },
     'lsa': {
       onceInAShift: {
         na2co3: { target: 98.5, tolerancePlus: 1.0, toleranceMinus: 0.0, min: 98.5, max: 99.5, unit: '%', paramName: 'Na2CO3', label: 'Na₂CO₃', frequency: 'Once in a Shift', formattedRange: '98.5% – 99.5%', formattedTarget: '98.5%', formattedTolerance: '+1.0 / -0.0' },
@@ -1019,6 +1025,12 @@ export const ANALYSIS_LIMITS_REGISTRY = {
         c: { target: 20, tolerance: 2.0, min: 18, max: 22, unit: '%', paramName: 'Moisture Option C', label: 'Option C', frequency: 'Once in 4 Hours', formattedRange: '18% – 22%', formattedTarget: '20%', formattedTolerance: '±2.0%' },
       },
     },
+    'lsa-at-500#': {
+      onceIn2Hrs: SA_LSA_500_LIMITS,
+    },
+    'lsa-500': {
+      onceIn2Hrs: SA_LSA_500_LIMITS,
+    },
     'lsa': {
       // Applied strictly to SA Plant - LSA Shift Analysis - Frequency: Once in a Shift
       // Parameters: Na2CO3, NaCl, Fe2O3 (Fe), Na2SO4, VM, IR, BD, Turbidity
@@ -1346,6 +1358,12 @@ export const SA_LSA_LIMITS = {
   turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in a Shift', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
   trubidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in a Shift', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
 };
+export const SA_LSA_500_LIMITS = {
+  nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
+  bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
+  turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
+};
+
 export const LSA_LIMITS = SA_LSA_LIMITS;
 
 export const SA_LSA_BAGGING_SHIFT_LIMITS = {
@@ -2233,7 +2251,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if (!analysisLimits) return null;
 
   const category = getRowCategory(cleanAnalysis, rowKey);
-  const categoryLimits = analysisLimits[rowKey] || (category && analysisLimits[category]) || analysisLimits['day'] || analysisLimits['onceIn1Hour'] || analysisLimits['onceIn4Hours'] || analysisLimits['shiftTwice'] || analysisLimits['onceInAShift'] || analysisLimits['shift'] || analysisLimits['onceInAWeek'] || analysisLimits['week'];
+  const categoryLimits = analysisLimits[rowKey] || (category && analysisLimits[category]) || analysisLimits['day'] || analysisLimits['onceIn2Hrs'] || analysisLimits['onceIn1Hour'] || analysisLimits['onceIn4Hours'] || analysisLimits['shiftTwice'] || analysisLimits['onceInAShift'] || analysisLimits['shift'] || analysisLimits['onceInAWeek'] || analysisLimits['week'];
   if (!categoryLimits) return null;
 
   const normalizedParamKey = String(paramKey || '').toLowerCase().replace(/[^a-z0-9]/g, '');

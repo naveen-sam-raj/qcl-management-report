@@ -31,12 +31,14 @@ router.post('/', async (req, res) => {
     // Validate numeric values if entered
     if (Array.isArray(rows)) {
       rows.forEach((row, index) => {
-        if (row.nacl !== '' && row.nacl !== null && row.nacl !== undefined) {
-          const num = Number(row.nacl);
-          if (isNaN(num)) {
-            errors.push(`Row ${index + 1} (${row.time || 'Unknown time'}): NaCl % must be a valid number.`);
+        ['nacl', 'bd', 'turbidity'].forEach(f => {
+          if (row[f] !== '' && row[f] !== null && row[f] !== undefined) {
+            const num = Number(row[f]);
+            if (isNaN(num)) {
+              errors.push(`Row ${index + 1} (${row.time || 'Unknown time'}): ${f.toUpperCase()} must be a valid number.`);
+            }
           }
-        }
+        });
       });
     } else if (typeof rows === 'object' && rows !== null) {
       Object.entries(rows).forEach(([rowKey, valObj]) => {
@@ -44,7 +46,7 @@ router.post('/', async (req, res) => {
         if (val !== '' && val !== null && val !== undefined) {
           const num = Number(val);
           if (isNaN(num)) {
-            errors.push(`Slot '${rowKey}': NaCl % must be a valid number.`);
+            errors.push(`Slot '${rowKey}': Invalid number.`);
           }
         }
       });
