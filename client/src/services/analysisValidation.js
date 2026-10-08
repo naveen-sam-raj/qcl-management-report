@@ -241,10 +241,18 @@ export const ANALYSIS_LIMITS_REGISTRY = {
       },
     },
     'lsa-at-500#': {
-      onceIn2Hrs: SA_LSA_500_LIMITS,
+      onceIn2Hrs: {
+        nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
+        bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
+        turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
+      },
     },
     'lsa-500': {
-      onceIn2Hrs: SA_LSA_500_LIMITS,
+      onceIn2Hrs: {
+        nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
+        bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
+        turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
+      },
     },
     'lsa': {
       onceInAShift: {
@@ -1026,10 +1034,18 @@ export const ANALYSIS_LIMITS_REGISTRY = {
       },
     },
     'lsa-at-500#': {
-      onceIn2Hrs: SA_LSA_500_LIMITS,
+      onceIn2Hrs: {
+        nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
+        bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
+        turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
+      },
     },
     'lsa-500': {
-      onceIn2Hrs: SA_LSA_500_LIMITS,
+      onceIn2Hrs: {
+        nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
+        bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
+        turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
+      },
     },
     'lsa': {
       // Applied strictly to SA Plant - LSA Shift Analysis - Frequency: Once in a Shift
@@ -1358,11 +1374,7 @@ export const SA_LSA_LIMITS = {
   turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in a Shift', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
   trubidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in a Shift', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
 };
-export const SA_LSA_500_LIMITS = {
-  nacl: { target: 1.0, tolerancePlus: 1.0, toleranceMinus: 0.5, min: 0.5, max: 2.0, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in 2 Hrs', formattedRange: '0.5 – 2.0 %', formattedTarget: '1.0 %', formattedTolerance: '+1.0 / -0.5' },
-  bd: { min: 500, max: 750, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Once in 2 Hrs', formattedRange: '500 – 750 g/L' },
-  turbidity: { target: 80, tolerance: 5.0, min: 75, max: 85, unit: 'NTU', paramName: 'Turbidity', label: 'Turbidity', frequency: 'Once in 2 Hrs', formattedRange: '75 – 85 NTU', formattedTarget: '80 NTU', formattedTolerance: '±5.0 NTU' },
-};
+
 
 export const LSA_LIMITS = SA_LSA_LIMITS;
 
