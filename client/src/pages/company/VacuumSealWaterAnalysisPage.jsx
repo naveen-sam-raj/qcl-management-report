@@ -368,7 +368,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                           {fnh3Limit.formattedLabel || `Limit: ${fnh3Limit.min}-${fnh3Limit.max}`}
                         </div>
                       )}
-                      {!fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && row.fnh3 === '' && idx === 0 && (
+                      {!fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && row.fnh3 === '' && (
                         <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
                           {fnh3Limit.formattedRange || `${fnh3Limit.min}-${fnh3Limit.max}`}
                         </div>
@@ -412,7 +412,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                           Limit: NIL
                         </div>
                       )}
-                      {!caValid.isOutOfLimit && !errors[`${row.id}_ca`] && caLimit && (row.ca === '' || row.ca === undefined) && idx === 0 && (
+                      {!caValid.isOutOfLimit && !errors[`${row.id}_ca`] && caLimit && (row.ca === '' || row.ca === undefined) && (
                         <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
                           NIL
                         </div>
