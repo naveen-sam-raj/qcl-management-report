@@ -22,7 +22,7 @@ const emptyRow = { time: '07:00', ph: '', frc: '', cl: '', opo4: '', turbidity: 
 const emptyRow200 = { time: '07:00', ph: '', frc: '', opo4: '', cl: '' };
 
 const DEFAULT_READINGS_DAY = [
-  { id: 't07', ...(is200 ? emptyRow200 : emptyRow), time: '07:00' },
+  { id: 't07', ...emptyRow, time: '07:00' },
   { id: 't09', ...emptyRow, time: '09:00' },
   { id: 't11', ...emptyRow, time: '11:00' },
   { id: 't13', ...emptyRow, time: '13:00' },
@@ -112,7 +112,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
       ...prev,
       {
         id: nextId,
-        ...emptyRow,
+        ...(is200 ? emptyRow200 : emptyRow),
         time: '19:00',
       },
     ]);
