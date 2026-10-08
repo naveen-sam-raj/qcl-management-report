@@ -698,6 +698,69 @@ export const ANALYSIS_LIMITS_REGISTRY = {
         h: { target: 0.10, tolerance: 0.20, min: 0.03, max: 0.30, unit: 'Kgm/m³', paramName: 'PCL/TCL', label: 'PCL/TCL', frequency: 'Once in a shift', formattedRange: '0.03–0.30 Kgm/m³', formattedTarget: '0.05–0.10 Kgm/m³', formattedTolerance: '+0.2 / -0.02', notation: '0.05–0.10 Kgm/m³ +0.2 / -0.02' },
       },
     },
+    'acl-product': {
+      day: {
+        nh4cl: { target: 97.0, tolerance: 0.5, min: 96.5, max: 97.5, unit: '%', paramName: 'NH4Cl', frequency: 'Day' },
+        nacl: { target: 2.0, tolerance: 0.1, min: 1.9, max: 2.1, unit: '%', paramName: 'NaCl', frequency: 'Day' },
+        fe2o3: { target: 0.013, tolerance: 0.005, min: 0.008, max: 0.018, unit: '%', paramName: 'Fe2O3', frequency: 'Day' },
+        h2o: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'H2O', frequency: 'Day' },
+        ir: { target: 0.30, tolerance: 0.10, min: 0.20, max: 0.40, unit: '%', paramName: 'IR', frequency: 'Day' },
+        bd: { target: 1000, tolerance: 0.10, min: 999.9, max: 1000.1, unit: 'g/L', paramName: 'BD', frequency: 'Day' },
+      },
+      composition: {
+        nh4cl: { target: 97.0, tolerance: 0.5, min: 96.5, max: 97.5, unit: '%', paramName: 'NH4Cl', frequency: 'Day' },
+        nacl: { target: 2.0, tolerance: 0.1, min: 1.9, max: 2.1, unit: '%', paramName: 'NaCl', frequency: 'Day' },
+        fe2o3: { target: 0.013, tolerance: 0.005, min: 0.008, max: 0.018, unit: '%', paramName: 'Fe2O3', frequency: 'Day' },
+        h2o: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'H2O', frequency: 'Day' },
+        ir: { target: 0.30, tolerance: 0.10, min: 0.20, max: 0.40, unit: '%', paramName: 'IR', frequency: 'Day' },
+        bd: { target: 1000, tolerance: 0.10, min: 999.9, max: 1000.1, unit: 'g/L', paramName: 'BD', frequency: 'Day' },
+      },
+    },
+    'acl-300': {
+      onceInAShift: {
+        nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', frequency: 'Once in a shift' },
+        bss18: { target: 5, tolerance: 1.0, min: 4, max: 6, unit: '%', paramName: 'BSS 18', frequency: 'Once in a shift' },
+        bss44: { target: 60, tolerance: 5, min: 55, max: 65, unit: '%', paramName: 'BSS 44', frequency: 'Once in a shift' },
+      },
+      shift: {
+        nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', frequency: 'Once in a shift' },
+        bss18: { target: 5, tolerance: 1.0, min: 4, max: 6, unit: '%', paramName: 'BSS 18', frequency: 'Once in a shift' },
+        bss44: { target: 60, tolerance: 5, min: 55, max: 65, unit: '%', paramName: 'BSS 44', frequency: 'Once in a shift' },
+      },
+      shift1: {
+        nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', frequency: 'Once in a shift' },
+        bss18: { target: 5, tolerance: 1.0, min: 4, max: 6, unit: '%', paramName: 'BSS 18', frequency: 'Once in a shift' },
+        bss44: { target: 60, tolerance: 5, min: 55, max: 65, unit: '%', paramName: 'BSS 44', frequency: 'Once in a shift' },
+      },
+      shift2: {
+        nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', frequency: 'Once in a shift' },
+        bss18: { target: 5, tolerance: 1.0, min: 4, max: 6, unit: '%', paramName: 'BSS 18', frequency: 'Once in a shift' },
+        bss44: { target: 60, tolerance: 5, min: 55, max: 65, unit: '%', paramName: 'BSS 44', frequency: 'Once in a shift' },
+      },
+      shift3: {
+        nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', frequency: 'Once in a shift' },
+        bss18: { target: 5, tolerance: 1.0, min: 4, max: 6, unit: '%', paramName: 'BSS 18', frequency: 'Once in a shift' },
+        bss44: { target: 60, tolerance: 5, min: 55, max: 65, unit: '%', paramName: 'BSS 44', frequency: 'Once in a shift' },
+      },
+    },
+    'raw-salt': {
+      day: {
+        nacl: { target: 91.0, tolerance: 1.0, min: 90.0, max: 92.0, unit: '%', paramName: 'NaCl', frequency: 'Day' },
+        ca: { target: 0.24, tolerance: 0.10, min: 0.14, max: 0.34, unit: '%', paramName: 'Ca', frequency: 'Day' },
+        mg: { target: 0.45, tolerance: 0.10, min: 0.35, max: 0.55, unit: '%', paramName: 'Mg', frequency: 'Day' },
+        so4: { target: 1.00, tolerance: 0.10, min: 0.90, max: 1.10, unit: '%', paramName: 'SO4', frequency: 'Day' },
+        ir: { target: 0.60, tolerance: 0.10, min: 0.50, max: 0.70, unit: '%', paramName: 'IR', frequency: 'Day' },
+        h2o: { target: 7.0, tolerance: 1.0, min: 6.0, max: 8.0, unit: '%', paramName: 'H2O', frequency: 'Day' },
+      },
+      composition: {
+        nacl: { target: 91.0, tolerance: 1.0, min: 90.0, max: 92.0, unit: '%', paramName: 'NaCl', frequency: 'Day' },
+        ca: { target: 0.24, tolerance: 0.10, min: 0.14, max: 0.34, unit: '%', paramName: 'Ca', frequency: 'Day' },
+        mg: { target: 0.45, tolerance: 0.10, min: 0.35, max: 0.55, unit: '%', paramName: 'Mg', frequency: 'Day' },
+        so4: { target: 1.00, tolerance: 0.10, min: 0.90, max: 1.10, unit: '%', paramName: 'SO4', frequency: 'Day' },
+        ir: { target: 0.60, tolerance: 0.10, min: 0.50, max: 0.70, unit: '%', paramName: 'IR', frequency: 'Day' },
+        h2o: { target: 7.0, tolerance: 1.0, min: 6.0, max: 8.0, unit: '%', paramName: 'H2O', frequency: 'Day' },
+      },
+    },
     'cacl2': {
       // Applied strictly to ACL Plant - CaCl2 Analysis - Frequency: Day
       // 1. pH: Reference 7.7, Tolerance ±1, Valid Range: 6.7 – 8.7
@@ -1136,6 +1199,23 @@ export const ANALYSIS_LIMITS_REGISTRY = {
     },
   },
   offset: {
+    'raw-water': {
+      day: {
+        ph: { min: 7.0, max: 9.5, unit: '', paramName: 'pH', label: 'pH', frequency: 'Day', isDirectRange: true, formattedRange: '7.0 – 9.5', referenceDisplay: 'Direct Range: 7.0 – 9.5' },
+        cond: { target: 600, tolerance: 50, min: 550, max: 650, unit: 'umho/cm', paramName: 'Cond', frequency: 'Day' },
+        turbidity: { target: 10, tolerance: 5, min: 5, max: 15, unit: 'NTU', paramName: 'Turbidity', frequency: 'Day' },
+        fe: { target: 0.10, tolerance: 5, min: -4.90, max: 5.10, unit: 'ppm', paramName: 'Fe', frequency: 'Day', formattedTolerance: '± 5', formattedRange: '0.10 ppm ±5' },
+        sio2: { target: 10, tolerance: 5, min: 5, max: 15, unit: 'ppm', paramName: 'SiO2', frequency: 'Day' },
+        th: { target: 250, tolerance: 5, min: 245, max: 255, unit: 'ppm', paramName: 'TH', frequency: 'Day' },
+        cah: { target: 150, tolerance: 10, min: 140, max: 160, unit: 'ppm', paramName: 'CaH', frequency: 'Day' },
+        mgh: { target: 100, tolerance: 10, min: 90, max: 110, unit: 'ppm', paramName: 'MgH', frequency: 'Day' },
+        cl: { target: 50, tolerance: 10, min: 40, max: 60, unit: 'ppm', paramName: 'Cl', frequency: 'Day' },
+        alk: { target: 130, tolerance: 10, min: 120, max: 140, unit: 'ppm', paramName: 'Alk', frequency: 'Day' },
+        so4: { target: 40, tolerance: 5, min: 35, max: 45, unit: 'ppm', paramName: 'SO4', frequency: 'Day' },
+        ema: { target: 100, tolerance: 10, min: 90, max: 110, unit: 'ppm', paramName: 'EMA', frequency: 'Day' },
+        tds: { target: 350, tolerance: 50, min: 300, max: 400, unit: 'ppm', paramName: 'TDS', frequency: 'Day' },
+      },
+    },
     'dm-water': {
       // Applied strictly to Offset Plant - DM Water Analysis - Frequency: Day
       // 1. pH: Direct Valid Range 7.0 – 9.5 (NOT a ± tolerance)
@@ -1675,6 +1755,9 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   const cleanAnalysis = (analysisType || 'pure-salt').toLowerCase().replace(/\s+/g, '-');
 
   const isPureSalt = cleanAnalysis === 'pure-salt' || cleanAnalysis === 'pure-salt-analysis';
+  const isAclProduct = cleanAnalysis === 'acl-product' || cleanAnalysis === 'acl-product-analysis';
+  const isAcl300 = cleanAnalysis === 'acl-300' || cleanAnalysis === 'acl-300#' || cleanAnalysis === 'acl-300#-analysis' || cleanAnalysis === 'acl-300-analysis';
+  const isRawSalt = cleanAnalysis === 'raw-salt' || cleanAnalysis === 'raw-salt-analysis';
   const isBrine = cleanAnalysis === 'brine' || cleanAnalysis === 'brine-analysis';
   const isPureSaltSieve = cleanAnalysis === 'pure-salt-sieve' || cleanAnalysis === 'pure-salt-sieve-analysis';
   const isTK203 = cleanAnalysis === 'tk203' || cleanAnalysis === 'tk-203' || cleanAnalysis === 'tk-203-analysis' || cleanAnalysis === 'tk203-analysis';
@@ -1830,6 +1913,12 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'gas-concentration-analysis' ||
     cleanAnalysis === 'sa-gas-conc' ||
     cleanAnalysis === 'sa-gas-conc-analysis';
+  const isOffsetRawWater =
+    cleanAnalysis === 'raw-water' ||
+    cleanAnalysis === 'rawwater' ||
+    cleanAnalysis === 'raw-water-analysis' ||
+    cleanAnalysis === 'rawwater-analysis' ||
+    cleanAnalysis === 'offset-raw-water';
   const isOffsetDMWater =
     cleanAnalysis === 'dm-water' ||
     cleanAnalysis === 'dmwater' ||
@@ -1854,7 +1943,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'acl-cacl2-analysis' ||
     cleanAnalysis.includes('cacl2');
 
-  if (!isPureSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
+  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
     return null;
   }
 
@@ -1912,7 +2001,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
     return null;
   }
-  if ((isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
+  if ((isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
     return null;
   }
 
@@ -1925,57 +2014,63 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     ANALYSIS_LIMITS_REGISTRY['tfl'];
   if (!plantLimits) return null;
 
-  const analysisKey = isAbsorberDrainLiq
-    ? 'absorber-drain-liq'
-    : isSoxDrainLiq
-      ? 'sox-drain-liq'
-      : isDccDrainLiq
-        ? 'dcc-drain-liq'
-        : isTK1252
-          ? 'tk1252'
-          : isTK1251
-            ? 'tk1251'
-            : isReflux
-              ? 'reflux'
-              : isP1256
-                ? 'p1256'
-                : isWashwater
-                  ? 'washwater'
-                  : isRich
-                    ? 'rich'
-                    : isLean
-                      ? 'lean'
-                      : isOutlet
-                        ? 'outlet'
-                        : isAbsorberInlet
-                          ? 'absorber-inlet'
-                          : isBL1204
-                            ? 'bl1204-bl1203'
-                            : isTK204
-                              ? 'tk204'
-                              : isTK205
-                                ? 'tk205'
-                                : isTK207
-                                  ? 'tk207'
-                                  : isTK209
-                                    ? 'tk209'
-                                    : isCR202
-                                      ? 'cr202'
-                                      : isCR203
-                                        ? 'cr203'
-                                        : isPclTcl
-                                          ? 'pcl-tcl'
-                                          : isSATK401
-                                            ? 'tk401'
-                                            : isSATK405
-                                              ? 'tk405'
-                                              : isSATK414
-                                                ? 'tk414'
-                                                : isSAP413
-                                                  ? 'p413'
-                                                  : isSATK419
-                                                    ? 'tk419'
-                                                    : isSAP417
+  const analysisKey = isAclProduct
+    ? 'acl-product'
+    : isAcl300
+      ? 'acl-300'
+      : isRawSalt
+        ? 'raw-salt'
+        : isAbsorberDrainLiq
+          ? 'absorber-drain-liq'
+          : isSoxDrainLiq
+            ? 'sox-drain-liq'
+            : isDccDrainLiq
+              ? 'dcc-drain-liq'
+              : isTK1252
+                ? 'tk1252'
+                : isTK1251
+                  ? 'tk1251'
+                  : isReflux
+                    ? 'reflux'
+                    : isP1256
+                      ? 'p1256'
+                      : isWashwater
+                        ? 'washwater'
+                        : isRich
+                          ? 'rich'
+                          : isLean
+                            ? 'lean'
+                            : isOutlet
+                              ? 'outlet'
+                              : isAbsorberInlet
+                                ? 'absorber-inlet'
+                                : isBL1204
+                                  ? 'bl1204-bl1203'
+                                  : isTK204
+                                    ? 'tk204'
+                                    : isTK205
+                                      ? 'tk205'
+                                      : isTK207
+                                        ? 'tk207'
+                                        : isTK209
+                                          ? 'tk209'
+                                          : isCR202
+                                            ? 'cr202'
+                                            : isCR203
+                                              ? 'cr203'
+                                              : isPclTcl
+                                                ? 'pcl-tcl'
+                                                : isSATK401
+                                                  ? 'tk401'
+                                                  : isSATK405
+                                                    ? 'tk405'
+                                                    : isSATK414
+                                                      ? 'tk414'
+                                                      : isSAP413
+                                                        ? 'p413'
+                                                        : isSATK419
+                                                          ? 'tk419'
+                                                          : isSAP417
                                                       ? 'p417'
                                                       : isSAT401
                                                         ? 't401'
@@ -1995,8 +2090,10 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
                                                                       ? 'e501-t501'
                                                                       : isSAGasConc
                                                                         ? 'gas-conc'
-                                                                        : isOffsetDMWater
-                                                                          ? 'dm-water'
+                                                                        : isOffsetRawWater
+                                                                          ? 'raw-water'
+                                                                          : isOffsetDMWater
+                                                                            ? 'dm-water'
                                                                           : isOffsetBFW
                                                                             ? 'bfw'
                                                                             : isOffsetSHS

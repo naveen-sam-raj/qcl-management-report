@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -339,6 +340,9 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
               {LEFT_PARAMETERS.map((param) => {
                 const val = data[param.key] || '';
                 const err = errors[param.key];
+                const limit = getCellLimit('offset', 'raw-water', 'day', param.key);
+                const validation = limit && val !== '' ? validateCellValue(val, limit) : { isOutOfLimit: false };
+                const isOutOfLimit = validation.isOutOfLimit;
 
                 return (
                   <div
@@ -357,7 +361,8 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       <div className="text-[10px] text-slate-400">{param.desc}</div>
                     </div>
 
-                    <div className="w-36 flex items-center gap-1.5">
+                    <div className="w-40 flex flex-col items-end gap-1">
+                      <div className="w-36 flex items-center gap-1.5">
                       <input
                         type="text"
                         inputMode="decimal"
@@ -365,7 +370,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         onChange={(e) => handleInputChange(param.key, e.target.value)}
                         placeholder={param.placeholder}
                         className={`w-full text-center font-mono text-sm py-1.5 px-2.5 rounded-lg border-2 transition shadow-2xs ${
-                          err
+                          err || isOutOfLimit
                             ? 'border-red-500 bg-red-50 text-red-900 focus:ring-red-200'
                             : val !== ''
                             ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
@@ -376,6 +381,17 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         <span className="text-[10px] font-bold text-slate-500 min-w-[36px]">
                           {param.unit}
                         </span>
+                      )}
+                    </div>
+                      {isOutOfLimit && !err && limit && (
+                        <div className="mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn shadow-2xs">
+                          {limit.formattedLabel || `Limit: ${limit.min.toFixed(2)}–${limit.max.toFixed(2)} ${limit.unit}`}
+                        </div>
+                      )}
+                      {!isOutOfLimit && !err && limit && val === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-0.5 tracking-tight text-right w-full pr-1">
+                          {limit.formattedRange || `${limit.min.toFixed(2)}–${limit.max.toFixed(2)} ${limit.unit}`}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -395,6 +411,9 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
               {RIGHT_PARAMETERS.map((param) => {
                 const val = data[param.key] || '';
                 const err = errors[param.key];
+                const limit = getCellLimit('offset', 'raw-water', 'day', param.key);
+                const validation = limit && val !== '' ? validateCellValue(val, limit) : { isOutOfLimit: false };
+                const isOutOfLimit = validation.isOutOfLimit;
 
                 return (
                   <div
@@ -413,7 +432,8 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       <div className="text-[10px] text-slate-400">{param.desc}</div>
                     </div>
 
-                    <div className="w-36 flex items-center gap-1.5">
+                    <div className="w-40 flex flex-col items-end gap-1">
+                      <div className="w-36 flex items-center gap-1.5">
                       <input
                         type="text"
                         inputMode="decimal"
@@ -421,7 +441,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         onChange={(e) => handleInputChange(param.key, e.target.value)}
                         placeholder={param.placeholder}
                         className={`w-full text-center font-mono text-sm py-1.5 px-2.5 rounded-lg border-2 transition shadow-2xs ${
-                          err
+                          err || isOutOfLimit
                             ? 'border-red-500 bg-red-50 text-red-900 focus:ring-red-200'
                             : val !== ''
                             ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
@@ -432,6 +452,17 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         <span className="text-[10px] font-bold text-slate-500 min-w-[36px]">
                           {param.unit}
                         </span>
+                      )}
+                    </div>
+                      {isOutOfLimit && !err && limit && (
+                        <div className="mt-0.5 px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn shadow-2xs">
+                          {limit.formattedLabel || `Limit: ${limit.min.toFixed(2)}–${limit.max.toFixed(2)} ${limit.unit}`}
+                        </div>
+                      )}
+                      {!isOutOfLimit && !err && limit && val === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-0.5 tracking-tight text-right w-full pr-1">
+                          {limit.formattedRange || `${limit.min.toFixed(2)}–${limit.max.toFixed(2)} ${limit.unit}`}
+                        </div>
                       )}
                     </div>
                   </div>
