@@ -68,12 +68,17 @@ const getPlants = async (req, res) => {
 // @access  Private
 const getPlantById = async (req, res) => {
   try {
-    const plant = await Plant.findById(req.params.id).populate('company');
+    let plant;
+    if (req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      plant = await Plant.findById(req.params.id).populate('company');
+    } else {
+      plant = await Plant.findOne({ code: new RegExp('^' + req.params.id + '$', 'i') }).populate('company');
+    }
+
     if (!plant) {
       return res.status(404).json({ success: false, message: 'Plant not found.' });
     }
 
-    // Company isolation check
     if (req.user.role === 'company_admin' || req.user.role === 'user') {
       const userCompId = (req.user.company?._id || req.user.company).toString();
       const plantCompId = (plant.company?._id || plant.company).toString();
@@ -82,12 +87,82 @@ const getPlantById = async (req, res) => {
       }
     }
 
-    const telemetry = generateTelemetryHistory(plant);
+    const { PlantAnalysisRecord, PureSaltAnalysis } = require('../models');
+    const plantCodeUpper = plant.code.toUpperCase();
+    
+    const allRecords = [];
+    
+    const parDocs = await PlantAnalysisRecord.find({ 
+      $or: [
+        { plantCode: plantCodeUpper },
+        { plantName: { $regex: new RegExp(plantCodeUpper, 'i') } }
+      ]
+    }).sort({ date: 1, createdAt: 1 }).lean();
+    
+    parDocs.forEach(doc => {
+      let mergedData = {};
+      const extractNum = (obj, prefix = '') => {
+        if (!obj || typeof obj !== 'object') return;
+        Object.entries(obj).forEach(([key, val]) => {
+          if (val === null || val === undefined || val === '') return;
+          if (typeof val === 'object' && !Array.isArray(val)) {
+            extractNum(val, prefix + key + '_');
+          } else {
+            const num = Number(val);
+            if (!isNaN(num)) {
+              mergedData[prefix + key.toLowerCase()] = num;
+            }
+          }
+        });
+      };
+      extractNum(doc.data);
+      if (Object.keys(mergedData).length > 0) {
+        const dateStr = (doc.date || doc.createdAt).toString();
+        const t = new Date(doc.createdAt);
+        const timeStr = isNaN(t) ? '00:00' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dayStr = isNaN(t) ? dateStr.substring(0,10) : t.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        allRecords.push({
+          date: dateStr,
+          time: dayStr + ' ' + timeStr,
+          ...mergedData
+        });
+      }
+    });
+
+    if (plantCodeUpper === 'ACL') {
+      const psaDocs = await PureSaltAnalysis.find().sort({ date: 1, createdAt: 1 }).lean();
+      psaDocs.forEach(doc => {
+        let mergedData = {};
+        const extractNum = (obj) => {
+          if (!obj || typeof obj !== 'object') return;
+          Object.entries(obj).forEach(([key, val]) => {
+            const num = Number(val);
+            if (!isNaN(num) && val !== '') {
+              mergedData[key.toLowerCase()] = num;
+            }
+          });
+        };
+        extractNum(doc.rows);
+        if (Object.keys(mergedData).length > 0) {
+          const dateStr = (doc.date || doc.createdAt).toString();
+          const t = new Date(doc.createdAt);
+          const timeStr = isNaN(t) ? '00:00' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const dayStr = isNaN(t) ? dateStr.substring(0,10) : t.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+          allRecords.push({
+            date: dateStr,
+            time: dayStr + ' ' + timeStr,
+            ...mergedData
+          });
+        }
+      });
+    }
+
+    allRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     return res.status(200).json({
       success: true,
       plant,
-      telemetry,
+      telemetry: allRecords,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

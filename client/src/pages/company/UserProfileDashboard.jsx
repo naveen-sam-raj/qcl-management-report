@@ -62,16 +62,17 @@ const UserProfileDashboard = () => {
         setAssignedPlant(plant || null);
 
       if (plant) {
-        // Generate mock telemetry for this user's plant
-        const mockTelemetry = Array.from({ length: 14 }, (_, i) => ({
-          date: new Date(Date.now() - (13 - i) * 24 * 60 * 60 * 1000).toLocaleDateString(
-            'en-IN',
-            { day: '2-digit', month: 'short' }
-          ),
-          efficiency: Math.max(60, (plant.efficiency || 90) + Math.floor(Math.random() * 10) - 5),
-          production: Math.max(50, (plant.currentProduction || 100) + Math.floor(Math.random() * 20) - 10),
-        }));
-        setTelemetry(mockTelemetry);
+        const plantId = plant._id || plant.code || plant.name || plant;
+        try {
+          const resTelemetry = await api.get(`/api/plants/${plantId}`);
+          if(resTelemetry.data?.telemetry && resTelemetry.data.telemetry.length > 0) {
+            setTelemetry(resTelemetry.data.telemetry);
+          } else {
+            setTelemetry([]);
+          }
+        } catch(e) {
+          console.warn('Could not fetch telemetry for user plant');
+        }
       }
 
       // Fetch real reports for this user
@@ -379,14 +380,28 @@ const UserProfileDashboard = () => {
               </p>
             </div>
             <div className="flex items-center gap-3 text-[11px] font-semibold">
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
-                Production (MT)
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                Efficiency (%)
-              </span>
+              {(() => {
+                const keys = Object.keys(telemetry[telemetry.length - 1] || telemetry[0] || {})
+                  .filter(k => !['time', 'date', '_id', 'id', 'createdAt', 'updatedAt', '__v'].includes(k) && typeof telemetry[0][k] === 'number');
+                const key1 = keys[0];
+                const key2 = keys[1];
+                return (
+                  <>
+                    {key1 && (
+                      <span className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+                        {key1.toUpperCase()}
+                      </span>
+                    )}
+                    {key2 && (
+                      <span className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                        {key2.toUpperCase()}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
           <ResponsiveContainer width="100%" height={220}>
@@ -402,8 +417,8 @@ const UserProfileDashboard = () => {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} domain={['auto', 'auto']} />
               <Tooltip
                 contentStyle={{
                   background: '#1e293b',
@@ -413,22 +428,36 @@ const UserProfileDashboard = () => {
                   color: '#f1f5f9',
                 }}
               />
-              <Area
-                type="monotone"
-                dataKey="production"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                fill="url(#prodGrad)"
-                name="Production (MT)"
-              />
-              <Area
-                type="monotone"
-                dataKey="efficiency"
-                stroke="#10b981"
-                strokeWidth={2}
-                fill="url(#effGrad)"
-                name="Efficiency (%)"
-              />
+              {(() => {
+                const keys = Object.keys(telemetry[telemetry.length - 1] || telemetry[0] || {})
+                  .filter(k => !['time', 'date', '_id', 'id', 'createdAt', 'updatedAt', '__v'].includes(k) && typeof telemetry[0][k] === 'number');
+                const key1 = keys[0];
+                const key2 = keys[1];
+                return (
+                  <>
+                    {key1 && (
+                      <Area
+                        type="monotone"
+                        dataKey={key1}
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        fill="url(#prodGrad)"
+                        name={key1.toUpperCase()}
+                      />
+                    )}
+                    {key2 && (
+                      <Area
+                        type="monotone"
+                        dataKey={key2}
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        fill="url(#effGrad)"
+                        name={key2.toUpperCase()}
+                      />
+                    )}
+                  </>
+                );
+              })()}
             </AreaChart>
           </ResponsiveContainer>
         </div>

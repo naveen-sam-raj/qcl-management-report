@@ -47,18 +47,23 @@ const PlantDetailsPage = () => {
     const fetchPlant = async () => {
       try {
         setLoading(true);
-        await new Promise((r) => setTimeout(r, 400));
-        // Find plant by id in mock data
-        const found = MOCK_PLANTS.find((p) => p._id === id || p.code === id);
-        if (found) {
-          setPlant(found);
-          // Generate mock telemetry for chart
-          const mockTelemetry = Array.from({ length: 14 }, (_, i) => ({
-            date: new Date(Date.now() - (13 - i) * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
-            efficiency: Math.max(60, (found.efficiency || 90) + Math.floor(Math.random() * 10) - 5),
-            production: Math.max(50, (found.currentProduction || 100) + Math.floor(Math.random() * 20) - 10),
-          }));
-          setTelemetry(mockTelemetry);
+        // Find plant by id via API
+        const response = await api.get(`/api/plants/${id}`);
+        if (response.data?.success && response.data?.plant) {
+          setPlant(response.data.plant);
+          if (response.data.telemetry && response.data.telemetry.length > 0) {
+            setTelemetry(response.data.telemetry);
+            // Default to first valid numeric metric
+            const firstData = response.data.telemetry[0];
+            const possibleMetrics = Object.keys(firstData).filter(
+              k => !['time', 'date', '_id', 'id', 'createdAt', 'updatedAt', '__v'].includes(k) && typeof firstData[k] === 'number'
+            );
+            if (possibleMetrics.length > 0) {
+              setChartMetric(possibleMetrics[0]);
+            }
+          } else {
+            setTelemetry([]);
+          }
         } else {
           showToast('Plant not found', 'error');
           navigate('/admin/tfl');
@@ -184,38 +189,43 @@ const PlantDetailsPage = () => {
           </div>
 
           {/* Metric Selector Toggle */}
-          <div className="inline-flex p-1 bg-slate-100 rounded-xl">
-            {[
-              { id: 'efficiency', label: 'Efficiency (%)' },
-              { id: 'temperature', label: 'Temperature (°C)' },
-              { id: 'flowRate', label: 'Flow Rate (m³/h)' },
-              { id: 'pressure', label: 'Pressure (Bar)' },
-            ].map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setChartMetric(m.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  chartMetric === m.id
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
+          <div className="inline-flex p-1 bg-slate-100 rounded-xl flex-wrap max-w-xl">
+            {telemetry.length > 0 ? (
+              Object.keys(telemetry[telemetry.length - 1] || telemetry[0] || {})
+                .filter(k => !['time', 'date', '_id', 'id', 'createdAt', 'updatedAt', '__v'].includes(k) && typeof telemetry[0][k] === 'number')
+                .slice(0, 8)
+                .map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setChartMetric(m)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      chartMetric === m
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {m.toUpperCase()}
+                  </button>
+                ))
+            ) : null}
           </div>
         </div>
 
         {/* Recharts Chart Container */}
         <div className="h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={telemetry} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#2563EB" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#2563EB" stopOpacity={0.0} />
-                </linearGradient>
-              </defs>
+          {telemetry.length === 0 ? (
+            <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              <span className="font-medium">No data available</span>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={telemetry} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563EB" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#2563EB" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
               <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748B' }} stroke="#CBD5E1" />
               <YAxis domain={['auto', 'auto']} tick={{ fontSize: 11, fill: '#64748B' }} stroke="#CBD5E1" />
@@ -239,6 +249,7 @@ const PlantDetailsPage = () => {
               />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </div>
       </div>
 
