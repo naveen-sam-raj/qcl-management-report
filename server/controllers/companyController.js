@@ -136,9 +136,46 @@ const createCompany = async (req, res) => {
   }
 };
 
+// @desc    Update company (name and logo)
+// @route   PUT /api/companies/:id
+// @access  Private (Super Admin)
+const updateCompany = async (req, res) => {
+  try {
+    const { name, logo } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Company name is required.' });
+    }
+    
+    // Check if name already exists for another company
+    const existing = await Company.findOne({ name: { $regex: new RegExp('^' + name + '$', 'i') }, _id: { $ne: req.params.id } });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Company name already exists.' });
+    }
+
+    const company = await Company.findByIdAndUpdate(
+      req.params.id,
+      { $set: { name, logo } },
+      { new: true }
+    );
+
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Company updated successfully',
+      company,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getCompanies,
   getCompanyById,
   updateCompanyStatus,
   createCompany,
+  updateCompany,
 };

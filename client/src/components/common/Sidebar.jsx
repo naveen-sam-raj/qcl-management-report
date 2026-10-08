@@ -39,8 +39,10 @@ const Sidebar = ({ isOpen, onClose }) => {
   const getNavLinks = () => {
     if (user?.role === 'super_admin' || user?.role === 'SUPER_ADMIN') {
       return [
-        { label: 'Company Admins', to: '/super-admin', icon: UserCheck, exact: true },
-        { label: 'Account Settings', to: '/super-admin/settings', icon: Settings },
+        { label: 'Dashboard', to: '/super-admin', icon: LayoutDashboard, exact: true },
+        { label: 'Companies', to: '/super-admin/companies', icon: Building2 },
+        { label: 'Admins', to: '/super-admin/admins', icon: UserCheck },
+        { label: 'Settings', to: '/super-admin/settings', icon: Settings },
       ];
     }
 

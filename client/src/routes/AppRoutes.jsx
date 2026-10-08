@@ -7,6 +7,8 @@ import TFLLogin from '../pages/auth/TFLLogin';
 import GreenstarLogin from '../pages/auth/GreenstarLogin';
 import DashboardLayout from '../layouts/DashboardLayout';
 import SuperAdminDashboard from '../pages/superadmin/SuperAdminDashboard';
+import SuperAdminCompanies from '../pages/superadmin/SuperAdminCompanies';
+import SuperAdminAdmins from '../pages/superadmin/SuperAdminAdmins';
 import SuperAdminSettings from '../pages/superadmin/SuperAdminSettings';
 import TFLAdminDashboard from '../pages/company/TFLAdminDashboard';
 import PlantAnalysisPage from '../pages/company/PlantAnalysisPage';
@@ -40,6 +42,8 @@ const AppRoutes = () => {
       {/* ── Super Admin Protected Routes ── */}
       <Route path="/super-admin" element={<DashboardLayout requiredRole="super_admin" />}>
         <Route index element={<SuperAdminDashboard />} />
+        <Route path="companies" element={<SuperAdminCompanies />} />
+        <Route path="admins" element={<SuperAdminAdmins />} />
         <Route path="settings" element={<SuperAdminSettings />} />
         {/* All other sub-routes redirect to dashboard */}
         <Route path="*" element={<SuperAdminDashboard />} />

@@ -24,7 +24,7 @@ import {
   Settings,
 } from 'lucide-react';
 
-const SuperAdminDashboard = () => {
+const SuperAdminCompanies = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -88,6 +88,62 @@ const SuperAdminDashboard = () => {
   // Delete Confirm Modal
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deletingAdmin, setDeletingAdmin] = useState(null);
+  const [editingCompany, setEditingCompany] = useState(null);
+  const [isEditCompanyModalOpen, setIsEditCompanyModalOpen] = useState(false);
+  const [deletingCompany, setDeletingCompany] = useState(null);
+  const [isDeleteCompanyModalOpen, setIsDeleteCompanyModalOpen] = useState(false);
+  const [editCompanySubmitting, setEditCompanySubmitting] = useState(false);
+  const [editCompanyError, setEditCompanyError] = useState('');
+
+  const openEditCompanyModal = (c) => {
+    setEditingCompany(c);
+    setCreateCompanyData({ name: c.name, logo: c.logo || '' });
+    setEditCompanyError('');
+    setIsEditCompanyModalOpen(true);
+  };
+
+  const handleEditCompanySubmit = async (e) => {
+    e.preventDefault();
+    setEditCompanyError('');
+    if (!createCompanyData.name) {
+      setEditCompanyError('Company name is required.');
+      return;
+    }
+    setEditCompanySubmitting(true);
+    try {
+      const res = await api.put(`/companies/${editingCompany._id}`, createCompanyData);
+      if (res.data?.success) {
+        showToast('Company updated successfully.', 'success');
+        setCompanies(prev => prev.map(c => c._id === editingCompany._id ? { ...c, ...createCompanyData } : c));
+        setIsEditCompanyModalOpen(false);
+      } else {
+        setEditCompanyError(res.data?.message || 'Failed to update company.');
+      }
+    } catch (err) {
+      setEditCompanyError(err.response?.data?.message || 'Failed to update company.');
+    } finally {
+      setEditCompanySubmitting(false);
+    }
+  };
+
+  const openDeleteCompanyModal = (c) => {
+    setDeletingCompany(c);
+    setIsDeleteCompanyModalOpen(true);
+  };
+
+  const handleDeleteCompany = async () => {
+    if (!deletingCompany) return;
+    try {
+      await api.patch(`/companies/${deletingCompany._id}/status`, { status: 'inactive' });
+      setCompanies(prev => prev.map(c => c._id === deletingCompany._id ? { ...c, status: 'inactive' } : c));
+      showToast('Company deactivated successfully.', 'success');
+      setIsDeleteCompanyModalOpen(false);
+    } catch (err) {
+      showToast('Failed to deactivate company.', 'error');
+      setIsDeleteCompanyModalOpen(false);
+    }
+  };
+
 
   // Super Admin Change Password Modal State
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
@@ -640,10 +696,10 @@ const SuperAdminDashboard = () => {
             <div className="w-8 h-8 rounded-xl bg-purple-600 flex items-center justify-center shadow-md">
               <Shield className="w-4 h-4 text-white" />
             </div>
-            <h1 className="text-2xl font-extrabold text-slate-900">Super Admin Control</h1>
+            <h1 className="text-2xl font-extrabold text-slate-900">Companies Management</h1>
           </div>
           <p className="text-sm text-slate-500 ml-10">
-            Manage company administrator accounts across all subsidiaries.
+            Manage registered companies and subsidiaries.
           </p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -702,45 +758,71 @@ const SuperAdminDashboard = () => {
         </div>
       </div>
 
-      {/* Stats Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-              <Users className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold text-slate-900">{admins.length}</div>
-              <div className="text-xs text-slate-500 font-medium">Total Company Admins</div>
-            </div>
-          </div>
+      {/* Companies Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200">
+          <h2 className="text-sm font-bold text-slate-900">Registered Companies</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{companies.length} company/companies found</p>
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold text-slate-900">
-                {admins.filter((a) => a.status === 'active').length}
-              </div>
-              <div className="text-xs text-slate-500 font-medium">Active Admins</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold text-slate-900">{companies.length}</div>
-              <div className="text-xs text-slate-500 font-medium">Registered Companies</div>
-            </div>
-          </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Logo</th>
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company Name</th>
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Created On</th>
+                <th className="px-6 py-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {companies.map((c) => (
+                <tr key={c._id} className="hover:bg-slate-50/80 transition duration-150">
+                  <td className="px-6 py-4">
+                    <img src={c.logo || '/default-company.png'} alt={c.name} className="w-10 h-10 object-contain rounded-lg shadow-sm border border-slate-200" />
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="font-bold text-slate-900 text-[13px]">{c.name}</div>
+                    <div className="text-[11px] font-medium text-slate-500 mt-0.5">Code: {c.code}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    {c.status === 'active' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                        <span className="w-1 h-1 rounded-full bg-emerald-500" /> Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold">
+                        <AlertCircle className="w-3 h-3" /> {c.status}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-[11px] font-medium text-slate-600">
+                    {formatDateDisplay(c.createdAt)}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => openEditCompanyModal(c)}
+                        title="Edit company"
+                        className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => openDeleteCompanyModal(c)}
+                        title="Delete/Deactivate company"
+                        className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-
       {/* ===================== CREATE ADMIN MODAL ===================== */}
       <Modal
         isOpen={isCreateModalOpen}
@@ -938,404 +1020,55 @@ const SuperAdminDashboard = () => {
         </form>
       </Modal>
 
-      {/* ===================== EDIT ADMIN MODAL ===================== */}
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Company Admin">
-        <form onSubmit={handleEditAdmin} className="space-y-4">
-          {editFormError && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2">
+      {/* Edit Company Modal */}
+      <Modal isOpen={isEditCompanyModalOpen} onClose={() => setIsEditCompanyModalOpen(false)} title="Edit Company">
+        <form onSubmit={handleEditCompanySubmit} className="space-y-4">
+          {editCompanyError && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-100 flex items-start gap-2 text-rose-700 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{editFormError}</span>
+              <p>{editCompanyError}</p>
             </div>
           )}
-
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Full Name</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Company Name</label>
             <input
               type="text"
               required
-              value={editFormData.name}
-              onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Email</label>
-            <input
-              type="email"
-              required
-              value={editFormData.email}
-              onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Mobile</label>
-            <input
-              type="tel"
-              value={editFormData.mobile}
-              onChange={(e) => setEditFormData({ ...editFormData, mobile: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">
-                Maximum Users <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                required
-                value={editFormData.maxUsers}
-                onChange={(e) => setEditFormData({ ...editFormData, maxUsers: e.target.value })}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              />
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Decreasing limit does not delete users</span>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">Status</label>
-              <select
-                value={editFormData.status}
-                onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">
-                License Period From
-              </label>
-              <input
-                type="date"
-                value={editFormData.licensePeriodFrom}
-                onChange={(e) => setEditFormData({ ...editFormData, licensePeriodFrom: e.target.value })}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">
-                License Period To
-              </label>
-              <input
-                type="date"
-                value={editFormData.licensePeriodTo}
-                onChange={(e) => setEditFormData({ ...editFormData, licensePeriodTo: e.target.value })}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-            <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">Cancel</button>
-            <button type="submit" disabled={editSubmitting} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition disabled:opacity-50">
-              {editSubmitting ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* ===================== RESET PASSWORD MODAL ===================== */}
-      <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)} title={`Reset Password — ${resetAdmin?.name}`}>
-        <form onSubmit={handleResetPassword} className="space-y-4">
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Set a new login password for Company Admin <strong>{resetAdmin?.name}</strong> (Username: <span className="font-mono text-indigo-600 font-semibold">{resetAdmin?.username}</span>).
-          </p>
-
-          {/* New Password */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">
-              New Password <span className="text-amber-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showResetPassword ? 'text' : 'password'}
-                required
-                minLength={6}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition"
-                placeholder="Min. 6 characters"
-              />
-              <button
-                type="button"
-                onClick={() => setShowResetPassword(!showResetPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-              >
-                {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Confirm New Password */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">
-              Confirm New Password <span className="text-amber-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showResetConfirmPassword ? 'text' : 'password'}
-                required
-                minLength={6}
-                value={confirmNewPassword}
-                onChange={(e) => setConfirmNewPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition"
-                placeholder="Re-enter new password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-              >
-                {showResetConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsResetModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={resetSubmitting}
-              className="inline-flex items-center gap-2 px-6 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition shadow-md shadow-amber-600/20 disabled:opacity-50"
-            >
-              {resetSubmitting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Resetting Password...</span>
-                </>
-              ) : (
-                <>
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span>Reset Password</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* ===================== SUPER ADMIN CHANGE PASSWORD MODAL ===================== */}
-      <Modal
-        isOpen={isChangePasswordModalOpen}
-        onClose={() => setIsChangePasswordModalOpen(false)}
-        title="Super Admin — Change Password"
-      >
-        <form onSubmit={handleSuperAdminChangePassword} className="space-y-4">
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Update your master password for account <strong>QCL_ADMIN</strong>. Password must contain at least 8 characters.
-          </p>
-
-          {changePasswordSuccess && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{changePasswordSuccess}</span>
-            </div>
-          )}
-
-          {changePasswordError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{changePasswordError}</span>
-            </div>
-          )}
-
-          {/* Current Password */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              Current Password <span className="text-indigo-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showCurrentPassword ? 'text' : 'password'}
-                required
-                placeholder="Enter current password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-              >
-                {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* New Password */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              New Password <span className="text-indigo-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showSuperAdminNewPassword ? 'text' : 'password'}
-                required
-                placeholder="Enter new password (min. 8 characters)"
-                value={superAdminNewPassword}
-                onChange={(e) => setSuperAdminNewPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-              />
-              <button
-                type="button"
-                onClick={() => setShowSuperAdminNewPassword(!showSuperAdminNewPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-              >
-                {showSuperAdminNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Confirm New Password */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              Confirm New Password <span className="text-indigo-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showSuperAdminConfirmPassword ? 'text' : 'password'}
-                required
-                placeholder="Confirm new password"
-                value={superAdminConfirmPassword}
-                onChange={(e) => setSuperAdminConfirmPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-mono rounded-xl px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-              />
-              <button
-                type="button"
-                onClick={() => setShowSuperAdminConfirmPassword(!showSuperAdminConfirmPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-              >
-                {showSuperAdminConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsChangePasswordModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={changePasswordLoading}
-              className="inline-flex items-center gap-2 px-6 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-md shadow-indigo-600/20 disabled:opacity-50"
-            >
-              {changePasswordLoading ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Changing Password...</span>
-                </>
-              ) : (
-                <span>Change Password</span>
-              )}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* ===================== CREATE COMPANY MODAL ===================== */}
-      <Modal
-        isOpen={isCreateCompanyModalOpen}
-        onClose={() => setIsCreateCompanyModalOpen(false)}
-        title="Create New Company"
-        icon={<Building2 className="w-5 h-5 text-blue-600" />}
-      >
-        <form onSubmit={handleCreateCompany} className="p-6 space-y-5">
-          {createCompanyError && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <p className="text-xs font-semibold text-rose-800">{createCompanyError}</p>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              Company Name <span className="text-blue-600">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Test Fertilizer Company"
               value={createCompanyData.name}
               onChange={(e) => setCreateCompanyData({ ...createCompanyData, name: e.target.value })}
-              className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
-
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              Company Logo <span className="text-blue-600">*</span>
-            </label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Company Logo URL (Optional)</label>
             <input
-              type="file"
-              accept="image/jpeg, image/png, image/jpg, image/webp"
-              onChange={handleLogoUpload}
-              required={!createCompanyData.logo}
-              className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              type="text"
+              value={createCompanyData.logo}
+              onChange={(e) => setCreateCompanyData({ ...createCompanyData, logo: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              placeholder="/logos/company-logo.png"
             />
-            {createCompanyData.logo && (
-              <div className="mt-3 p-3 border border-slate-200 rounded-xl bg-slate-50 flex items-center justify-center h-24">
-                <img src={createCompanyData.logo} alt="Preview" className="max-h-full max-w-full object-contain" />
-              </div>
-            )}
-            <p className="mt-1.5 text-[10px] text-slate-500">Max size 2MB. JPG, PNG, or WebP.</p>
           </div>
-
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsCreateCompanyModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={createCompanySubmitting}
-              className="inline-flex items-center gap-2 px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-md shadow-blue-600/20 disabled:opacity-50"
-            >
-              {createCompanySubmitting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Creating...</span>
-                </>
-              ) : (
-                <span>Create Company</span>
-              )}
+            <button type="button" onClick={() => setIsEditCompanyModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" disabled={editCompanySubmitting} className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+              {editCompanySubmitting ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* ===================== DELETE CONFIRM MODAL ===================== */}
+      {/* Delete Company Modal */}
       <ConfirmModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        onConfirm={handleDeleteAdmin}
-        title="Remove Company Admin"
-        message={`Are you sure you want to remove ${deletingAdmin?.name} (${deletingAdmin?.email}) as a company admin? This action cannot be undone.`}
-        confirmLabel="Remove Admin"
-        confirmVariant="danger"
+        isOpen={isDeleteCompanyModalOpen}
+        onClose={() => setIsDeleteCompanyModalOpen(false)}
+        onConfirm={handleDeleteCompany}
+        title="Deactivate Company"
+        message={`Are you sure you want to deactivate ${deletingCompany?.name}? This will hide the company from the portal.`}
+        confirmText="Deactivate Company"
+        isDanger={true}
       />
     </div>
   );
 };
-
-export default SuperAdminDashboard;
+export default SuperAdminCompanies;
