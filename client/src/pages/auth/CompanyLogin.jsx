@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
-// This page is deprecated — login is now handled by SPICLogin, TFLLogin, GreenstarLogin.
-// Kept for reference only. Route /login/company redirects to landing page.
+// Dynamic login page for new companies
 import {
   Building2,
   Lock,
@@ -19,11 +18,12 @@ import {
 
 const CompanyLogin = () => {
   const navigate = useNavigate();
+  const { companyCode } = useParams();
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const { showToast } = useToast();
 
-  const companyParam = searchParams.get('company') || 'tfl';
+  const companyParam = companyCode || searchParams.get('company') || 'company';
   const [selectedCompany, setSelectedCompany] = useState(companyParam.toLowerCase());
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');

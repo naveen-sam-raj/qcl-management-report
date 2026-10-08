@@ -16,6 +16,7 @@ import UserProfileDashboard from '../pages/company/UserProfileDashboard';
 import UserDashboard from '../pages/user/UserDashboard';
 import ReportsPage from '../pages/reports/ReportsPage';
 import TFLOverallGraphPage from '../pages/company/TFLOverallGraphPage';
+import CompanyLogin from '../pages/auth/CompanyLogin';
 
 const AppRoutes = () => {
   return (
@@ -32,8 +33,9 @@ const AppRoutes = () => {
       <Route path="/login/tfl" element={<TFLLogin />} />
       <Route path="/login/greenstar" element={<GreenstarLogin />} />
 
-      {/* Legacy shared company login route — redirect to landing */}
+      {/* Legacy shared company login route / Dynamic route */}
       <Route path="/login/company" element={<Navigate to="/" replace />} />
+      <Route path="/login/:companyCode" element={<CompanyLogin />} />
 
       {/* ── Super Admin Protected Routes ── */}
       <Route path="/super-admin" element={<DashboardLayout requiredRole="super_admin" />}>
@@ -41,6 +43,16 @@ const AppRoutes = () => {
         <Route path="settings" element={<SuperAdminSettings />} />
         {/* All other sub-routes redirect to dashboard */}
         <Route path="*" element={<SuperAdminDashboard />} />
+      </Route>
+
+      {/* ── Dynamic Admin Protected Routes ── */}
+      <Route path="/admin/:companyCode" element={<DashboardLayout requiredRole="company_admin" />}>
+        <Route index element={<EmptyCompanyDashboard companyName="Dynamic Company" />} />
+        <Route path="plants" element={<EmptyCompanyDashboard companyName="Dynamic Company" />} />
+        <Route path="users" element={<UserManagementPage />} />
+        <Route path="users/:userId" element={<UserProfileDashboard />} />
+        <Route path="reports" element={<EmptyCompanyDashboard companyName="Dynamic Company" />} />
+        <Route path="settings" element={<EmptyCompanyDashboard companyName="Dynamic Company" />} />
       </Route>
 
       {/* ── TFL Admin Protected Routes ── */}

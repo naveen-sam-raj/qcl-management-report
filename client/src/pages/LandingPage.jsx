@@ -1,67 +1,108 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 import {
   Sparkles,
 } from 'lucide-react';
 
+const DEFAULT_COMPANIES = [
+  {
+    id: 'spic',
+    code: 'SPIC',
+    name: 'SPIC Limited',
+    shortName: 'SPIC',
+    subtitle: 'Agri-Nutrients & Fertilizer Powerhouse',
+    description: 'High-grade urea, complex fertilizers, and industrial chemicals across South India.',
+    logo: '/spic-logo.png',
+    logoAlt: 'SPIC Nourishing Growth',
+    status: 'Standby Pipeline',
+    statusType: 'standby',
+    accentGradient: 'from-blue-600 via-blue-500 to-indigo-600',
+    activeBadge: 'Corporate Unit',
+    targetRoute: '/login/spic',
+    directAdminRoute: '/admin/spic',
+    isPrimary: false,
+  },
+  {
+    id: 'tfl',
+    code: 'TFL',
+    name: 'Tuticorin Alkali Chemicals',
+    shortName: 'TFL',
+    subtitle: 'Soda Ash & CCU Carbon Recovery',
+    description: 'Synthetic soda ash and ammonium chloride with operational Carbon Capture & Utilization (CCU).',
+    logo: '/tfl-logo.png',
+    logoAlt: 'Tuticorin Alkali Chemicals and Fertilizers',
+    status: '4 Active Plants',
+    statusType: 'active',
+    accentGradient: 'from-teal-500 via-emerald-500 to-blue-600',
+    activeBadge: 'Live Telemetry & QCL',
+    targetRoute: '/login/tfl',
+    directAdminRoute: '/admin/tfl',
+    isPrimary: true,
+  },
+  {
+    id: 'greenstar',
+    code: 'GSFL',
+    name: 'Greenstar Fertilizers',
+    shortName: 'Greenstar',
+    subtitle: 'Phosphatic & Precision Nutrients',
+    description: 'Major phosphatic fertilizer and water-soluble nutrient manufacturer across the subcontinent.',
+    logo: '/greenstar-logo.png',
+    logoAlt: 'Greenstar Fertilizers Limited',
+    status: 'Standby Pipeline',
+    statusType: 'standby',
+    accentGradient: 'from-emerald-600 via-green-500 to-teal-500',
+    activeBadge: 'Agri Solutions',
+    targetRoute: '/login/greenstar',
+    directAdminRoute: '/admin/greenstar',
+    isPrimary: false,
+  },
+];
+
 const LandingPage = () => {
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+  const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
 
-  const companies = [
-    {
-      id: 'spic',
-      code: 'SPIC',
-      name: 'SPIC Limited',
-      shortName: 'SPIC',
-      subtitle: 'Agri-Nutrients & Fertilizer Powerhouse',
-      description: 'High-grade urea, complex fertilizers, and industrial chemicals across South India.',
-      logo: '/spic-logo.png',
-      logoAlt: 'SPIC Nourishing Growth',
-      status: 'Standby Pipeline',
-      statusType: 'standby',
-      accentGradient: 'from-blue-600 via-blue-500 to-indigo-600',
-      activeBadge: 'Corporate Unit',
-      targetRoute: '/login/spic',
-      directAdminRoute: '/admin/spic',
-      isPrimary: false,
-    },
-    {
-      id: 'tfl',
-      code: 'TFL',
-      name: 'Tuticorin Alkali Chemicals',
-      shortName: 'TFL',
-      subtitle: 'Soda Ash & CCU Carbon Recovery',
-      description: 'Synthetic soda ash and ammonium chloride with operational Carbon Capture & Utilization (CCU).',
-      logo: '/tfl-logo.png',
-      logoAlt: 'Tuticorin Alkali Chemicals and Fertilizers',
-      status: '4 Active Plants',
-      statusType: 'active',
-      accentGradient: 'from-teal-500 via-emerald-500 to-blue-600',
-      activeBadge: 'Live Telemetry & QCL',
-      targetRoute: '/login/tfl',
-      directAdminRoute: '/admin/tfl',
-      isPrimary: true,
-    },
-    {
-      id: 'greenstar',
-      code: 'GSFL',
-      name: 'Greenstar Fertilizers',
-      shortName: 'Greenstar',
-      subtitle: 'Phosphatic & Precision Nutrients',
-      description: 'Major phosphatic fertilizer and water-soluble nutrient manufacturer across the subcontinent.',
-      logo: '/greenstar-logo.png',
-      logoAlt: 'Greenstar Fertilizers Limited',
-      status: 'Standby Pipeline',
-      statusType: 'standby',
-      accentGradient: 'from-emerald-600 via-green-500 to-teal-500',
-      activeBadge: 'Agri Solutions',
-      targetRoute: '/login/greenstar',
-      directAdminRoute: '/admin/greenstar',
-      isPrimary: false,
-    },
-  ];
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      try {
+        const res = await api.get('/companies');
+        if (res.data?.success && res.data.companies) {
+          const dbCompanies = res.data.companies;
+          const defaultCodes = DEFAULT_COMPANIES.map(c => c.code.toLowerCase());
+          
+          const newCompanies = dbCompanies
+            .filter(c => c.status === 'active' && !defaultCodes.includes(c.code.toLowerCase()))
+            .map(c => ({
+              id: c._id || c.code.toLowerCase(),
+              code: c.code,
+              name: c.name,
+              shortName: c.name,
+              subtitle: 'Dynamic Company',
+              description: '',
+              logo: c.logo || '/default-company.png',
+              logoAlt: c.name,
+              status: 'Active',
+              statusType: 'active',
+              accentGradient: 'from-slate-400 via-slate-500 to-slate-600',
+              activeBadge: 'Live',
+              targetRoute: `/login/${c.code.toLowerCase()}`,
+              directAdminRoute: `/admin/${c.code.toLowerCase()}`,
+              isPrimary: false,
+            }));
+            
+          if (newCompanies.length > 0) {
+            setCompanies([...DEFAULT_COMPANIES, ...newCompanies]);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch dynamic companies', err);
+      }
+    };
+    fetchCompanies();
+  }, []);
 
   const handleCompanyClick = (company) => {
     if (isAuthenticated) {
