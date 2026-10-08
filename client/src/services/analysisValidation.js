@@ -2233,7 +2233,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if (!analysisLimits) return null;
 
   const category = getRowCategory(cleanAnalysis, rowKey);
-  const categoryLimits = (category && analysisLimits[category]) || analysisLimits['day'] || analysisLimits['onceIn1Hour'] || analysisLimits['onceIn4Hours'] || analysisLimits['shiftTwice'] || analysisLimits['onceInAShift'] || analysisLimits['shift'] || analysisLimits['onceInAWeek'] || analysisLimits['week'];
+  const categoryLimits = analysisLimits[rowKey] || (category && analysisLimits[category]) || analysisLimits['day'] || analysisLimits['onceIn1Hour'] || analysisLimits['onceIn4Hours'] || analysisLimits['shiftTwice'] || analysisLimits['onceInAShift'] || analysisLimits['shift'] || analysisLimits['onceInAWeek'] || analysisLimits['week'];
   if (!categoryLimits) return null;
 
   const normalizedParamKey = String(paramKey || '').toLowerCase().replace(/[^a-z0-9]/g, '');
