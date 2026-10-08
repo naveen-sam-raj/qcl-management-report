@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -471,6 +472,9 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
                     const cellVal = data[shift.key][param.key];
                     const isInvalid = !!errors[fieldKey];
                     const errorMessage = errors[fieldKey];
+                    const limit = getCellLimit('offset', 'cbd', 'day', param.key);
+                    const validation = limit && cellVal !== '' ? validateCellValue(cellVal, limit) : { isOutOfLimit: false };
+                    const isOutOfLimit = validation.isOutOfLimit;
 
                     return (
                       <td key={param.key} className="px-3 py-2.5 text-center align-middle">
@@ -484,7 +488,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
                           }
                           placeholder={param.placeholder}
                           className={`w-full max-w-[95px] mx-auto text-center text-sm font-mono font-bold px-3 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                            isInvalid
+                            isInvalid || isOutOfLimit
                               ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
                               : shift.inputFocus
                           }`}
@@ -496,6 +500,17 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
                           <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
                             <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
                             <span>{errorMessage}</span>
+                          </div>
+                        )}
+                      
+                        {isOutOfLimit && !isInvalid && limit && (
+                          <div className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 py-0.5 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                            {limit.formattedLabel || `Limit: ${limit.min}-${limit.max}`}
+                          </div>
+                        )}
+                        {!isOutOfLimit && !isInvalid && limit && cellVal === '' && (
+                          <div className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                            {limit.formattedRange || `${limit.min}-${limit.max}`}
                           </div>
                         )}
                       </td>

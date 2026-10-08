@@ -1199,6 +1199,18 @@ export const ANALYSIS_LIMITS_REGISTRY = {
     },
   },
   offset: {
+    cbd: {
+      day: {
+        ph: { min: 10.5, max: 11, unit: '', paramName: 'pH', label: 'pH', frequency: 'Day', isDirectRange: true, formattedRange: '10.5 – 11', referenceDisplay: 'Direct Range: 10.5 – 11' },
+        po4: { min: 30, max: 70, unit: 'ppm', paramName: 'PO4', label: 'PO4', frequency: 'Day', isDirectRange: true, formattedRange: '30 – 70 ppm', referenceDisplay: 'Direct Range: 30 – 70 ppm' },
+        na2so3: { min: 20, max: 30, unit: 'ppm', paramName: 'Na2SO3', label: 'Na2SO3', frequency: 'Day', isDirectRange: true, formattedRange: '20 – 30 ppm', referenceDisplay: 'Direct Range: 20 – 30 ppm' },
+        talk: { target: 200, tolerance: 10, min: 190, max: 210, unit: 'ppm', paramName: 'T.Alk', frequency: 'Day' },
+        sio2: { target: 10, tolerance: 5, min: 5, max: 15, unit: 'ppm', paramName: 'SiO2', frequency: 'Day' },
+        tfe: { target: 5, tolerance: 5, min: 0, max: 10, unit: 'ppm', paramName: 'T.Fe', frequency: 'Day' },
+        tds: { target: 2000, tolerance: 50, min: 1950, max: 2050, unit: 'ppm', paramName: 'TDS', frequency: 'Day' },
+        ss: { target: 20, tolerance: 5, min: 15, max: 25, unit: 'ppm', paramName: 'SS', frequency: 'Day' },
+      },
+    },
     'raw-water': {
       day: {
         ph: { min: 7.0, max: 9.5, unit: '', paramName: 'pH', label: 'pH', frequency: 'Day', isDirectRange: true, formattedRange: '7.0 – 9.5', referenceDisplay: 'Direct Range: 7.0 – 9.5' },
@@ -1913,6 +1925,10 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'gas-concentration-analysis' ||
     cleanAnalysis === 'sa-gas-conc' ||
     cleanAnalysis === 'sa-gas-conc-analysis';
+  const isOffsetCBD =
+    cleanAnalysis === 'cbd' ||
+    cleanAnalysis === 'cbd-analysis' ||
+    cleanAnalysis === 'offset-cbd';
   const isOffsetRawWater =
     cleanAnalysis === 'raw-water' ||
     cleanAnalysis === 'rawwater' ||
@@ -1943,7 +1959,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'acl-cacl2-analysis' ||
     cleanAnalysis.includes('cacl2');
 
-  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
+  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetCBD && !isOffsetRawWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
     return null;
   }
 
@@ -2001,7 +2017,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
     return null;
   }
-  if ((isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
+  if ((isOffsetCBD || isOffsetRawWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
     return null;
   }
 
@@ -2090,8 +2106,10 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
                                                                       ? 'e501-t501'
                                                                       : isSAGasConc
                                                                         ? 'gas-conc'
-                                                                        : isOffsetRawWater
-                                                                          ? 'raw-water'
+                                                                        : isOffsetCBD
+                                                                          ? 'cbd'
+                                                                          : isOffsetRawWater
+                                                                            ? 'raw-water'
                                                                           : isOffsetDMWater
                                                                             ? 'dm-water'
                                                                           : isOffsetBFW
