@@ -15,6 +15,7 @@ import {
   Trash2,
   Clock,
   ThermometerSnowflake,
+  AlertCircle,
 } from 'lucide-react';
 
 const emptyRow = {
