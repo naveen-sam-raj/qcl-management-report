@@ -18,31 +18,21 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-const emptyRow = {
-  time: '07:00',
-  ph: '',
-  frc: '',
-  cl: '',
-  opo4: '',
-  turbidity: '',
-  tds: '',
-  fe: '',
-  sio2: '',
-  alk: '',
-  so4: '',
-  th: '',
-  cah: '',
-  mgh: '',
-  ammn: ''
-};
+const emptyRow = { time: '07:00', ph: '', frc: '', cl: '', opo4: '', turbidity: '', tds: '', fe: '', sio2: '', alk: '', so4: '', th: '', cah: '', mgh: '', ammn: '' };
+const emptyRow200 = { time: '07:00', ph: '', frc: '', opo4: '', cl: '' };
 
-const DEFAULT_READINGS = [
-  { id: 't07', ...emptyRow, time: '07:00' },
+const DEFAULT_READINGS_DAY = [
+  { id: 't07', ...(is200 ? emptyRow200 : emptyRow), time: '07:00' },
   { id: 't09', ...emptyRow, time: '09:00' },
   { id: 't11', ...emptyRow, time: '11:00' },
   { id: 't13', ...emptyRow, time: '13:00' },
   { id: 't15', ...emptyRow, time: '15:00' },
   { id: 't17', ...emptyRow, time: '17:00' },
+];
+
+const DEFAULT_READINGS_200 = [
+  { id: 't07', ...emptyRow200, time: '07:00' },
+  { id: 't19', ...emptyRow200, time: '19:00' },
 ];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -61,7 +51,7 @@ const formatDateDisplay = (isoDate) => {
   }
 };
 
-const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
+const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -69,7 +59,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   const [date, setDate] = useState('2026-09-13');
-  const [readings, setReadings] = useState(DEFAULT_READINGS);
+  const [readings, setReadings] = useState(is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -78,7 +68,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/cooling-water-analysis?date=${date}`);
+        const response = await api.get(`/api/cooling-water-analysis?date=${date}&unit=${encodeURIComponent(is200 ? 'cooling water 200#' : 'cooling water')}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
@@ -137,14 +127,14 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
   };
 
   const handleReset = () => {
-    setReadings(DEFAULT_READINGS);
+    setReadings(is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY);
     setErrors({});
     showToast?.('Values reset to defaults.', 'info');
   };
 
   const handleSave = async () => {
     const newErrors = {};
-    const numericFields = ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh'];
+    const numericFields = is200 ? ['ph', 'frc', 'opo4', 'cl'] : ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh'];
 
     readings.forEach((r) => {
       numericFields.forEach((f) => {
@@ -165,7 +155,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
       const payload = {
         date,
         plant: 'OFFSET',
-        unit: 'cooling water',
+        unit: is200 ? 'cooling water 200#' : 'cooling water',
         readings,
         submittedBy: user?.name || 'Shift Chemist',
       };
@@ -173,7 +163,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
       const res = await api.post('/api/cooling-water-analysis', payload);
 
       if (res.data?.success) {
-        showToast?.('Cooling Water Analysis saved successfully!', 'success');
+        showToast?.(is200 ? 'Cooling Water 200# saved successfully!' : 'Cooling Water Analysis saved successfully!', 'success');
         setLastSaved(new Date().toLocaleTimeString());
       } else {
         showToast?.(res.data?.message || 'Cooling Water data saved.', 'success');
@@ -211,12 +201,12 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
               </span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200/60">
-                Cooling Water (C.W Water)
+                {is200 ? 'Cooling Water / 200#' : 'Cooling Water (C.W Water)'}
               </span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
               <ThermometerSnowflake className="w-5 h-5 text-cyan-600" />
-              COOLING WATER ANALYSIS (C.W WATER)
+              {is200 ? 'COOLING WATER / 200# ANALYSIS' : 'COOLING WATER ANALYSIS (C.W WATER)'}
             </h1>
           </div>
         </div>
@@ -264,7 +254,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-blue-600" />
               <h2 className="text-xs font-bold text-slate-900 uppercase">
-                Cooling Water (C.W Water) Laboratory Readings
+                {is200 ? 'Cooling Water / 200# Laboratory Readings' : 'Cooling Water (C.W Water) Laboratory Readings'}
               </h2>
             </div>
 
@@ -323,59 +313,63 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
                 <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>Cl</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
                   <div>O-PO₄</div>
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
                 <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>Turbidity</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">NTU</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>TDS</div>
+                  <div>Cl</div>
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>Fe</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>SiO₂</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>ALK</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>SO₄</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>TH</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>CaH</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>MgH</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>Amm.N</div>
-                  <div className="text-[9px] font-normal text-emerald-400/80 normal-case mt-0.5">Limit: NIL</div>
-                </th>
+                {!is200 && (
+                  <>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>Turbidity</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">NTU</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>TDS</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>Fe</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>SiO₂</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>ALK</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>SO₄</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>TH</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>CaH</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>MgH</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>Amm.N</div>
+                      <div className="text-[9px] font-normal text-emerald-400/80 normal-case mt-0.5">Limit: NIL</div>
+                    </th>
+                  </>
+                )}
                 <th className="py-3 px-2 w-14 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((row, idx) => {
-                const getLimit = (param) => getCellLimit('offset', 'cooling-water', 'Day', param);
+                const getLimit = (param) => getCellLimit('offset', 'cooling-water', is200 ? 'shiftTwice' : 'Day', is200 ? `sec200${param}` : param);
 
                 const limits = {
                   ph: getLimit('ph'),
@@ -461,7 +455,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       />
                     </td>
 
-                    {['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh', 'ammn'].map(renderInput)}
+                    {(is200 ? ['ph', 'frc', 'opo4', 'cl'] : ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh', 'ammn']).map(renderInput)}
 
                     <td className="py-2.5 px-2 text-center">
                       <button

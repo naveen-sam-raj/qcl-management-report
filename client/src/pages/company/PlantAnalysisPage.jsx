@@ -695,7 +695,7 @@ const PlantAnalysisPage = () => {
       decodedOptionName.toLowerCase().includes('cooling water') ||
       decodedOptionName.toLowerCase().includes('c.w water')
     ) {
-      return <CoolingWaterAnalysisPage plantId={id || 'offset'} />;
+      return <CoolingWaterAnalysisPage plantId={id || 'offset'} is200={decodedOptionName.includes('200')} />;
     }
 
     // ── Distiller Waste / Distiller Waste Water (OFFSET Plant) → dedicated full-featured module ──

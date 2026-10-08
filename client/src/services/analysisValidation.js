@@ -1216,6 +1216,12 @@ export const ANALYSIS_LIMITS_REGISTRY = {
         mgh: { min: 150, max: 250, unit: 'ppm', paramName: 'MgH', frequency: 'Day', target: 200, tolerance: 50 },
         ammn: { paramName: 'Amm.N', frequency: 'Day', formattedRange: 'NIL', formattedLabel: 'Limit: NIL' },
       },
+      shiftTwice: {
+        sec200ph: { min: 7.2, max: 7.9, unit: '', paramName: 'pH', frequency: 'Shift Twice' },
+        sec200frc: { min: 0.2, max: 0.5, unit: 'ppm', paramName: 'FRC', frequency: 'Shift Twice' },
+        sec200opo4: { min: 6, max: 8, unit: 'ppm', paramName: 'O-PO4', frequency: 'Shift Twice' },
+        sec200cl: { min: 600, max: 800, unit: 'ppm', paramName: 'Cl', frequency: 'Shift Twice', target: 700, tolerance: 100 },
+      },
     },
     'sewer-water': {
       shift: {
