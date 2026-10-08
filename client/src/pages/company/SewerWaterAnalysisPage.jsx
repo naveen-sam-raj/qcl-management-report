@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -442,12 +443,35 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 </th>
                 <th className="py-2 px-2 text-center w-20 border-r border-slate-800 text-emerald-200">
                   PCl
-                </th>
+                <div className="text-[9px] font-normal text-emerald-400/80 normal-case mt-0.5">Limit: NIL</div></th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-100 text-xs">
-              {readings.map((row, idx) => (
+              {readings.map((row, idx) => {
+                const getLimit = (category, param) => getCellLimit('offset', 'sewer-water', 'Shift', param, category);
+                
+                const sec200Fnh3Limit = getLimit('sec200', 'fnh3');
+                const sec200Cnh3Limit = getLimit('sec200', 'cnh3');
+                const sec400Fnh3Limit = getLimit('sec400', 'fnh3');
+                const sec400Cnh3Limit = getLimit('sec400', 'cnh3');
+                const finalOutletFnh3Limit = getLimit('finalOutlet', 'fnh3');
+                const finalOutletCnh3Limit = getLimit('finalOutlet', 'cnh3');
+                const pclLimit = getLimit('finalOutlet', 'pcl');
+
+                const isValid = (val, limit) => limit && val !== '' ? validateCellValue(val, limit) : { isOutOfLimit: false };
+                
+                const vSec200Fnh3 = isValid(row.sec200.fnh3, sec200Fnh3Limit);
+                const vSec200Cnh3 = isValid(row.sec200.cnh3, sec200Cnh3Limit);
+                const vSec400Fnh3 = isValid(row.sec400.fnh3, sec400Fnh3Limit);
+                const vSec400Cnh3 = isValid(row.sec400.cnh3, sec400Cnh3Limit);
+                const vFinalOutletFnh3 = isValid(row.finalOutlet.fnh3, finalOutletFnh3Limit);
+                const vFinalOutletCnh3 = isValid(row.finalOutlet.cnh3, finalOutletCnh3Limit);
+
+                const isPclNil = row.finalOutlet.pcl !== undefined && ['nil', 'n', 'ni', 'none', '-'].includes(String(row.finalOutlet.pcl).toLowerCase().trim());
+                const vPcl = pclLimit && row.finalOutlet.pcl !== '' ? (isPclNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
+
+                return (
                 <tr
                   key={row.id}
                   className="hover:bg-teal-50/30 transition-colors"
@@ -477,14 +501,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'sec200', 'fnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_sec200_fnh3`]
+                        (errors[`${row.id}_sec200_fnh3`] || vSec200Fnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.sec200?.fnh3 !== '' && row.sec200?.fnh3 !== '0'
                           ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vSec200Fnh3.isOutOfLimit && !errors[`${row.id}_sec200_fnh3`] && sec200Fnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {sec200Fnh3Limit.formattedLabel || `Limit: ${sec200Fnh3Limit.min}-${sec200Fnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vSec200Fnh3.isOutOfLimit && !errors[`${row.id}_sec200_fnh3`] && sec200Fnh3Limit && (row.sec200?.fnh3 === '' || row.sec200?.fnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {sec200Fnh3Limit.formattedRange || `${sec200Fnh3Limit.min}-${sec200Fnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-200">
                     <input
@@ -494,14 +529,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'sec200', 'cnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_sec200_cnh3`]
+                        (errors[`${row.id}_sec200_cnh3`] || vSec200Cnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.sec200?.cnh3 !== '' && row.sec200?.cnh3 !== '0'
                           ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vSec200Cnh3.isOutOfLimit && !errors[`${row.id}_sec200_cnh3`] && sec200Cnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {sec200Cnh3Limit.formattedLabel || `Limit: ${sec200Cnh3Limit.min}-${sec200Cnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vSec200Cnh3.isOutOfLimit && !errors[`${row.id}_sec200_cnh3`] && sec200Cnh3Limit && (row.sec200?.cnh3 === '' || row.sec200?.cnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {sec200Cnh3Limit.formattedRange || `${sec200Cnh3Limit.min}-${sec200Cnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   {/* ── 400 # Columns ── */}
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
@@ -512,14 +558,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'sec400', 'fnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_sec400_fnh3`]
+                        (errors[`${row.id}_sec400_fnh3`] || vSec400Fnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.sec400?.fnh3 !== '' && row.sec400?.fnh3 !== '0'
                           ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vSec400Fnh3.isOutOfLimit && !errors[`${row.id}_sec400_fnh3`] && sec400Fnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {sec400Fnh3Limit.formattedLabel || `Limit: ${sec400Fnh3Limit.min}-${sec400Fnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vSec400Fnh3.isOutOfLimit && !errors[`${row.id}_sec400_fnh3`] && sec400Fnh3Limit && (row.sec400?.fnh3 === '' || row.sec400?.fnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {sec400Fnh3Limit.formattedRange || `${sec400Fnh3Limit.min}-${sec400Fnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
                     <input
@@ -529,14 +586,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'sec400', 'cnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_sec400_cnh3`]
+                        (errors[`${row.id}_sec400_cnh3`] || vSec400Cnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.sec400?.cnh3 !== '' && row.sec400?.cnh3 !== '0'
                           ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vSec400Cnh3.isOutOfLimit && !errors[`${row.id}_sec400_cnh3`] && sec400Cnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {sec400Cnh3Limit.formattedLabel || `Limit: ${sec400Cnh3Limit.min}-${sec400Cnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vSec400Cnh3.isOutOfLimit && !errors[`${row.id}_sec400_cnh3`] && sec400Cnh3Limit && (row.sec400?.cnh3 === '' || row.sec400?.cnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {sec400Cnh3Limit.formattedRange || `${sec400Cnh3Limit.min}-${sec400Cnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-200">
                     <input
@@ -564,14 +632,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'fnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_finalOutlet_fnh3`]
+                        (errors[`${row.id}_finalOutlet_fnh3`] || vFinalOutletFnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.finalOutlet?.fnh3 !== '' && row.finalOutlet?.fnh3 !== '0'
                           ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vFinalOutletFnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_fnh3`] && finalOutletFnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {finalOutletFnh3Limit.formattedLabel || `Limit: ${finalOutletFnh3Limit.min}-${finalOutletFnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vFinalOutletFnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_fnh3`] && finalOutletFnh3Limit && (row.finalOutlet?.fnh3 === '' || row.finalOutlet?.fnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {finalOutletFnh3Limit.formattedRange || `${finalOutletFnh3Limit.min}-${finalOutletFnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
                     <input
@@ -581,14 +660,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'cnh3', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_finalOutlet_cnh3`]
+                        (errors[`${row.id}_finalOutlet_cnh3`] || vFinalOutletCnh3.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.finalOutlet?.cnh3 !== '' && row.finalOutlet?.cnh3 !== '0'
                           ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                      {vFinalOutletCnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_cnh3`] && finalOutletCnh3Limit && (
+                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {finalOutletCnh3Limit.formattedLabel || `Limit: ${finalOutletCnh3Limit.min}-${finalOutletCnh3Limit.max}`}
+                        </div>
+                      )}
+                      {!vFinalOutletCnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_cnh3`] && finalOutletCnh3Limit && (row.finalOutlet?.cnh3 === '' || row.finalOutlet?.cnh3 === undefined) && (
+                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {finalOutletCnh3Limit.formattedRange || `${finalOutletCnh3Limit.min}-${finalOutletCnh3Limit.max}`}
+                        </div>
+                      )}
+                    </td>
 
                   <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
                     <input
@@ -615,14 +705,25 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'pcl', e.target.value)}
                       placeholder="0"
                       className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_finalOutlet_pcl`]
+                        (errors[`${row.id}_finalOutlet_pcl`] || vPcl.isOutOfLimit)
                           ? 'border-red-500 bg-red-50'
                           : row.finalOutlet?.pcl !== '' && row.finalOutlet?.pcl !== '0'
                           ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
                           : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
                       }`}
                     />
-                  </td>
+                  
+                    {vPcl.isOutOfLimit && !errors[`${row.id}_finalOutlet_pcl`] && pclLimit && (
+                    <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        Limit: NIL
+                    </div>
+                    )}
+                    {!vPcl.isOutOfLimit && !errors[`${row.id}_finalOutlet_pcl`] && pclLimit && (row.finalOutlet?.pcl === '' || row.finalOutlet?.pcl === undefined) && (
+                    <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        NIL
+                    </div>
+                    )}
+                </td>
 
                   {/* ACTION */}
                   <td className="py-2.5 px-2 text-center">
@@ -636,7 +737,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     </button>
                   </td>
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
         </div>
