@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -361,6 +362,14 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                 const combErr = errors[`${row.id}_combustible`];
                 const gcvErr = errors[`${row.id}_gcv`];
                 const moistErr = errors[`${row.id}_moisture`];
+                const combLimit = getCellLimit('offset', 'bottom-ash', 'day', 'combustible');
+                const combValid = combLimit && row.combustible !== '' ? validateCellValue(row.combustible, combLimit) : { isOutOfLimit: false };
+
+                const gcvLimit = getCellLimit('offset', 'bottom-ash', 'day', 'gcv');
+                const gcvValid = gcvLimit && row.gcv !== '' ? validateCellValue(row.gcv, gcvLimit) : { isOutOfLimit: false };
+
+                const moistLimit = getCellLimit('offset', 'bottom-ash', 'day', 'moisture');
+                const moistValid = moistLimit && row.moisture !== '' ? validateCellValue(row.moisture, moistLimit) : { isOutOfLimit: false };
 
                 return (
                   <tr
@@ -393,7 +402,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                           onChange={(e) => handleCellChange(row.id, 'combustible', e.target.value)}
                           placeholder="0.00"
                           className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                            combErr
+                            combErr || combValid.isOutOfLimit
                               ? 'border-red-500 bg-red-50/50 text-red-900 focus:ring-red-200'
                               : row.combustible !== ''
                               ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
@@ -409,6 +418,16 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                           {combErr}
                         </div>
                       )}
+                      {combValid.isOutOfLimit && !combErr && combLimit && (
+                        <div className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 py-0.5 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {combLimit.formattedLabel || `Limit: ${combLimit.min}-${combLimit.max}`}
+                        </div>
+                      )}
+                      {!combValid.isOutOfLimit && !combErr && combLimit && row.combustible === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {combLimit.formattedRange || `${combLimit.min}-${combLimit.max}`}
+                        </div>
+                      )}
                     </td>
 
                     {/* GCV Kcals/kg */}
@@ -421,7 +440,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                           onChange={(e) => handleCellChange(row.id, 'gcv', e.target.value)}
                           placeholder="0000"
                           className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                            gcvErr
+                            gcvErr || gcvValid.isOutOfLimit
                               ? 'border-red-500 bg-red-50/50 text-red-900 focus:ring-red-200'
                               : row.gcv !== ''
                               ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-amber-600 focus:ring-2 focus:ring-amber-100'
@@ -437,6 +456,16 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                           {gcvErr}
                         </div>
                       )}
+                      {gcvValid.isOutOfLimit && !gcvErr && gcvLimit && (
+                        <div className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 py-0.5 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {gcvLimit.formattedLabel || `Limit: ${gcvLimit.min}-${gcvLimit.max}`}
+                        </div>
+                      )}
+                      {!gcvValid.isOutOfLimit && !gcvErr && gcvLimit && row.gcv === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {gcvLimit.formattedRange || `${gcvLimit.min}-${gcvLimit.max}`}
+                        </div>
+                      )}
                     </td>
 
                     {/* MOISTURE % */}
@@ -449,7 +478,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                           onChange={(e) => handleCellChange(row.id, 'moisture', e.target.value)}
                           placeholder="0.00"
                           className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                            moistErr
+                            moistErr || moistValid.isOutOfLimit
                               ? 'border-red-500 bg-red-50/50 text-red-900 focus:ring-red-200'
                               : row.moisture !== ''
                               ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100'
@@ -463,6 +492,16 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
                       {moistErr && (
                         <div className="text-[10px] text-red-600 font-semibold mt-1">
                           {moistErr}
+                        </div>
+                      )}
+                      {moistValid.isOutOfLimit && !moistErr && moistLimit && (
+                        <div className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 py-0.5 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                          {moistLimit.formattedLabel || `Limit: ${moistLimit.min}-${moistLimit.max}`}
+                        </div>
+                      )}
+                      {!moistValid.isOutOfLimit && !moistErr && moistLimit && row.moisture === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {moistLimit.formattedRange || `${moistLimit.min}-${moistLimit.max}`}
                         </div>
                       )}
                     </td>
