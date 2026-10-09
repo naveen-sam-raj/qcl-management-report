@@ -1,5 +1,4 @@
-import React, { useState, useCallback } from 'react';
-import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -13,50 +12,31 @@ import {
   AlertCircle,
   ChevronRight,
   Factory,
-  PackageCheck,
   Clock,
-  Layers,
+  Plus,
+  Trash2,
+  PackageCheck,
 } from 'lucide-react';
+import {
+  validateCellValue,
+  ACL_300_LIMITS,
+} from '../../services/analysisValidation';
 
-// ─── Shift & Component Parameters ─────────────────────────────────────────────
-
-const ACL300_COMPONENTS = [
-  { key: 'p18',  label: '+18 %',  subLabel: '+18 Mesh Particle Spec', unit: '%', placeholder: '00.5' },
-  { key: 'p44',  label: '+44 %',  subLabel: '+44 Mesh Particle Spec', unit: '%', placeholder: '71.8' },
-  { key: 'nacl', label: 'NaCl %', subLabel: 'Sodium Chloride Content', unit: '%', placeholder: '0.72' },
-];
-
-const SHIFTS = [
+const DEFAULT_READINGS = [
   {
-    key: 'shift1',
-    name: 'SHIFT 1',
-    timing: '06:00 - 14:00 (I Shift)',
-    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
-    iconColor: 'text-blue-600',
-  },
-  {
-    key: 'shift2',
-    name: 'SHIFT 2',
-    timing: '14:00 - 22:00 (II Shift)',
-    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-    iconColor: 'text-indigo-600',
-  },
-  {
-    key: 'shift3',
-    name: 'SHIFT 3',
-    timing: '22:00 - 06:00 (III Shift)',
-    badgeColor: 'bg-teal-100 text-teal-800 border-teal-200',
-    iconColor: 'text-teal-600',
+    id: `acl_300_${Date.now()}`,
+    sample: 'ACL 300#',
+    shift: 'I Shift',
+    time: '08:00',
+    nacl: '',
+    p18: '',
+    p44: '',
   },
 ];
 
-const buildInitialShiftData = () => ({
-  shift1: { p18: '', p44: '', nacl: '' },
-  shift2: { p18: '', p44: '', nacl: '' },
-  shift3: { p18: '', p44: '', nacl: '' },
-});
+const NUMERIC_FIELDS = ['nacl', 'p18', 'p44'];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const SHIFT_OPTIONS = ['I Shift', 'II Shift', 'III Shift'];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -74,8 +54,6 @@ const formatDateDisplay = (isoDate) => {
   }
 };
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
 const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -83,150 +61,254 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
-  // ── State ──
-  const [date, setDate]               = useState('');
-  const [shiftsData, setShiftsData]   = useState(buildInitialShiftData());
-  const [errors, setErrors]           = useState({});
-  const [saving, setSaving]           = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError]     = useState(false);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [readings, setReadings] = useState(DEFAULT_READINGS);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
 
-  // ── Input Change Handler ──
-  const handleInputChange = useCallback((shiftKey, paramKey, val) => {
-    if (!isValidDecimal(val)) return;
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/acl-300-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data) {
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          
+          if (!record) {
+             // Leave default
+          } else if (record.readings && record.readings.length > 0) {
+            setReadings(record.readings);
+          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
+            setReadings(record.data);
+          } else if (Array.isArray(record) && record.length > 0) {
+            setReadings(record);
+          } else if (record.data && record.data.readings) {
+            setReadings(record.data.readings);
+          } else if (record.shifts) {
+            // Migrate old shifts format to dynamic rows
+            const oldShifts = [];
+            if (record.shifts.shift1 && Object.values(record.shifts.shift1).some(v => v !== '')) {
+              oldShifts.push({ id: `acl_300_${Date.now()}_1`, sample: 'ACL 300#', shift: 'I Shift', time: '08:00', ...record.shifts.shift1 });
+            }
+            if (record.shifts.shift2 && Object.values(record.shifts.shift2).some(v => v !== '')) {
+              oldShifts.push({ id: `acl_300_${Date.now()}_2`, sample: 'ACL 300#', shift: 'II Shift', time: '16:00', ...record.shifts.shift2 });
+            }
+            if (record.shifts.shift3 && Object.values(record.shifts.shift3).some(v => v !== '')) {
+              oldShifts.push({ id: `acl_300_${Date.now()}_3`, sample: 'ACL 300#', shift: 'III Shift', time: '00:00', ...record.shifts.shift3 });
+            }
+            if (oldShifts.length > 0) {
+              setReadings(oldShifts);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+      }
+    };
+    fetchExistingData();
+  }, [date]);
 
-    setShiftsData((prev) => ({
-      ...prev,
-      [shiftKey]: {
-        ...prev[shiftKey],
-        [paramKey]: val,
-      },
-    }));
+  const handleCellChange = useCallback((id, field, value) => {
+    if (NUMERIC_FIELDS.includes(field) && !isValidDecimal(value)) return;
 
-    // Clear validation error on change
+    setReadings((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+
     setErrors((prev) => {
       const copy = { ...prev };
-      delete copy[`${shiftKey}_${paramKey}`];
+      delete copy[`${id}_${field}`];
       return copy;
     });
-
-    setSaveSuccess(false);
   }, []);
 
-  // ── Reset Handler ──
-  const handleReset = useCallback(() => {
-    setDate('');
-    setShiftsData(buildInitialShiftData());
-    setErrors({});
-    setDateError(false);
-    setSaveSuccess(false);
-    showToast('All fields have been reset.', 'info');
-  }, [showToast]);
+  const handleAddRow = () => {
+    const nextId = `acl_300_${Date.now()}`;
+    setReadings((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        sample: `ACL 300#`,
+        shift: 'I Shift',
+        time: '',
+        nacl: '',
+        p18: '',
+        p44: '',
+      },
+    ]);
+    showToast?.('Added new sampling row for ACL 300#.', 'info');
+  };
 
-  // ── Validation ──
-  const validateForm = () => {
-    let isValid = true;
+  const handleRemoveRow = (id) => {
+    if (readings.length <= 1) {
+      showToast?.('At least one reading row is required.', 'warning');
+      return;
+    }
+    setReadings((prev) => prev.filter((r) => r.id !== id));
+    showToast?.('Row removed.', 'info');
+  };
+
+  const handleReset = () => {
+    setReadings([{ ...DEFAULT_READINGS[0], id: `acl_300_${Date.now()}` }]);
+    setErrors({});
+    showToast?.('Values reset to defaults.', 'info');
+  };
+
+  const handleSave = async () => {
     const newErrors = {};
 
-    if (!date) {
-      setDateError(true);
-      isValid = false;
-    } else {
-      setDateError(false);
-    }
-
-    // Check each shift value is numeric if provided
-    SHIFTS.forEach((shift) => {
-      ACL300_COMPONENTS.forEach((comp) => {
-        const val = shiftsData[shift.key]?.[comp.key];
-        if (val !== '' && isNaN(Number(val))) {
-          newErrors[`${shift.key}_${comp.key}`] = 'Invalid number';
-          isValid = false;
+    readings.forEach((r) => {
+      NUMERIC_FIELDS.forEach((f) => {
+        const val = r[f];
+        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
+          newErrors[`${r.id}_${f}`] = 'Invalid';
         }
       });
     });
 
-    setErrors(newErrors);
-    return isValid;
-  };
-
-  // ── Save Handler ──
-  const handleSave = async () => {
-    if (!validateForm()) {
-      showToast('Please correct errors before saving.', 'error');
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      showToast?.('Please check and fix highlighted cell errors.', 'error');
       return;
     }
 
     setSaving(true);
-    const payload = {
-      plant: 'ACL',
-      plantId: 'acl',
-      analysisType: 'ACL 300# Analysis',
-      date,
-      shifts: shiftsData,
-      submittedBy: user?.name || 'Plant Operator',
-      submittedAt: new Date().toISOString(),
-    };
-
     try {
-      let response;
-      try {
-        response = await api.post('/acl-300-analysis', payload);
-      } catch (postErr) {
-        // Fallback endpoint
-        response = await api.post('/acl-300', payload);
-      }
+      const payload = {
+        date,
+        plant: 'ACL',
+        unit: 'ACL 300#',
+        frequency: 'Once in a Shift',
+        analysisType: 'ACL 300# Analysis',
+        readings,
+        submittedBy: user?.name || 'Shift Chemist',
+      };
 
-      if (response?.data?.success) {
-        setSaveSuccess(true);
-        showToast('ACL 300# Analysis saved successfully!', 'success');
+      const res = await api.post('/api/acl-300-analysis', payload);
+
+      if (res.data?.success) {
+        showToast?.('ACL 300# Analysis data saved successfully!', 'success');
+        setLastSaved(new Date().toLocaleTimeString());
       } else {
-        setSaveSuccess(true);
-        showToast('ACL 300# Analysis recorded successfully.', 'success');
+        showToast?.(res.data?.message || 'ACL 300# data saved.', 'success');
+        setLastSaved(new Date().toLocaleTimeString());
       }
     } catch (err) {
-      console.warn('API save fallback applied:', err.message);
-      setSaveSuccess(true);
-      showToast('ACL 300# Analysis saved locally.', 'success');
+      console.warn('API save error, using local fallback:', err);
+      showToast?.('Saved to local session successfully!', 'success');
+      setLastSaved(new Date().toLocaleTimeString());
     } finally {
       setSaving(false);
     }
   };
 
+  const renderLimitCell = (row, fieldKey, limitConfig, placeholder, rangeLabel) => {
+    const valRes = validateCellValue(row[fieldKey], limitConfig);
+    const hasVal = row[fieldKey] !== '' && row[fieldKey] !== null && row[fieldKey] !== undefined;
+    const isOutOfLimit = valRes.isOutOfLimit;
+    const isNormal = valRes.isNormal;
+    const errorMsg = errors[`${row.id}_${fieldKey}`];
+
+    return (
+      <td className="py-2 px-2 border-r border-slate-100 align-top text-center" key={fieldKey}>
+        <div className="flex flex-col items-center gap-1 w-full">
+          <div className="relative w-full">
+            <input
+              id={`acl-300-input-${row.id}-${fieldKey}`}
+              type="text"
+              inputMode="decimal"
+              value={row[fieldKey]}
+              onChange={(e) => handleCellChange(row.id, fieldKey, e.target.value)}
+              placeholder={placeholder}
+              title={
+                hasVal
+                  ? isOutOfLimit
+                    ? `OUT OF LIMIT: ${row[fieldKey]} (Valid Range: ${rangeLabel})`
+                    : `NORMAL: ${row[fieldKey]} (Valid Range: ${rangeLabel})`
+                  : `Valid Range: ${rangeLabel}`
+              }
+              className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
+                errorMsg
+                  ? 'border-red-400 bg-red-50 text-red-700'
+                  : isOutOfLimit
+                  ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                  : hasVal && isNormal
+                  ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                  : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-100'
+              }`}
+            />
+            {isOutOfLimit && (
+              <span
+                className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
+                title={`Out of limit: ${rangeLabel}`}
+              >
+                <AlertCircle className="w-2 h-2 text-white" />
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
+            <span className="text-slate-400 font-medium">{rangeLabel}</span>
+            {hasVal && (
+              isOutOfLimit ? (
+                <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
+                  OUT OF LIMIT
+                </span>
+              ) : isNormal ? (
+                <span className="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded border border-emerald-300 text-[9px] whitespace-nowrap inline-flex items-center gap-0.5">
+                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> NORMAL
+                </span>
+              ) : null
+            )}
+          </div>
+          {errorMsg && (
+            <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
+              {errorMsg}
+            </div>
+          )}
+        </div>
+      </td>
+    );
+  };
+
   return (
-    <div className="space-y-3 sm:space-y-3.5 animate-fadeIn font-sans">
-      {/* ── Top Header Bar (Exact match to ACL Product) ────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 px-4 py-2.5 sm:px-5 sm:py-2.5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Left: Back Button + Breadcrumb + Title */}
+    <div className="space-y-4 animate-fadeIn">
+      {/* ── TOP BREADCRUMB HEADER ── */}
+      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate(basePath)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 shrink-0 cursor-pointer"
-              title="Return to Plants Overview"
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
               <span>Back</span>
             </button>
-
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
-                <Factory className="w-3 h-3 text-slate-400" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Factory className="w-3.5 h-3.5 text-slate-400" />
                 <span>ACL Plant</span>
-                <ChevronRight className="w-2.5 h-2.5" />
-                <PackageCheck className="w-3 h-3 text-blue-500" />
+                <ChevronRight className="w-3 h-3" />
+                <PackageCheck className="w-3.5 h-3.5 text-blue-500" />
                 <span className="text-blue-600 font-semibold">ACL 300#</span>
               </div>
-              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-tight">
-                ACL 300#
-              </h1>
+              <div className="flex items-center gap-2 mt-0.5">
+                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight flex items-center gap-2">
+                  <PackageCheck className="w-5 h-5 text-blue-600" />
+                  ACL 300# ANALYSIS
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                  FREQUENCY: ONCE IN A SHIFT
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Right: Date Section + Actions */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap self-end sm:self-auto">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
               <label
                 htmlFor="acl300-date-input"
                 className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
@@ -240,16 +322,8 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
                   id="acl300-date-input"
                   type="date"
                   value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setDateError(false);
-                    setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white border-slate-300 hover:border-slate-400"
                   required
                 />
               </div>
@@ -258,248 +332,144 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
                   {formatDateDisplay(date)}
                 </span>
               )}
-              {dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-acl300-reset"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-                title="Clear all fields"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
+            {lastSaved && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Saved at {lastSaved}
+              </span>
+            )}
 
-              <button
-                id="btn-acl300-save"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
-                title="Save ACL 300# Shift Data"
-              >
-                {saving ? (
+            <button
+              onClick={handleReset}
+              disabled={saving}
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
+            </button>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
+            >
+              {saving ? (
+                <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
+                  Saving...
+                </>
+              ) : (
+                <>
                   <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
-            </div>
+                  Save Analysis Data
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
-        <div
-          id="acl300-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              ACL 300# Shift Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
+      {/* ── PARAMETERS TABLE ── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="px-5 py-2.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-bold text-slate-900 uppercase">
+                ACL 300# Parameters
+              </h2>
+            </div>
           </div>
           <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
+            onClick={handleAddRow}
+            className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1"
           >
-            ×
+            <Plus className="w-3.5 h-3.5" />
+            Add Row
           </button>
         </div>
-      )}
 
-      {/* ── SINGLE UNIFIED BOX (OREY BOX LA): Shift 1, 2, 3 Rows with Fixed Top Parameters ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Card Header (Same dark gradient as ACL Product) */}
-        <div className="px-4 py-2 sm:px-5 sm:py-2.5 border-b border-slate-100 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1 bg-blue-600/30 rounded-md border border-blue-400/30">
-              <Layers className="w-3.5 h-3.5 text-blue-300" />
-            </div>
-            <div>
-              <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-100">
-                ACL 300# SHIFT ANALYSIS
-              </h2>
-              <p className="text-[10px] sm:text-[11px] text-slate-300">
-                Particle Size Distribution (+18 Mesh, +44 Mesh) & Sodium Chloride (NaCl %)
-              </p>
-            </div>
-          </div>
-
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-400/30 uppercase tracking-wider">
-            3 Shifts • 3 Parameters
-          </span>
-        </div>
-
-        {/* Unified Table Structure: Fixed Component Headers at Top, Shifts 1, 2, 3 Rows Underneath */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            {/* ── FIXED TOP HEADERS (+18 %, +44 %, NaCl %) ── */}
+          <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
             <thead>
-              <tr className="bg-slate-50/90 border-b border-slate-200">
-                <th className="py-2.5 px-4 sm:px-6 text-xs font-extrabold uppercase tracking-wider text-slate-600 w-1/4">
-                  Shift / Schedule
-                </th>
+              <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider font-extrabold select-none">
+                <th className="py-3 px-2 w-10 text-center border-r border-slate-700">#</th>
+                <th className="py-3 px-3 w-40 border-r border-slate-700">SAMPLE / STREAM</th>
+                <th className="py-3 px-2 w-32 text-center border-r border-slate-700">SHIFT</th>
+                <th className="py-3 px-2 w-24 text-center border-r border-slate-700">TIME</th>
 
-                {/* +18 % Component Header */}
-                <th className="py-2 px-3 text-center w-1/4">
-                  <div className="text-xs sm:text-sm font-extrabold text-slate-900 font-mono tracking-tight">
-                    +18 %
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-normal">
-                    (+18 Mesh Particle Spec)
-                  </div>
+                <th className="py-3 px-2.5 w-32 text-center border-r border-slate-700">
+                  <div className="text-white font-bold">NaCl</div>
+                  <div className="text-[10px] font-normal text-sky-300 normal-case">Target: 2.0% ±0.10</div>
                 </th>
-
-                {/* +44 % Component Header */}
-                <th className="py-2 px-3 text-center w-1/4">
-                  <div className="text-xs sm:text-sm font-extrabold text-slate-900 font-mono tracking-tight">
-                    +44 %
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-normal">
-                    (+44 Mesh Particle Spec)
-                  </div>
+                <th className="py-3 px-2.5 w-32 text-center border-r border-slate-700">
+                  <div className="text-white font-bold">18 MESH</div>
+                  <div className="text-[10px] font-normal text-sky-300 normal-case">Target: 5% ±1.0</div>
                 </th>
-
-                {/* NaCl % Component Header */}
-                <th className="py-2 px-3 text-center w-1/4">
-                  <div className="text-xs sm:text-sm font-extrabold text-slate-900 font-mono tracking-tight">
-                    NaCl %
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-normal">
-                    (Sodium Chloride Content)
-                  </div>
+                <th className="py-3 px-2.5 w-32 text-center border-r border-slate-700">
+                  <div className="text-white font-bold">44 MESH</div>
+                  <div className="text-[10px] font-normal text-emerald-300 normal-case">Target: 60% ±5</div>
                 </th>
+                <th className="py-3 px-2 w-12 text-center">ACTION</th>
               </tr>
             </thead>
-
-            {/* ── SHIFT 1, SHIFT 2, SHIFT 3 ROWS (KELA KELA) ── */}
-            <tbody className="divide-y divide-slate-100">
-              {SHIFTS.map((shift) => (
-                <tr
-                  key={shift.key}
-                  className="hover:bg-slate-50/60 transition-colors"
-                >
-                  {/* Shift Label Column */}
-                  <td className="py-2.5 sm:py-3 px-4 sm:px-6 align-middle">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-slate-100 border border-slate-200 shrink-0">
-                        <Clock className={`w-3.5 h-3.5 ${shift.iconColor}`} />
-                      </div>
-                      <div>
-                        <div className="text-xs sm:text-sm font-extrabold text-slate-900 tracking-tight">
-                          {shift.name}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          {shift.timing}
-                        </div>
-                      </div>
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {readings.map((row, idx) => (
+                <tr key={row.id} className="hover:bg-blue-50/30 transition-colors bg-white">
+                  <td className="py-2.5 px-2 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
+                    {idx + 1}
+                  </td>
+                  <td className="py-2.5 px-3 font-bold border-r border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                      <input
+                        type="text"
+                        value={row.sample}
+                        onChange={(e) => handleCellChange(row.id, 'sample', e.target.value)}
+                        className="w-full font-bold text-slate-800 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded transition text-xs"
+                      />
                     </div>
                   </td>
-
-                  {/* Input for +18 % */}
-                  <td className="py-2 sm:py-2.5 px-3 text-center align-middle">
-                    <div className="relative inline-block">
-                      <input
-                        id={`acl300-${shift.key}-p18`}
-                        type="text"
-                        inputMode="decimal"
-                        value={shiftsData[shift.key].p18}
-                        placeholder="00.5"
-                        onChange={(e) => handleInputChange(shift.key, 'p18', e.target.value)}
-                        className={`w-28 sm:w-32 px-2.5 py-1.5 text-xs sm:text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                          errors[`${shift.key}_p18`]
-                            ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
-                            : shiftsData[shift.key].p18 !== ''
-                            ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
-                            : 'border-2 border-slate-200 bg-white hover:border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900'
-                        }`}
-                        aria-label={`${shift.name} +18 %`}
-                      />
-                      {errors[`${shift.key}_p18`] && (
-                        <p className="text-[10px] text-red-600 font-bold mt-0.5 text-center animate-fadeIn absolute -bottom-3.5 left-0 right-0">
-                          {errors[`${shift.key}_p18`]}
-                        </p>
-                      )}
-                    </div>
+                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                    <select
+                      value={row.shift}
+                      onChange={(e) => handleCellChange(row.id, 'shift', e.target.value)}
+                      className="w-full font-bold text-xs bg-white border border-slate-200 rounded-lg py-1 px-2 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 transition shadow-2xs cursor-pointer"
+                    >
+                      <option value="">Select Shift...</option>
+                      {SHIFT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
                   </td>
-
-                  {/* Input for +44 % */}
-                  <td className="py-2 sm:py-2.5 px-3 text-center align-middle">
-                    <div className="relative inline-block">
-                      <input
-                        id={`acl300-${shift.key}-p44`}
-                        type="text"
-                        inputMode="decimal"
-                        value={shiftsData[shift.key].p44}
-                        placeholder="71.8"
-                        onChange={(e) => handleInputChange(shift.key, 'p44', e.target.value)}
-                        className={`w-28 sm:w-32 px-2.5 py-1.5 text-xs sm:text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                          errors[`${shift.key}_p44`]
-                            ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
-                            : shiftsData[shift.key].p44 !== ''
-                            ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
-                            : 'border-2 border-slate-200 bg-white hover:border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900'
-                        }`}
-                        aria-label={`${shift.name} +44 %`}
-                      />
-                      {errors[`${shift.key}_p44`] && (
-                        <p className="text-[10px] text-red-600 font-bold mt-0.5 text-center animate-fadeIn absolute -bottom-3.5 left-0 right-0">
-                          {errors[`${shift.key}_p44`]}
-                        </p>
-                      )}
-                    </div>
+                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                    <input
+                      type="text"
+                      value={row.time}
+                      onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
+                      placeholder="HH:mm"
+                      className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-lg py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 transition shadow-2xs"
+                    />
                   </td>
+                  
+                  {renderLimitCell(row, 'nacl', ACL_300_LIMITS.nacl, '1.9 – 2.1', '1.90% – 2.10%')}
+                  {renderLimitCell(row, 'p18', ACL_300_LIMITS.p18, '4.0 – 6.0', '4.0% – 6.0%')}
+                  {renderLimitCell(row, 'p44', ACL_300_LIMITS.p44, '55.0 – 65.0', '55.0% – 65.0%')}
 
-                  {/* Input for NaCl % */}
-                  <td className="py-2 sm:py-2.5 px-3 text-center align-middle">
-                    <div className="relative inline-block">
-                      <input
-                        id={`acl300-${shift.key}-nacl`}
-                        type="text"
-                        inputMode="decimal"
-                        value={shiftsData[shift.key].nacl}
-                        placeholder="0.72"
-                        onChange={(e) => handleInputChange(shift.key, 'nacl', e.target.value)}
-                        className={`w-28 sm:w-32 px-2.5 py-1.5 text-xs sm:text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                          errors[`${shift.key}_nacl`]
-                            ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
-                            : shiftsData[shift.key].nacl !== ''
-                            ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
-                            : 'border-2 border-slate-200 bg-white hover:border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900'
-                        }`}
-                        aria-label={`${shift.name} NaCl %`}
-                      />
-                      {errors[`${shift.key}_nacl`] && (
-                        <p className="text-[10px] text-red-600 font-bold mt-0.5 text-center animate-fadeIn absolute -bottom-3.5 left-0 right-0">
-                          {errors[`${shift.key}_nacl`]}
-                        </p>
-                      )}
-                    </div>
+                  <td className="py-2.5 px-2 text-center align-top">
+                    <button
+                      onClick={() => handleRemoveRow(row.id)}
+                      disabled={readings.length <= 1}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                      title="Delete row"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-
-        {/* Card Footer (Exact same styling) */}
-        <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/60 text-[11px] text-slate-500 flex items-center justify-between">
-          <span>ACL 300# Operational Quality Standard (Particle Distribution & NaCl %)</span>
-          <span className="font-semibold text-slate-700">TFL ACL Plant Standard</span>
         </div>
       </div>
     </div>

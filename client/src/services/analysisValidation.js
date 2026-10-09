@@ -1502,6 +1502,12 @@ export const OFFSET_SHS_LIMITS = {
 };
 export const SHS_LIMITS = OFFSET_SHS_LIMITS;
 
+export const ACL_300_LIMITS = {
+  nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in a Shift', formattedRange: '1.90% – 2.10%', formattedTarget: '2.0%', formattedTolerance: '±0.10%', referenceDisplay: '2.0% ± 0.10% (1.90% – 2.10%)' },
+  p18: { target: 5.0, tolerance: 1.0, min: 4.0, max: 6.0, unit: '%', paramName: 'BSS 18', label: '18 Mesh', frequency: 'Once in a Shift', formattedRange: '4.0% – 6.0%', formattedTarget: '5.0%', formattedTolerance: '±1.0%', referenceDisplay: '5.0% ± 1.0% (4.0% – 6.0%)' },
+  p44: { target: 60.0, tolerance: 5.0, min: 55.0, max: 65.0, unit: '%', paramName: 'BSS 44', label: '44 Mesh', frequency: 'Once in a Shift', formattedRange: '55.0% – 65.0%', formattedTarget: '60.0%', formattedTolerance: '±5.0%', referenceDisplay: '60.0% ± 5.0% (55.0% – 65.0%)' },
+};
+
 export const ACL_PRODUCT_LIMITS = {
   nh4cl: { target: 97.0, tolerance: 0.5, min: 96.5, max: 97.5, unit: '%', paramName: 'NH4Cl', label: 'NH₄Cl', frequency: 'Day', formattedRange: '96.5% – 97.5%', formattedTarget: '97.0%', formattedTolerance: '±0.5%', referenceDisplay: '97.0% ± 0.5% (96.5% – 97.5%)' },
   nacl: { target: 2.0, tolerance: 0.1, min: 1.9, max: 2.1, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Day', formattedRange: '1.9% – 2.1%', formattedTarget: '2.0%', formattedTolerance: '±0.1%', referenceDisplay: '2.0% ± 0.1% (1.9% – 2.1%)' },

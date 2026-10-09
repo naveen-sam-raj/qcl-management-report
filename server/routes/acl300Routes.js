@@ -25,21 +25,34 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { shifts = {} } = payload;
+    const { shifts = {}, readings = [] } = payload;
     const errors = [];
 
-    // Validate shift parameters: shift1, shift2, shift3
-    ['shift1', 'shift2', 'shift3'].forEach((shiftKey) => {
-      const shiftData = shifts[shiftKey] || {};
-      ['p18', 'p44', 'nacl'].forEach((paramKey) => {
-        const val = shiftData[paramKey];
-        if (val === '' || val === null || val === undefined) return;
-        const num = Number(val);
-        if (isNaN(num)) {
-          errors.push(`Shift '${shiftKey.toUpperCase()}' parameter '${paramKey.toUpperCase()}' must be a valid number.`);
-        }
+    if (readings && readings.length > 0) {
+      readings.forEach((r, idx) => {
+        ['p18', 'p44', 'nacl'].forEach((paramKey) => {
+          const val = r[paramKey];
+          if (val === '' || val === null || val === undefined) return;
+          const num = Number(val);
+          if (isNaN(num)) {
+            errors.push(`Row ${idx + 1}: Parameter '${paramKey}' must be a valid number.`);
+          }
+        });
       });
-    });
+    } else {
+      // Validate shift parameters: shift1, shift2, shift3
+      ['shift1', 'shift2', 'shift3'].forEach((shiftKey) => {
+        const shiftData = shifts[shiftKey] || {};
+        ['p18', 'p44', 'nacl'].forEach((paramKey) => {
+          const val = shiftData[paramKey];
+          if (val === '' || val === null || val === undefined) return;
+          const num = Number(val);
+          if (isNaN(num)) {
+            errors.push(`Shift '${shiftKey.toUpperCase()}' parameter '${paramKey.toUpperCase()}' must be a valid number.`);
+          }
+        });
+      });
+    }
 
     if (errors.length > 0) {
       return res.status(400).json({
@@ -60,6 +73,7 @@ router.post('/', async (req, res) => {
         shift2: shifts.shift2 || { p18: '', p44: '', nacl: '' },
         shift3: shifts.shift3 || { p18: '', p44: '', nacl: '' },
       },
+      readings,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,
       submittedAt: new Date().toISOString(),
