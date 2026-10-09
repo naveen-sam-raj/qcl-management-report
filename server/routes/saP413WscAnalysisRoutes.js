@@ -1,14 +1,29 @@
 const express = require("express");
 const router = express.Router();
+const { PlantAnalysisRecord, ActivityLog } = require('../models');
 const { protect } = require("../middleware/auth");
-const { ActivityLog } = require("../models");
 
-const records = [];
+
+// Removed cache
 router.use(protect);
 
 router.post("/", async (req, res) => {
   try {
     const payload = req.body;
+
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    const { sendAnalysisNotification } = require('../services/emailService');
+    payload.plant = 'SA';
+    payload.analysisType = 'P413 WSC TANK Analysis';
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
     if (!payload || !payload.date) {
       return res.status(400).json({ success: false, message: "Analysis Date is required." });
     }
@@ -36,12 +51,42 @@ router.post("/", async (req, res) => {
       submittedAt: new Date().toISOString(),
       company: req.user?.company?._id || req.user?.company,
     };
-    const existingIndex = records.findIndex((r) => r.date === payload.date);
-    if (existingIndex >= 0) {
-      records[existingIndex] = { ...records[existingIndex], ...record };
-    } else {
-      records.unshift(record);
+    
+    let savedRecord;
+    try {
+      if (PlantAnalysisRecord) {
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: 'SA',
+            analysisType: 'P413 WSC TANK Analysis',
+            date: payload.date,
+            shift: payload.shift || ''
+          },
+          {
+            $set: {
+              plantName: 'SA Plant',
+              plantCode: 'SA',
+              analysisType: 'P413 WSC TANK Analysis',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending'
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } else { throw new Error("Model missing"); }
+    } catch (dbErr) {
+      console.error('DB Save Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
     }
+    try {
+      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
+    } catch(e) {}
+  
     try {
       if (ActivityLog && typeof ActivityLog.create === "function") {
         await ActivityLog.create({ action: "SA_P413_WSC_SAVED", user: req.user?._id, userName: req.user?.name, details: "P413 WSC TANK Analysis saved for date: " + payload.date + ".", timestamp: new Date() });
@@ -57,7 +102,22 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    let results = [...records];
+    
+    let dbRecords = [];
+    if (PlantAnalysisRecord) {
+      const query = { plantCode: 'SA', analysisType: 'P413 WSC TANK Analysis' };
+      if (date) query.date = date;
+      if (startDate || endDate) {
+        query.date = {};
+        if (startDate) query.date.$gte = startDate;
+        if (endDate) query.date.$lte = endDate;
+      }
+      if (req.user && req.user.company) query.company = req.user.company;
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      dbRecords = docs.map(d => d.data || d);
+    }
+    let results = dbRecords;
+    
     if (date) results = results.filter((r) => r.date === date);
     else if (startDate && endDate) results = results.filter((r) => r.date >= startDate && r.date <= endDate);
     return res.status(200).json({ success: true, count: results.length, data: results });

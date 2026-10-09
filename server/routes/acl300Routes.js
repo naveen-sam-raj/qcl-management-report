@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for ACL 300# records (Legacy support)
-const acl300Records = [];
+// Removed cache
 
 // Apply authentication middleware
 router.use(protect);
@@ -17,6 +17,23 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    payload.plant = 'ACL';
+    payload.analysisType = 'ACL 300 Analysis';
+    
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
+    return res.status(501).json({ success: false, message: 'Blocked pending configuration: Server-side limits not yet verified for this analysis type.' });
+      
 
     if (!payload || !payload.date) {
       return res.status(400).json({

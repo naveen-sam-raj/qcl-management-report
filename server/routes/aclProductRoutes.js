@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for ACL Product records
-const aclProductRecords = [];
+// Cache removed
 
 // Apply authentication middleware
 router.use(protect);
@@ -16,7 +16,12 @@ router.use(protect);
  */
 router.post('/', async (req, res) => {
   try {
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    const { sendAnalysisNotification } = require('../services/emailService');
+
     const payload = req.body;
+    payload.plant = 'ACL';
+    payload.analysisType = 'ACL Product Analysis';
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -24,6 +29,21 @@ router.post('/', async (req, res) => {
         message: 'Analysis Date is required to save ACL Product Analysis.',
       });
     }
+
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+    
+    // Blocked pending configuration
+    return res.status(501).json({
+      success: false,
+      message: 'Blocked pending configuration: Server-side limits not yet verified for this analysis type.'
+    });
 
     const { chemical = {}, bss = {}, readings = [] } = payload;
     const errors = [];
@@ -81,34 +101,7 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    aclProductRecords.unshift(record);
-
-    // Persist to MongoDB PlantAnalysisRecord
-    try {
-      if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
-          },
-          {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
-    } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
-    }
+    // Replaced by validation block
 
 
     // Activity log entry
@@ -149,35 +142,25 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    let results = [...aclProductRecords];
-
+    let results = [];
     if (date) {
       try {
         if (PlantAnalysisRecord) {
-          const query = { date };
-          query.analysisType = 'ACL Product Analysis';
+          const query = { date, analysisType: 'ACL Product Analysis' };
           if (req.user && req.user.company) {
             query.company = req.user.company;
           }
-          
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
           if (doc && doc.data) {
             return res.status(200).json({
               success: true,
-              data: [doc.data] // return as array because the frontend usually expects array or we modified it to handle both
+              data: [doc.data]
             });
           }
         }
       } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
+        return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
       }
-    }
-
-
-    if (date) {
-      results = results.filter((r) => r.date === date);
-    } else if (startDate && endDate) {
-      results = results.filter((r) => r.date >= startDate && r.date <= endDate);
     }
 
     return res.status(200).json({

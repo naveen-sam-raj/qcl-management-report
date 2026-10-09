@@ -107,6 +107,20 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    const { sendAnalysisNotification } = require('../services/emailService');
+    payload.plant = 'SA';
+    payload.analysisType = 'Gas Conc';
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
+
     if (!payload) {
       return res.status(400).json({
         success: false,
@@ -124,7 +138,7 @@ router.post('/', async (req, res) => {
     }
 
     // Resolve date inheritance and perform basic input validation
-    const errors = [];
+    // Removed cache
     let lastValidDate = payload.date || '';
 
     const validatedRows = rows.map((r, idx) => {
@@ -225,7 +239,42 @@ router.post('/', async (req, res) => {
     if (existingIdx >= 0) {
       gasConcRecords[existingIdx] = { ...gasConcRecords[existingIdx], ...record };
     } else {
-      gasConcRecords.unshift(record);
+      
+    let savedRecord;
+    try {
+      if (PlantAnalysisRecord) {
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: 'SA',
+            analysisType: 'Gas Conc',
+            date: payload.date,
+            shift: payload.shift || ''
+          },
+          {
+            $set: {
+              plantName: 'SA Plant',
+              plantCode: 'SA',
+              analysisType: 'Gas Conc',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending'
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } else { throw new Error("Model missing"); }
+    } catch (dbErr) {
+      console.error('DB Save Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
+    }
+    try {
+      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
+    } catch(e) {}
+  
     }
 
     // 3. Log Activity

@@ -40,6 +40,21 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    payload.plant = 'ACL';
+    payload.analysisType = 'CaCl2 Analysis';
+    
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
+
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
@@ -93,7 +108,7 @@ router.post('/', async (req, res) => {
     if (existingIndex >= 0) {
       cacl2Records[existingIndex] = { ...cacl2Records[existingIndex], ...record };
     } else {
-      cacl2Records.unshift(record);
+      // Cache push removed
     }
 
     if (cacl2Records.length > 50) {
@@ -124,7 +139,8 @@ router.post('/', async (req, res) => {
         );
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('DB Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
     }
 
     // Log user activity

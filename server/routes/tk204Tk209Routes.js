@@ -34,6 +34,23 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    payload.plant = 'ACL';
+    payload.analysisType = 'TK 204/209 Analysis';
+    
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
+    return res.status(501).json({ success: false, message: 'Blocked pending configuration: Server-side limits not yet verified for this analysis type.' });
+      
+
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
@@ -83,7 +100,7 @@ router.post('/', async (req, res) => {
     if (existingIndex >= 0) {
       tk204Tk209Records[existingIndex] = { ...tk204Tk209Records[existingIndex], ...record };
     } else {
-      tk204Tk209Records.unshift(record);
+      // Cache push removed
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -109,7 +126,8 @@ router.post('/', async (req, res) => {
         );
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('DB Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
     }
 
     }
@@ -152,7 +170,7 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    let results = [...tk204Tk209Records];
+    let results = []; // Replaced by DB
 
     if (date) {
       try {
