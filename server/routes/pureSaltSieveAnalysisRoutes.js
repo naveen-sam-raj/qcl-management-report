@@ -5,7 +5,7 @@ const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 
 // In-memory / cache storage for pure salt sieve records
-const sieveRecords = [];
+// Removed cache
 
 // Apply authentication middleware
 router.use(protect);
@@ -49,7 +49,7 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    sieveRecords.unshift(record);
+    // Cache push removed
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -75,7 +75,8 @@ router.post('/', async (req, res) => {
         );
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('DB Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
     }
 
 
@@ -116,7 +117,7 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    let filtered = [...sieveRecords];
+    let results = []; // Replaced by DB
 
     if (date) {
       filtered = filtered.filter((r) => r.date === date);

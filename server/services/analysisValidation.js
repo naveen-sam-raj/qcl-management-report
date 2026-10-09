@@ -2183,7 +2183,7 @@ const validateAnalysisPayload = (payload) => {
         return;
       }
 
-      // Tolerance limits boundary check (For Pure Salt or Brine Analysis under TFL/ACL)
+      // Tolerance limits boundary check
       const limit = getCellLimit(plantKey, analysisType, rowKey, paramKey);
       if (limit) {
         const EPSILON = 0.000001;
@@ -2201,6 +2201,10 @@ const validateAnalysisPayload = (payload) => {
             message: `Value must be between ${limit.formattedRange}`,
           };
         }
+      } else {
+        const msg = `Configuration Error: Missing verified limits for ${analysisType.toUpperCase()} -> ${rowKey} -> ${paramKey}. Writes blocked pending SME approval.`;
+        errors.push(msg);
+        errorDetails[`${rowKey}_${paramKey}_config`] = msg;
       }
     });
   });

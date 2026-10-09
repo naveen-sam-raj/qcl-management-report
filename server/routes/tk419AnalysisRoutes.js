@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for TK 419 analysis records
-const tk419Records = [];
+// Removed cache
 
 // Apply authentication middleware
 router.use(protect);
@@ -17,6 +17,20 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    const { sendAnalysisNotification } = require('../services/emailService');
+    payload.plant = 'SA';
+    payload.analysisType = 'TK 419 Analysis';
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -62,7 +76,42 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    tk419Records.unshift(record);
+    
+    let savedRecord;
+    try {
+      if (PlantAnalysisRecord) {
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: 'SA',
+            analysisType: 'TK 419 Analysis',
+            date: payload.date,
+            shift: payload.shift || ''
+          },
+          {
+            $set: {
+              plantName: 'SA Plant',
+              plantCode: 'SA',
+              analysisType: 'TK 419 Analysis',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending'
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } else { throw new Error("Model missing"); }
+    } catch (dbErr) {
+      console.error('DB Save Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
+    }
+    try {
+      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
+    } catch(e) {}
+  
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -130,7 +179,22 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    let results = [...tk419Records];
+    
+    let dbRecords = [];
+    if (PlantAnalysisRecord) {
+      const query = { plantCode: 'SA', analysisType: 'TK 419 Analysis' };
+      if (date) query.date = date;
+      if (startDate || endDate) {
+        query.date = {};
+        if (startDate) query.date.$gte = startDate;
+        if (endDate) query.date.$lte = endDate;
+      }
+      if (req.user && req.user.company) query.company = req.user.company;
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      dbRecords = docs.map(d => d.data || d);
+    }
+    let results = dbRecords;
+    
 
     if (date) {
       try {

@@ -4,43 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for DM Water / Anion Unit Analysis records
-const dmWaterRecords = [
-  {
-    id: 'dm_water_seed_1',
-    date: '2026-09-13',
-    plant: 'OFFSET',
-    unit: 'DM Water',
-    analysisType: 'Analysis For DM Water / Anion unit',
-    readings: [
-      {
-        id: 'r_dm_water',
-        unit: 'DM WATER',
-        time: '15:00',
-        ph: '7.2',
-        cond: '20.7',
-        p: '0',
-        m: '6',
-        th: '0',
-        sio2: '0.20',
-        isDefault: true,
-      },
-      {
-        id: 'r_anion_unit',
-        unit: 'A.UNIT',
-        time: '',
-        ph: '0',
-        cond: '0',
-        p: '0',
-        m: '0',
-        th: '0',
-        sio2: '0.00',
-        isDefault: true,
-      },
-    ],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-13T15:30:00Z').toISOString(),
-  },
-];
+// In-memory cache removed — all persistence via MongoDB
 
 // Apply authentication middleware
 router.use(protect);
@@ -53,6 +17,32 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    // Server-side validation
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    // Create a sanitized payload for generic validation to prevent string fields from failing the numeric check
+    const validationPayload = JSON.parse(JSON.stringify(payload));
+    validationPayload.plant = 'OFFSET';
+    validationPayload.analysisType = 'DM Water Analysis';
+    
+    if (Array.isArray(validationPayload.readings)) {
+      validationPayload.readings.forEach(r => {
+        delete r.stream;
+        delete r.time;
+        if (r.th && String(r.th).toLowerCase() === 'nil') delete r.th;
+      });
+    }
+
+    const validation = validateAnalysisPayload(validationPayload);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -107,40 +97,51 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company || 'TFL',
     };
 
-    // Upsert by date
-    const existingIndex = dmWaterRecords.findIndex((r) => r.date === payload.date);
-    if (existingIndex >= 0) {
-      dmWaterRecords[existingIndex] = { ...dmWaterRecords[existingIndex], ...record };
-    } else {
-      dmWaterRecords.unshift(record);
-
-    // Persist to MongoDB PlantAnalysisRecord
+    // Secure MongoDB persistence (nested DB write bug fixed)
+    let savedRecord;
     try {
       if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
+            plantCode: 'OFFSET',
+            analysisType: 'DM Water Analysis',
+            date: payload.date,
+            shift: payload.shift || '',
           },
           {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
+            $set: {
+              plantName: 'OFFSET Plant',
+              plantCode: 'OFFSET',
+              analysisType: 'DM Water Analysis',
+              unit: record.unit || '',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending',
+            },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+      } else {
+        throw new Error('PlantAnalysisRecord model not available');
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('[DM Water Analysis] Database save failed:', dbErr.message);
+      return res.status(500).json({ success: false, message: 'Database save failed: ' + dbErr.message });
     }
 
+    // Email notification only after confirmed persistence
+    try {
+      const { sendAnalysisNotification } = require('../services/emailService');
+      if (savedRecord) {
+        sendAnalysisNotification(savedRecord).catch(e => console.error('[Email Error]:', e.message));
+      }
+    } catch (emailErr) {
+      // Email failure must not undo saved records
+      console.error('[Email Dispatch Error]:', emailErr.message);
     }
 
     // Activity log entry
@@ -179,48 +180,43 @@ router.post('/', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { date, startDate, endDate } = req.query;
-
-    let results = [...dmWaterRecords];
+    const { date, startDate, endDate, plant } = req.query;
+    
+    const query = { plantCode: 'OFFSET', analysisType: 'DM Water Analysis' };
+    if (date) query.date = date;
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = startDate;
+      if (endDate) query.date.$lte = endDate;
+    }
+    if (req.user && req.user.company) {
+      query.company = req.user.company;
+    }
 
     if (date) {
+      // Single-date lookup
       try {
-        if (PlantAnalysisRecord) {
-          const query = { date };
-          if (req.user && req.user.company) {
-            query.company = req.user.company;
-          }
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-          if (doc && doc.data) {
-            return res.status(200).json({
-              success: true,
-              data: [doc.data] // return as array because the frontend usually expects array or we modified it to handle both
-            });
-          }
+        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        if (doc && doc.data) {
+          return res.status(200).json({ success: true, data: doc.data });
         }
       } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
+        return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
       }
+      return res.status(200).json({ success: true, data: null, message: 'No record found for date ' + date });
     }
 
-
-    if (date) {
-      results = results.filter((r) => r.date === date);
-    } else if (startDate && endDate) {
-      results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    // All records
+    try {
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      const records = docs.map(d => d.data || d);
+      return res.status(200).json({ success: true, count: records.length, data: records });
+    } catch (dbErr) {
+      return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
     }
-
-    return res.status(200).json({
-      success: true,
-      count: results.length,
-      data: results,
-    });
   } catch (error) {
-    console.error('[DMWaterAnalysis API] Error fetching records:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while retrieving DM Water records.',
-    });
+    console.error('Error in GET /api/dm-water-analysis:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch records.', error: error.message });
   }
 });
 

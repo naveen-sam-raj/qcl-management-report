@@ -4,41 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for BFW / SHS Analysis records
-const bfwRecords = [
-  {
-    id: 'bfw_seed_1',
-    date: '2026-09-13',
-    plant: 'OFFSET',
-    unit: 'BFW',
-    analysisType: 'Boiler Feed Water / Super Heated Steam Analysis',
-    readings: [
-      {
-        id: 'r1',
-        stream: 'Boiler Feed Water (BFW)',
-        time: '15:00',
-        ph: '9',
-        cond: '36.8',
-        tAlk: '10',
-        sio2: '0.26',
-        fe2o3: '',
-        th: '0',
-      },
-      {
-        id: 'r2',
-        stream: 'Super Heated Steam (SHS)',
-        time: '15:00',
-        ph: '7.6',
-        cond: '7.3',
-        tAlk: '6',
-        sio2: '0.14',
-        fe2o3: '',
-        th: '',
-      },
-    ],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-13T15:30:00Z').toISOString(),
-  },
-];
+// In-memory cache removed — all persistence via MongoDB
 
 // Apply authentication middleware
 router.use(protect);
@@ -51,6 +17,32 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    // Server-side validation
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    // Create a sanitized payload for generic validation to prevent string fields from failing the numeric check
+    const validationPayload = JSON.parse(JSON.stringify(payload));
+    validationPayload.plant = 'OFFSET';
+    validationPayload.analysisType = 'BFW Analysis';
+    
+    if (Array.isArray(validationPayload.readings)) {
+      validationPayload.readings.forEach(r => {
+        delete r.stream;
+        delete r.time;
+        if (r.th && String(r.th).toLowerCase() === 'nil') delete r.th;
+      });
+    }
+
+    const validation = validateAnalysisPayload(validationPayload);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -111,48 +103,51 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company || 'TFL',
     };
 
-    // Upsert by date
-    const existingIndex = bfwRecords.findIndex(
-      (r) => r.date === payload.date && (r.plant === record.plant || !r.plant)
-    );
-
-    if (existingIndex >= 0) {
-      bfwRecords[existingIndex] = { ...bfwRecords[existingIndex], ...record };
-    } else {
-      bfwRecords.unshift(record);
-
-    // Persist to MongoDB PlantAnalysisRecord
+    // Secure MongoDB persistence (nested DB write bug fixed)
+    let savedRecord;
     try {
       if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
+            plantCode: 'OFFSET',
+            analysisType: 'BFW Analysis',
+            date: payload.date,
+            shift: payload.shift || '',
           },
           {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
+            $set: {
+              plantName: 'OFFSET Plant',
+              plantCode: 'OFFSET',
+              analysisType: 'BFW Analysis',
+              unit: record.unit || '',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending',
+            },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+      } else {
+        throw new Error('PlantAnalysisRecord model not available');
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('[BFW Analysis] Database save failed:', dbErr.message);
+      return res.status(500).json({ success: false, message: 'Database save failed: ' + dbErr.message });
     }
 
-    }
-
-    // Keep memory cache under 50 records
-    if (bfwRecords.length > 50) {
-      bfwRecords.pop();
+    // Email notification only after confirmed persistence
+    try {
+      const { sendAnalysisNotification } = require('../services/emailService');
+      if (savedRecord) {
+        sendAnalysisNotification(savedRecord).catch(e => console.error('[Email Error]:', e.message));
+      }
+    } catch (emailErr) {
+      // Email failure must not undo saved records
+      console.error('[Email Dispatch Error]:', emailErr.message);
     }
 
     // Log user activity if ActivityLog model is present
@@ -195,56 +190,43 @@ router.post('/', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { date, plant } = req.query;
-
-    if (date) {
-
-      try {
-        if (PlantAnalysisRecord) {
-          const query = { date };
-          if (req.user && req.user.company) {
-            query.company = req.user.company;
-          }
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-          if (doc && doc.data) {
-            return res.status(200).json({
-              success: true,
-              data: doc.data
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
-      }
-
-      const match = bfwRecords.find(
-        (r) => r.date === date && (!plant || r.plant.toLowerCase() === plant.toLowerCase())
-      );
-      if (match) {
-        return res.status(200).json({
-          success: true,
-          data: match,
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
+    const { date, startDate, endDate, plant } = req.query;
+    
+    const query = { plantCode: 'OFFSET', analysisType: 'BFW Analysis' };
+    if (date) query.date = date;
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = startDate;
+      if (endDate) query.date.$lte = endDate;
+    }
+    if (req.user && req.user.company) {
+      query.company = req.user.company;
     }
 
-    return res.status(200).json({
-      success: true,
-      count: bfwRecords.length,
-      data: bfwRecords,
-    });
+    if (date) {
+      // Single-date lookup
+      try {
+        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        if (doc && doc.data) {
+          return res.status(200).json({ success: true, data: doc.data });
+        }
+      } catch (dbErr) {
+        return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
+      }
+      return res.status(200).json({ success: true, data: null, message: 'No record found for date ' + date });
+    }
+
+    // All records
+    try {
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      const records = docs.map(d => d.data || d);
+      return res.status(200).json({ success: true, count: records.length, data: records });
+    } catch (dbErr) {
+      return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
+    }
   } catch (error) {
     console.error('Error in GET /api/bfw-analysis:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch BFW Analysis records.',
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: 'Failed to fetch records.', error: error.message });
   }
 });
 

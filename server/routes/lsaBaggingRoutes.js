@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for LSA Bagging records
-const lsaBaggingRecords = [];
+// Removed cache
 
 // Apply authentication middleware
 router.use(protect);
@@ -18,6 +18,20 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    const { sendAnalysisNotification } = require('../services/emailService');
+    payload.plant = 'SA';
+    payload.analysisType = 'LSA Bagging Analysis';
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -88,7 +102,42 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    lsaBaggingRecords.unshift(record);
+    
+    let savedRecord;
+    try {
+      if (PlantAnalysisRecord) {
+        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: 'SA',
+            analysisType: 'LSA Bagging Analysis',
+            date: payload.date,
+            shift: payload.shift || ''
+          },
+          {
+            $set: {
+              plantName: 'SA Plant',
+              plantCode: 'SA',
+              analysisType: 'LSA Bagging Analysis',
+              date: payload.date,
+              shift: payload.shift || '',
+              data: record,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id,
+              company: req.user?.company?._id || req.user?.company,
+              emailStatus: 'Pending'
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } else { throw new Error("Model missing"); }
+    } catch (dbErr) {
+      console.error('DB Save Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
+    }
+    try {
+      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
+    } catch(e) {}
+  
 
     // Persist to MongoDB PlantAnalysisRecord
     try {

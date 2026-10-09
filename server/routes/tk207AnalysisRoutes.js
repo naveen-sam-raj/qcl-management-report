@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for TK 207 analysis records
-const tk207Records = [];
+// Removed cache
 
 // Apply authentication middleware
 router.use(protect);
@@ -17,6 +17,21 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
+    
+    payload.plant = 'ACL';
+    payload.analysisType = 'TK 207 Analysis';
+    
+    const validation = validateAnalysisPayload(payload);
+    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
+        errors: validation.errors,
+      });
+    }
+  
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -62,7 +77,7 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    tk207Records.unshift(record);
+    // Cache push removed
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -88,7 +103,8 @@ router.post('/', async (req, res) => {
         );
       }
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('DB Error:', dbErr);
+      return res.status(500).json({ success: false, message: 'Database save failed' });
     }
 
 
@@ -130,7 +146,7 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    let results = [...tk207Records];
+    let results = []; // Replaced by DB
 
     if (date) {
       try {
