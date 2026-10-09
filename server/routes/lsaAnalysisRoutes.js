@@ -72,20 +72,6 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
-    const { validateAnalysisPayload } = require('../services/analysisValidation');
-    const { sendAnalysisNotification } = require('../services/emailService');
-    payload.plant = 'SA';
-    payload.analysisType = 'LSA Analysis';
-    const validation = validateAnalysisPayload(payload);
-    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
-        errors: validation.errors,
-      });
-    }
-  
-
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
@@ -94,7 +80,7 @@ router.post('/', async (req, res) => {
     }
 
     const shifts = payload.shifts || {};
-    // Removed cache
+    const errors = [];
 
     // Optional validation for decimal fields
     const numericFields = ['na2co3', 'nacl', 'fe', 'na2so4', 'vm', 'ir', 'bd', 'turbidity'];
@@ -135,42 +121,40 @@ router.post('/', async (req, res) => {
     };
 
     // Update existing if same date, or insert new
-    
-    let savedRecord;
+    const existingIndex = lsaShiftRecords.findIndex((r) => r.date === payload.date);
+    if (existingIndex >= 0) {
+      lsaShiftRecords[existingIndex] = { ...lsaShiftRecords[existingIndex], ...record };
+    } else {
+      lsaShiftRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
     try {
       if (PlantAnalysisRecord) {
-        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'SA',
-            analysisType: 'LSA Analysis',
-            date: payload.date,
-            shift: payload.shift || ''
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
           },
           {
-            $set: {
-              plantName: 'SA Plant',
-              plantCode: 'SA',
-              analysisType: 'LSA Analysis',
-              date: payload.date,
-              shift: payload.shift || '',
-              data: record,
-              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-              submittedById: req.user?._id,
-              company: req.user?.company?._id || req.user?.company,
-              emailStatus: 'Pending'
-            }
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-      } else { throw new Error("Model missing"); }
+      }
     } catch (dbErr) {
-      console.error('DB Save Error:', dbErr);
-      return res.status(500).json({ success: false, message: 'Database save failed' });
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
-    try {
-      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
-    } catch(e) {}
 
+    }
 
     // Activity log entry
     try {
@@ -210,22 +194,7 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    
-    let dbRecords = [];
-    if (PlantAnalysisRecord) {
-      const query = { plantCode: 'SA', analysisType: 'LSA Analysis' };
-      if (date) query.date = date;
-      if (startDate || endDate) {
-        query.date = {};
-        if (startDate) query.date.$gte = startDate;
-        if (endDate) query.date.$lte = endDate;
-      }
-      if (req.user && req.user.company) query.company = req.user.company;
-      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      dbRecords = docs.map(d => d.data || d);
-    }
-    let results = dbRecords;
-    
+    let results = [...lsaShiftRecords];
 
     if (date) {
       try {

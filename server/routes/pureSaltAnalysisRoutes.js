@@ -7,7 +7,8 @@ const { sendPureSaltAnalysisReport } = require('../services/emailService');
 const { getPlantAssignedUser, sendPlantUpdateNotification } = require('../services/plantNotificationService');
 const { protect } = require('../middleware/auth');
 
-
+// In-memory fallback array for resilient offline operation
+const analysisRecords = [];
 
 /**
  * @desc    Save Pure Salt Analysis data, generate Excel .xlsx report, and send email with attachment via Nodemailer
@@ -85,7 +86,8 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-
+    // Cache in memory array as well
+    analysisRecords.unshift(savedRecord.toObject ? savedRecord.toObject() : savedRecord);
 
     // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
@@ -215,7 +217,16 @@ router.get('/', protect, async (req, res) => {
       records = await PureSaltAnalysis.find(query).sort({ createdAt: -1 }).limit(100);
     }
 
-
+    // Merge or fallback with in-memory records
+    if (!records || records.length === 0) {
+      records = [...analysisRecords];
+      if (date) {
+        records = records.filter((r) => r.date === date);
+      } else if (startDate || endDate) {
+        if (startDate) records = records.filter((r) => r.date >= startDate);
+        if (endDate) records = records.filter((r) => r.date <= endDate);
+      }
+    }
 
     return res.status(200).json({
       success: true,

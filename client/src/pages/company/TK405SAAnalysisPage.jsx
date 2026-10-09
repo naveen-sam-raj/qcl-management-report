@@ -180,7 +180,7 @@ const TK405SAAnalysisPage = ({ plantId = "sa" }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/sa-tk-405-analysis?date=${date}`);
+        const response = await api.get(`/api/sa-tk-405-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
@@ -301,7 +301,7 @@ const TK405SAAnalysisPage = ({ plantId = "sa" }) => {
         submittedBy: user?.name || "Plant Operator",
       };
 
-      const response = await api.post("/sa-tk-405-analysis", payload);
+      const response = await api.post("/api/sa-tk-405-analysis", payload);
       setSaveSuccess(true);
       showToast?.(response.data?.message || "TK 405 Analysis data saved successfully!", "success");
     } catch (err) {

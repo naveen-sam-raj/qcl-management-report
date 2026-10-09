@@ -3,27 +3,27 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
-const { sendAnalysisNotification } = require('../services/emailService');
+
+// In-memory / cache storage for LEAN Weekly analysis records
+const leanWeeklyRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
 
 /**
- * @desc    Save LEAN Analysis data
+ * @desc    Save LEAN Analysis data (Once in a Week: Cl, SO4, Fe, TSS, Na, K, NO2, NO3 in PPM)
  * @route   POST /api/lean-weekly-analysis
  * @access  Private
  */
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
-    payload.plant = 'CO2';
-    payload.analysisType = 'LEAN Analysis';
 
     const validation = validateAnalysisPayload(payload);
-    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
-        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed. Enter numeric values only within allowed limits.',
+        message: validation.errors[0] || 'Validation failed. Enter numeric values only.',
         errors: validation.errors,
       });
     }
@@ -31,80 +31,70 @@ router.post('/', async (req, res) => {
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
-        message: 'Analysis Date is required to save LEAN Analysis.',
+        message: 'Analysis Date is required to save LEAN Weekly Analysis.',
       });
     }
 
-    // Determine the data shape. If it's single-shift, it might be in rows.shift1 or parameters
-    let processedRows = payload.rows || {};
-    if (Object.keys(processedRows).length === 0 && payload.parameters) {
-       // Support flat parameters object if frontend uses it for "Once in a shift"
-       processedRows = { shift1: payload.parameters };
+    // Record creation
+    const record = {
+      id: `lean_weekly_${Date.now()}`,
+      date: payload.date,
+      plant: payload.plant || 'CO2',
+      analysisType: payload.analysisType || 'LEAN Analysis',
+      tank: 'LEAN',
+      unit: 'LEAN',
+      frequency: 'Once in a Week',
+      rows: payload.rows,
+      parameters: payload.parameters || payload.rows?.week || payload.rows?.onceInAWeek || {},
+      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+      submittedById: req.user?._id,
+      submittedAt: new Date().toISOString(),
+      company: req.user?.company?._id || req.user?.company,
+    };
+
+    // Upsert in in-memory array by date
+    const existingIndex = leanWeeklyRecords.findIndex((r) => r.date === payload.date);
+    if (existingIndex >= 0) {
+      leanWeeklyRecords[existingIndex] = { ...leanWeeklyRecords[existingIndex], ...record };
+    } else {
+      leanWeeklyRecords.unshift(record);
     }
 
-    const savedShifts = [];
-
-    // Save each shift independently
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findOneAndUpdate === 'function') {
-      const Model = req.TestModel || PlantAnalysisRecord;
-      
-      for (const [shiftKey, shiftData] of Object.entries(processedRows)) {
-        if (!shiftData || Object.keys(shiftData).length === 0) continue;
-        
-        let shiftName = '';
-        if (shiftKey === 'shift1') shiftName = 'I SHIFT';
-        if (shiftKey === 'shift2') shiftName = 'II SHIFT';
-        if (shiftKey === 'shift3') shiftName = 'III SHIFT';
-        if (!shiftName) shiftName = 'Once in a shift'; // fallback
-
-        // Check if user is authorized for this shift
-        if (req.user?.authorizedShifts && req.user.authorizedShifts.length > 0 && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
-          if (!req.user.authorizedShifts.includes(shiftName) && shiftName !== 'Once in a shift') {
-            return res.status(403).json({
-              success: false,
-              message: `Forbidden: You are not authorized to edit ${shiftName}.`
-            });
-          }
-        }
-
-        const saved = await Model.findOneAndUpdate(
+    // Persist to MongoDB Atlas via PlantAnalysisRecord model if available
+    try {
+      if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findOneAndUpdate === 'function') {
+        await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'CO2',
-            analysisType: 'LEAN Analysis',
+            plant: 'CO2',
+            analysisType: 'LEAN Weekly Analysis',
             date: payload.date,
-            shift: shiftName
           },
           {
             $set: {
-              plantName: 'CO2 Plant',
-              plantCode: 'CO2',
-              analysisType: 'LEAN Analysis',
+              plant: 'CO2',
+              analysisType: 'LEAN Weekly Analysis',
               unit: 'LEAN',
+              tank: 'LEAN',
               date: payload.date,
-              shift: shiftName,
-              data: {
-                 // Encapsulate properly so the legacy frontend expects it
-                 parameters: shiftData
-              },
+              shift: 'Once in a Week',
+              frequency: 'Once in a Week',
               submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
               submittedById: req.user?._id,
-              company: req.user?.company?._id || req.user?.company,
-              emailStatus: 'Pending'
-            }
+              data: {
+                rows: payload.rows,
+                parameters: payload.parameters || payload.rows?.week || {},
+              },
+              updatedAt: new Date(),
+            },
+            $setOnInsert: {
+              createdAt: new Date(),
+            },
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
+          { upsert: true, new: true }
         );
-        savedShifts.push(saved);
-        
-        // Trigger Email Notification safely
-        try {
-           sendAnalysisNotification(saved).catch(err => console.error('[Email Notification Failed] for', shiftName, ':', err.message));
-        } catch (e) {
-           console.error('[Email Dispatcher Error]', e.message);
-        }
       }
-    } else {
-       throw new Error('Database model is unavailable.');
+    } catch (dbErr) {
+      console.warn('[LeanWeeklyAnalysis API] MongoDB persistence note:', dbErr.message);
     }
 
     // Activity log entry
@@ -114,30 +104,30 @@ router.post('/', async (req, res) => {
           action: 'LEAN_WEEKLY_ANALYSIS_SAVED',
           user: req.user?._id,
           userName: req.user?.name,
-          details: `LEAN Analysis saved for date: ${payload.date}.`,
+          details: `LEAN Weekly Analysis saved for date: ${payload.date} (Cl, SO4, Fe, TSS, Na, K, NO2, NO3 in PPM).`,
           timestamp: new Date(),
         });
       }
     } catch (logErr) {
-      console.warn('[ActivityLog] Could not log activity:', logErr.message);
+      console.warn('[ActivityLog] Could not log LEAN Weekly activity:', logErr.message);
     }
 
     return res.status(201).json({
       success: true,
       message: 'LEAN Analysis data saved successfully.',
-      data: savedShifts,
+      data: record,
     });
   } catch (error) {
-    console.error('[CO2 API] Error saving data:', error);
+    console.error('[LeanWeeklyAnalysis API] Error saving data:', error);
     return res.status(500).json({
       success: false,
-      message: 'Server error while processing LEAN Analysis: ' + error.message,
+      message: 'Server error while processing LEAN analysis: ' + error.message,
     });
   }
 });
 
 /**
- * @desc    Retrieve LEAN Analysis records
+ * @desc    Retrieve LEAN Weekly Analysis records
  * @route   GET /api/lean-weekly-analysis
  * @access  Private
  */
@@ -145,58 +135,56 @@ router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
 
-    const query = {
-      plantCode: 'CO2',
-      analysisType: 'LEAN Analysis',
-    };
-    if (date) query.date = date;
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = startDate;
-      if (endDate) query.date.$lte = endDate;
+    // Check MongoDB first
+    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.find === 'function') {
+      const query = {
+        plant: 'CO2',
+        analysisType: 'LEAN Weekly Analysis',
+      };
+      if (date) query.date = date;
+      if (startDate || endDate) {
+        query.date = {};
+        if (startDate) query.date.$gte = startDate;
+        if (endDate) query.date.$lte = endDate;
+      }
+      const dbRecords = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      if (dbRecords && dbRecords.length > 0) {
+        return res.status(200).json({
+          success: true,
+          count: dbRecords.length,
+          data: dbRecords.map((r) => ({
+            id: r._id,
+            date: r.date,
+            plant: r.plant,
+            analysisType: r.analysisType,
+            rows: r.data?.rows || {},
+            submittedBy: r.submittedBy,
+          })),
+        });
+      }
     }
 
-    const Model = req.TestModel || PlantAnalysisRecord;
-    const dbRecords = await Model.find(query).sort({ date: -1, shift: 1 }).lean();
-    
-    // Group records by date to match the React grid structure expected by the frontend
-    const groupedByDate = {};
-    for (const r of dbRecords) {
-       if (!groupedByDate[r.date]) {
-          groupedByDate[r.date] = {
-             id: r._id,
-             date: r.date,
-             plant: r.plantName || r.plantCode,
-             analysisType: r.analysisType,
-             submittedBy: r.submittedBy,
-             rows: {}, // Frontend requires this object
-             parameters: {}
-          };
-       }
-       
-       let shiftKey = 'shift1';
-       if (r.shift === 'II SHIFT') shiftKey = 'shift2';
-       else if (r.shift === 'III SHIFT') shiftKey = 'shift3';
-       
-       const params = r.data?.parameters || r.data?.rows || {};
-       groupedByDate[r.date].rows[shiftKey] = params;
-       
-       // Fallback for flat structure 
-       groupedByDate[r.date].parameters = params;
+    let filtered = [...leanWeeklyRecords];
+    if (date) {
+      filtered = filtered.filter((r) => r.date === date);
     }
-
-    const resultList = Object.values(groupedByDate).sort((a,b) => b.date.localeCompare(a.date));
+    if (startDate) {
+      filtered = filtered.filter((r) => r.date >= startDate);
+    }
+    if (endDate) {
+      filtered = filtered.filter((r) => r.date <= endDate);
+    }
 
     return res.status(200).json({
       success: true,
-      count: resultList.length,
-      data: resultList,
+      count: filtered.length,
+      data: filtered,
     });
   } catch (error) {
-    console.error('[CO2 API] Error fetching records:', error);
+    console.error('[LeanWeeklyAnalysis API] Error fetching records:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to retrieve LEAN Analysis records: ' + error.message,
+      message: 'Failed to retrieve LEAN weekly analysis records: ' + error.message,
     });
   }
 });

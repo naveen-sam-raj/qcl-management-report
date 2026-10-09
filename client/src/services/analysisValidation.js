@@ -1502,21 +1502,6 @@ export const OFFSET_SHS_LIMITS = {
 };
 export const SHS_LIMITS = OFFSET_SHS_LIMITS;
 
-export const ACL_300_LIMITS = {
-  nacl: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Once in a Shift', formattedRange: '1.90% – 2.10%', formattedTarget: '2.0%', formattedTolerance: '±0.10%', referenceDisplay: '2.0% ± 0.10% (1.90% – 2.10%)' },
-  p18: { target: 5.0, tolerance: 1.0, min: 4.0, max: 6.0, unit: '%', paramName: 'BSS 18', label: '18 Mesh', frequency: 'Once in a Shift', formattedRange: '4.0% – 6.0%', formattedTarget: '5.0%', formattedTolerance: '±1.0%', referenceDisplay: '5.0% ± 1.0% (4.0% – 6.0%)' },
-  p44: { target: 60.0, tolerance: 5.0, min: 55.0, max: 65.0, unit: '%', paramName: 'BSS 44', label: '44 Mesh', frequency: 'Once in a Shift', formattedRange: '55.0% – 65.0%', formattedTarget: '60.0%', formattedTolerance: '±5.0%', referenceDisplay: '60.0% ± 5.0% (55.0% – 65.0%)' },
-};
-
-export const ACL_PRODUCT_LIMITS = {
-  nh4cl: { target: 97.0, tolerance: 0.5, min: 96.5, max: 97.5, unit: '%', paramName: 'NH4Cl', label: 'NH₄Cl', frequency: 'Day', formattedRange: '96.5% – 97.5%', formattedTarget: '97.0%', formattedTolerance: '±0.5%', referenceDisplay: '97.0% ± 0.5% (96.5% – 97.5%)' },
-  nacl: { target: 2.0, tolerance: 0.1, min: 1.9, max: 2.1, unit: '%', paramName: 'NaCl', label: 'NaCl', frequency: 'Day', formattedRange: '1.9% – 2.1%', formattedTarget: '2.0%', formattedTolerance: '±0.1%', referenceDisplay: '2.0% ± 0.1% (1.9% – 2.1%)' },
-  fe2o3: { target: 0.013, tolerance: 0.005, min: 0.008, max: 0.018, unit: '%', paramName: 'Fe2O3', label: 'Fe₂O₃', frequency: 'Day', formattedRange: '0.008% – 0.018%', formattedTarget: '0.013%', formattedTolerance: '±0.005%', referenceDisplay: '0.013% ± 0.005% (0.008% – 0.018%)' },
-  h2o: { target: 2.0, tolerance: 0.10, min: 1.90, max: 2.10, unit: '%', paramName: 'H2O', label: 'H₂O', frequency: 'Day', formattedRange: '1.90% – 2.10%', formattedTarget: '2.0%', formattedTolerance: '±0.10%', referenceDisplay: '2.0% ± 0.10% (1.90% – 2.10%)' },
-  ir: { target: 0.30, tolerance: 0.10, min: 0.20, max: 0.40, unit: '%', paramName: 'IR', label: 'IR', frequency: 'Day', formattedRange: '0.20% – 0.40%', formattedTarget: '0.30%', formattedTolerance: '±0.10%', referenceDisplay: '0.30% ± 0.10% (0.20% – 0.40%)' },
-  bd: { target: 1000, tolerance: 0.10, min: 999.90, max: 1000.10, unit: 'g/L', paramName: 'BD', label: 'BD', frequency: 'Day', formattedRange: '999.90 – 1000.10 g/L', formattedTarget: '1000 g/L', formattedTolerance: '±0.10 g/L', referenceDisplay: '1000 ± 0.10 g/L (999.90 – 1000.10 g/L)' },
-};
-
 export const ACL_CACL2_LIMITS = {
   ph: { target: 7.7, tolerance: 1.0, min: 6.7, max: 8.7, unit: '', paramName: 'pH', label: 'pH', frequency: 'Day', formattedRange: '6.7 – 8.7', formattedTarget: '7.7', formattedTolerance: '±1', referenceDisplay: '7.7 ± 1 (6.7 – 8.7)' },
   conc: { target: 20, tolerance: 5.0, min: 15, max: 25, unit: '%', paramName: 'CONC', label: 'CONC', frequency: 'Day', formattedRange: '15% – 25%', formattedTarget: '20%', formattedTolerance: '±5.0%', referenceDisplay: '20% ± 5.0% (15% – 25%)' },
@@ -1870,7 +1855,7 @@ export const LIMITS_ENABLED = true;
  * Returns null if no specific target/tolerance is defined for that cell.
  */
 export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKey, paramKey) => {
-  const cleanPlant = String(plantKey || 'acl').toLowerCase().replace(/\s+plant$/, '').trim();
+  const cleanPlant = (plantKey || 'acl').toLowerCase();
   const cleanAnalysis = (analysisType || 'pure-salt').toLowerCase().replace(/\s+/g, '-');
 
   const isPureSalt = cleanAnalysis === 'pure-salt' || cleanAnalysis === 'pure-salt-analysis';

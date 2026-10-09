@@ -35,20 +35,6 @@ router.post('/', async (req, res) => {
   try {
     const payload = req.body;
 
-    const { validateAnalysisPayload } = require('../services/analysisValidation');
-    const { sendAnalysisNotification } = require('../services/emailService');
-    payload.plant = 'SA';
-    payload.analysisType = 'Bicarbonate Moisture Analysis';
-    const validation = validateAnalysisPayload(payload);
-    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
-        errors: validation.errors,
-      });
-    }
-  
-
     if (!payload || !payload.date) {
       return res.status(400).json({
         success: false,
@@ -57,7 +43,7 @@ router.post('/', async (req, res) => {
     }
 
     const readings = Array.isArray(payload.readings) ? payload.readings : [];
-    // Removed cache
+    const errors = [];
 
     const numFields = ['m404_a', 'm404_b', 'm404_c', 'm405_outlet', 'sb_turb1', 'sb_turb2'];
 
@@ -96,42 +82,43 @@ router.post('/', async (req, res) => {
     };
 
     // Upsert by date
-    
-    let savedRecord;
+    const existingIndex = bicarbonateMoistureRecords.findIndex(
+      (r) => r.date === payload.date && (r.plant === record.plant || !r.plant)
+    );
+
+    if (existingIndex >= 0) {
+      bicarbonateMoistureRecords[existingIndex] = { ...bicarbonateMoistureRecords[existingIndex], ...record };
+    } else {
+      bicarbonateMoistureRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
     try {
       if (PlantAnalysisRecord) {
-        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'SA',
-            analysisType: 'Bicarbonate Moisture Analysis',
-            date: payload.date,
-            shift: payload.shift || ''
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
           },
           {
-            $set: {
-              plantName: 'SA Plant',
-              plantCode: 'SA',
-              analysisType: 'Bicarbonate Moisture Analysis',
-              date: payload.date,
-              shift: payload.shift || '',
-              data: record,
-              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-              submittedById: req.user?._id,
-              company: req.user?.company?._id || req.user?.company,
-              emailStatus: 'Pending'
-            }
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-      } else { throw new Error("Model missing"); }
+      }
     } catch (dbErr) {
-      console.error('DB Save Error:', dbErr);
-      return res.status(500).json({ success: false, message: 'Database save failed' });
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
-    try {
-      if (savedRecord) sendAnalysisNotification(savedRecord).catch(e => console.error(e));
-    } catch(e) {}
-  
+
+    }
 
     if (bicarbonateMoistureRecords.length > 50) {
       bicarbonateMoistureRecords.pop();

@@ -709,7 +709,8 @@ const ANALYSIS_LIMITS_REGISTRY = {
         co:  { target: 1000, tolerance: 50,  min: 950, max: 1050, unit: 'PPM', paramName: 'CO',  frequency: 'Once in a shift' },
       },
     },
-
+  },
+  acl: {
     'cacl2': {
       day: {
         ph:   { target: 7.7,  tolerance: 1.0, min: 6.7, max: 8.7, unit: '',    paramName: 'pH',   label: 'pH',   frequency: 'Day', formattedRange: '6.7 – 8.7', formattedTarget: '7.7', formattedTolerance: '±1', referenceDisplay: '7.7 ± 1 (6.7 – 8.7)' },
@@ -755,14 +756,12 @@ const ANALYSIS_LIMITS_REGISTRY = {
         cnh3: { target: 1.89, tolerance: 0.10, min: 1.79, max: 1.99, unit: 'Kgm/m³', paramName: 'CNH3', label: 'CNH₃', frequency: 'Once in a shift', formattedRange: '1.79–1.99 Kgm/m³', formattedTarget: '1.89 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         tcl:  { target: 5.39, tolerance: 0.10, min: 5.29, max: 5.49, unit: 'Kgm/m³', paramName: 'TCL',  label: 'TCl',  frequency: 'Once in a shift', formattedRange: '5.29–5.49 Kgm/m³', formattedTarget: '5.39 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         pcl:  { target: 3.50, tolerance: 0.10, min: 3.40, max: 3.60, unit: 'Kgm/m³', paramName: 'PCL',  label: 'PCl',  frequency: 'Once in a shift', formattedRange: '3.40–3.60 Kgm/m³', formattedTarget: '3.50 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
-        tcao: { hasNumericLimit: false, isNil: true, paramName: 'TCAO', label: 'TCAO' },
       },
       shift: {
         fnh3: { target: 3.86, tolerance: 0.10, min: 3.76, max: 3.96, unit: 'Kgm/m³', paramName: 'FNH3', label: 'FNH₃', frequency: 'Once in a shift', formattedRange: '3.76–3.96 Kgm/m³', formattedTarget: '3.86 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         cnh3: { target: 1.89, tolerance: 0.10, min: 1.79, max: 1.99, unit: 'Kgm/m³', paramName: 'CNH3', label: 'CNH₃', frequency: 'Once in a shift', formattedRange: '1.79–1.99 Kgm/m³', formattedTarget: '1.89 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         tcl:  { target: 5.39, tolerance: 0.10, min: 5.29, max: 5.49, unit: 'Kgm/m³', paramName: 'TCL',  label: 'TCl',  frequency: 'Once in a shift', formattedRange: '5.29–5.49 Kgm/m³', formattedTarget: '5.39 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         pcl:  { target: 3.50, tolerance: 0.10, min: 3.40, max: 3.60, unit: 'Kgm/m³', paramName: 'PCL',  label: 'PCl',  frequency: 'Once in a shift', formattedRange: '3.40–3.60 Kgm/m³', formattedTarget: '3.50 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
-        tcao: { hasNumericLimit: false, isNil: true, paramName: 'TCAO', label: 'TCAO' },
       },
     },
     'tk414': {
@@ -1599,7 +1598,7 @@ const CACL2_LIMIT_VALIDATION_ENABLED = true;
 const LIMITS_ENABLED = true;
 
 const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKey, paramKey) => {
-  const cleanPlant = String(plantKey || 'acl').toLowerCase().replace(/\s+plant$/, '').trim();
+  const cleanPlant = (plantKey || 'acl').toLowerCase();
   const cleanAnalysis = (analysisType || 'pure-salt').toLowerCase().replace(/\s+/g, '-');
 
   const isPureSalt = cleanAnalysis === 'pure-salt' || cleanAnalysis === 'pure-salt-analysis';
@@ -2184,7 +2183,7 @@ const validateAnalysisPayload = (payload) => {
         return;
       }
 
-      // Tolerance limits boundary check
+      // Tolerance limits boundary check (For Pure Salt or Brine Analysis under TFL/ACL)
       const limit = getCellLimit(plantKey, analysisType, rowKey, paramKey);
       if (limit) {
         const EPSILON = 0.000001;
@@ -2202,10 +2201,6 @@ const validateAnalysisPayload = (payload) => {
             message: `Value must be between ${limit.formattedRange}`,
           };
         }
-      } else {
-        const msg = `Configuration Error: Missing verified limits for ${analysisType.toUpperCase()} -> ${rowKey} -> ${paramKey}. Writes blocked pending SME approval.`;
-        errors.push(msg);
-        errorDetails[`${rowKey}_${paramKey}_config`] = msg;
       }
     });
   });

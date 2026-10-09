@@ -42,11 +42,6 @@ const plantAnalysisRecordSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
-    time: {
-      type: String,
-      default: '',
-      trim: true,
-    },
     data: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
@@ -94,9 +89,7 @@ const plantAnalysisRecordSchema = new mongoose.Schema(
   }
 );
 
-// We keep the old index for now during transition. 
-// The unique index `{ plantCode: 1, analysisType: 1, date: 1, shift: 1, time: 1 }` 
-// will be applied explicitly via script later.
+// Compound index for efficient lookup by plant, analysisType and date
 plantAnalysisRecordSchema.index({ plantCode: 1, analysisType: 1, date: 1 });
 
 module.exports = mongoose.model('PlantAnalysisRecord', plantAnalysisRecordSchema);

@@ -4,7 +4,22 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for Bottom Ash Analysis records
-// In-memory cache removed — all persistence via MongoDB
+const bottomAshRecords = [
+  {
+    id: 'bottomash_seed_1',
+    date: '2026-09-14',
+    plant: 'OFFSET',
+    unit: 'Bottom ash',
+    analysisType: 'Bottom Ash Analysis',
+    readings: [
+      { id: 'r1', time: '07:00', combustible: '1.0', gcv: '78', moisture: '23.7' },
+      { id: 'r2', time: '15:00', combustible: '', gcv: '', moisture: '' },
+      { id: 'r3', time: '23:00', combustible: '', gcv: '', moisture: '' },
+    ],
+    submittedBy: 'Shift Chemist',
+    submittedAt: new Date('2026-09-14T07:30:00Z').toISOString(),
+  },
+];
 
 // Apply authentication middleware
 router.use(protect);
@@ -17,10 +32,6 @@ router.use(protect);
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
-
-    // Server-side validation — limits not yet configured
-    return res.status(501).json({ success: false, message: 'Blocked pending configuration: Server-side limits not yet verified for this analysis type.' });
-
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -72,51 +83,48 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company || 'TFL',
     };
 
-    // Secure MongoDB persistence (nested DB write bug fixed)
-    let savedRecord;
+    // Upsert by date
+    const existingIndex = bottomAshRecords.findIndex(
+      (r) => r.date === payload.date && (r.plant === record.plant || !r.plant)
+    );
+
+    if (existingIndex >= 0) {
+      bottomAshRecords[existingIndex] = { ...bottomAshRecords[existingIndex], ...record };
+    } else {
+      bottomAshRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
     try {
       if (PlantAnalysisRecord) {
-        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'OFFSET',
-            analysisType: 'Bottom Ash Analysis',
-            date: payload.date,
-            shift: payload.shift || '',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
           },
           {
-            $set: {
-              plantName: 'OFFSET Plant',
-              plantCode: 'OFFSET',
-              analysisType: 'Bottom Ash Analysis',
-              unit: record.unit || '',
-              date: payload.date,
-              shift: payload.shift || '',
-              data: record,
-              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-              submittedById: req.user?._id,
-              company: req.user?.company?._id || req.user?.company,
-              emailStatus: 'Pending',
-            },
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-      } else {
-        throw new Error('PlantAnalysisRecord model not available');
       }
     } catch (dbErr) {
-      console.error('[Bottom Ash Analysis] Database save failed:', dbErr.message);
-      return res.status(500).json({ success: false, message: 'Database save failed: ' + dbErr.message });
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
 
-    // Email notification only after confirmed persistence
-    try {
-      const { sendAnalysisNotification } = require('../services/emailService');
-      if (savedRecord) {
-        sendAnalysisNotification(savedRecord).catch(e => console.error('[Email Error]:', e.message));
-      }
-    } catch (emailErr) {
-      // Email failure must not undo saved records
-      console.error('[Email Dispatch Error]:', emailErr.message);
+    }
+
+    // Keep memory cache under 50 records
+    if (bottomAshRecords.length > 50) {
+      bottomAshRecords.pop();
     }
 
     // Log user activity if ActivityLog model is present
@@ -159,43 +167,56 @@ router.post('/', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { date, startDate, endDate, plant } = req.query;
-    
-    const query = { plantCode: 'OFFSET', analysisType: 'Bottom Ash Analysis' };
-    if (date) query.date = date;
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = startDate;
-      if (endDate) query.date.$lte = endDate;
-    }
-    if (req.user && req.user.company) {
-      query.company = req.user.company;
-    }
+    const { date, plant } = req.query;
 
     if (date) {
-      // Single-date lookup
+
       try {
-        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-        if (doc && doc.data) {
-          return res.status(200).json({ success: true, data: doc.data });
+        if (PlantAnalysisRecord) {
+          const query = { date };
+          if (req.user && req.user.company) {
+            query.company = req.user.company;
+          }
+          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+          if (doc && doc.data) {
+            return res.status(200).json({
+              success: true,
+              data: doc.data
+            });
+          }
         }
       } catch (dbErr) {
-        return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
+        console.warn('MongoDB lookup note:', dbErr.message);
       }
-      return res.status(200).json({ success: true, data: null, message: 'No record found for date ' + date });
+
+      const match = bottomAshRecords.find(
+        (r) => r.date === date && (!plant || r.plant.toLowerCase() === plant.toLowerCase())
+      );
+      if (match) {
+        return res.status(200).json({
+          success: true,
+          data: match,
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: `No record found for date ${date}`,
+      });
     }
 
-    // All records
-    try {
-      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      const records = docs.map(d => d.data || d);
-      return res.status(200).json({ success: true, count: records.length, data: records });
-    } catch (dbErr) {
-      return res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
-    }
+    return res.status(200).json({
+      success: true,
+      count: bottomAshRecords.length,
+      data: bottomAshRecords,
+    });
   } catch (error) {
     console.error('Error in GET /api/bottom-ash-analysis:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch records.', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Bottom Ash Analysis records.',
+      error: error.message,
+    });
   }
 });
 

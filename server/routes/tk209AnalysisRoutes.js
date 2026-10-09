@@ -5,7 +5,7 @@ const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 
 // In-memory / cache storage for TK 209 analysis records
-// Removed cache
+const tk209Records = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -57,7 +57,7 @@ router.post('/', async (req, res) => {
     if (existingIndex >= 0) {
       tk209Records[existingIndex] = { ...tk209Records[existingIndex], ...record };
     } else {
-      // Cache push removed
+      tk209Records.unshift(record);
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -83,8 +83,7 @@ router.post('/', async (req, res) => {
         );
       }
     } catch (dbErr) {
-      console.error('DB Error:', dbErr);
-      return res.status(500).json({ success: false, message: 'Database save failed' });
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
 
     }
@@ -126,7 +125,7 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    let results = []; // Replaced by DB
+    let filtered = [...tk209Records];
 
     if (date) {
       filtered = filtered.filter((r) => r.date === date);

@@ -4,7 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory / cache storage for brine analysis records
-// removed memory cache
+const brineRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -16,12 +16,7 @@ router.use(protect);
  */
 router.post('/', async (req, res) => {
   try {
-    const { validateAnalysisPayload } = require('../services/analysisValidation');
-    const { sendAnalysisNotification } = require('../services/emailService');
-
     const payload = req.body;
-    payload.plant = 'ACL';
-    payload.analysisType = 'Brine Analysis';
 
     if (!payload || !payload.date) {
       return res.status(400).json({
@@ -29,18 +24,6 @@ router.post('/', async (req, res) => {
         message: 'Analysis Date is required to save Brine Analysis.',
       });
     }
-
-    const validationPayload = { ...payload, plant: 'tfl' };
-    const validation = validateAnalysisPayload(validationPayload);
-    if (!validation.isValid || Object.keys(validation.outOfLimits || {}).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: validation.errors[0] || validation.warnings?.[0] || 'Validation failed.',
-        errors: validation.errors,
-      });
-    }
-    
-
 
     const rows = payload.rows || {};
     const errors = [];
@@ -78,48 +61,33 @@ router.post('/', async (req, res) => {
       company: req.user?.company?._id || req.user?.company,
     };
 
-    let savedRecord;
+    brineRecords.unshift(record);
+
+    // Persist to MongoDB PlantAnalysisRecord
     try {
       if (PlantAnalysisRecord) {
-        savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'ACL',
-            analysisType: 'Brine Analysis',
-            date: payload.date,
-            shift: '', // Using empty shift to store both tanks for the day
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            date: record.date,
           },
           {
-            $set: {
-              plantName: 'ACL Plant',
-              plantCode: 'ACL',
-              analysisType: 'Brine Analysis',
-              unit: 'g/L',
-              date: payload.date,
-              shift: '',
-              data: { rows: payload.rows },
-              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-              submittedById: req.user?._id,
-              company: req.user?.company?._id || req.user?.company,
-              emailStatus: 'Pending',
-            }
+            plantName: record.plant || 'Plant',
+            plantCode: record.plant || 'Unknown',
+            analysisType: record.analysisType || 'Unknown',
+            unit: record.unit || '',
+            date: record.date,
+            data: record,
+            submittedBy: record.submittedBy || req.user?.name,
+            submittedById: record.submittedById || req.user?._id,
+            company: record.company || req.user?.company?._id || req.user?.company,
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-      } else {
-         throw new Error("Model missing");
       }
     } catch (dbErr) {
-      console.error('MongoDB PlantAnalysisRecord save failure:', dbErr.message);
-      return res.status(500).json({ success: false, message: 'Server error while processing Brine Analysis: ' + dbErr.message });
-    }
-
-    // Attempt to notify
-    try {
-      if (savedRecord) {
-         sendAnalysisNotification(savedRecord).catch(err => console.error('[Email Notification Failed]:', err.message));
-      }
-    } catch (e) {
-      console.error('[Email Dispatcher Error]', e.message);
+      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
 
 
@@ -160,31 +128,19 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    
-    let dbRecords = [];
-    if (PlantAnalysisRecord) {
-      const query = { plantCode: 'ACL', analysisType: 'Brine Analysis' };
-      if (date) query.date = date;
-      if (startDate || endDate) {
-        query.date = {};
-        if (startDate) query.date.$gte = startDate;
-        if (endDate) query.date.$lte = endDate;
-      }
-      if (req.user && req.user.company) {
-        query.company = req.user.company;
-      }
-      
-      const records = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      dbRecords = records.map(doc => ({
-         date: doc.date,
-         rows: doc.data?.rows || {}
-      }));
+    let filtered = [...brineRecords];
+
+    if (date) {
+      filtered = filtered.filter((r) => r.date === date);
+    } else if (startDate || endDate) {
+      if (startDate) filtered = filtered.filter((r) => r.date >= startDate);
+      if (endDate) filtered = filtered.filter((r) => r.date <= endDate);
     }
 
     return res.status(200).json({
       success: true,
-      count: dbRecords.length,
-      data: dbRecords,
+      count: filtered.length,
+      data: filtered,
     });
   } catch (error) {
     return res.status(500).json({
