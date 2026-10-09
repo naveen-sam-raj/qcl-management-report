@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -347,6 +348,9 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
           <div className="divide-y divide-slate-100 p-1 sm:px-3 sm:py-1">
             {RAW_SALT_PARAMETERS.map((param) => {
               const val = formData[param.key];
+              const limit = getCellLimit('acl', 'raw-salt', 'day', param.key);
+              const validation = limit ? validateCellValue(val, limit) : { isOutOfLimit: false };
+              const isOutOfLimit = validation.isOutOfLimit;
               const isInvalid = !!errors[param.key];
               const errorMessage = errors[param.key];
 
@@ -376,7 +380,7 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
                         placeholder={param.placeholder}
                         onChange={(e) => handleInputChange(param.key, e.target.value)}
                         className={`w-28 sm:w-32 px-2.5 py-1 text-xs sm:text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-                          isInvalid
+                          isInvalid || isOutOfLimit
                             ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
                             : val !== ''
                             ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
@@ -388,6 +392,16 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
                         <p className="text-[10px] text-red-600 font-bold mt-0.5 text-center animate-fadeIn absolute -bottom-3.5 left-0 right-0">
                           {errorMessage}
                         </p>
+                      )}
+                      {isOutOfLimit && !isInvalid && limit && (
+                        <div className="mt-1 px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs">
+                          <span>Limit: {limit.min.toFixed(2)}–{limit.max.toFixed(2)}{limit.unit}</span>
+                        </div>
+                      )}
+                      {!isOutOfLimit && !isInvalid && limit && val === '' && (
+                        <div className="text-[9.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                          {limit.min.toFixed(2)}–{limit.max.toFixed(2)}{limit.unit}
+                        </div>
                       )}
                     </div>
                   </div>

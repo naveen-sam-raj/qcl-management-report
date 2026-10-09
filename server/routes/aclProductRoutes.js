@@ -25,26 +25,38 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { chemical = {}, bss = {} } = payload;
+    const { chemical = {}, bss = {}, readings = [] } = payload;
     const errors = [];
 
-    // Validate chemical values
-    Object.entries(chemical).forEach(([key, val]) => {
-      if (val === '' || val === null || val === undefined) return;
-      const num = Number(val);
-      if (isNaN(num)) {
-        errors.push(`Chemical parameter '${key.toUpperCase()}' must be a valid number.`);
-      }
-    });
-
-    // Validate BSS values
-    Object.entries(bss).forEach(([key, val]) => {
-      if (val === '' || val === null || val === undefined) return;
-      const num = Number(val);
-      if (isNaN(num)) {
-        errors.push(`BSS parameter '${key}' must be a valid number.`);
-      }
-    });
+    // Validation for new 'readings' array format
+    if (readings && readings.length > 0) {
+      readings.forEach((r, idx) => {
+        ['nh4cl', 'nacl', 'fe2o3', 'h2o', 'ir', 'bd', 'sieve_6', 'sieve_8', 'sieve_12', 'sieve_16', 'sieve_18', 'sieve_44', 'sieve_60', 'sieve_100'].forEach(key => {
+          const val = r[key];
+          if (val === '' || val === null || val === undefined) return;
+          const num = Number(val);
+          if (isNaN(num)) {
+            errors.push(`Row ${idx + 1}: Parameter '${key}' must be a valid number.`);
+          }
+        });
+      });
+    } else {
+      // Validate old format
+      Object.entries(chemical).forEach(([key, val]) => {
+        if (val === '' || val === null || val === undefined) return;
+        const num = Number(val);
+        if (isNaN(num)) {
+          errors.push(`Chemical parameter '${key.toUpperCase()}' must be a valid number.`);
+        }
+      });
+      Object.entries(bss).forEach(([key, val]) => {
+        if (val === '' || val === null || val === undefined) return;
+        const num = Number(val);
+        if (isNaN(num)) {
+          errors.push(`BSS parameter '${key}' must be a valid number.`);
+        }
+      });
+    }
 
     if (errors.length > 0) {
       return res.status(400).json({
@@ -62,6 +74,7 @@ router.post('/', async (req, res) => {
       analysisType: payload.analysisType || 'ACL Product Analysis',
       chemical,
       bss,
+      readings,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,
       submittedAt: new Date().toISOString(),
