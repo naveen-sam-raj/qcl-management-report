@@ -1,7 +1,7 @@
 ﻿const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
-const { ActivityLog } = require("../models");
+const { ActivityLog, PlantAnalysisRecord } = require("../models");
 
 const records = [];
 router.use(protect);
@@ -50,9 +50,40 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    let results = [...records];
-    if (date) results = results.filter((r) => r.date === date);
-    else if (startDate && endDate) results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    let results = [];
+    
+    if (PlantAnalysisRecord) {
+      const query = { analysisType: "P417-3 Analysis" };
+      if (date) query.date = date;
+      else if (startDate && endDate) {
+        query.date = { $gte: startDate, $lte: endDate };
+      }
+      if (req.user && req.user.company) {
+        query.company = req.user.company;
+      }
+      
+      const dbRecords = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      if (dbRecords && dbRecords.length > 0) {
+        results = dbRecords.map(dbRec => ({
+          id: dbRec._id,
+          date: dbRec.date,
+          plant: dbRec.plantCode,
+          analysisType: dbRec.analysisType,
+          shifts: dbRec.data,
+          rows: dbRec.data,
+          submittedBy: dbRec.submittedBy,
+          submittedById: dbRec.submittedById,
+          company: dbRec.company,
+          savedAt: dbRec.savedAt,
+        }));
+      }
+    }
+    
+    if (results.length === 0) {
+      results = [...records];
+      if (date) results = results.filter((r) => r.date === date);
+      else if (startDate && endDate) results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    }
     return res.status(200).json({ success: true, count: results.length, data: results });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error while retrieving P417-3 analysis records." });

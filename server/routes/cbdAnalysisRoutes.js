@@ -83,6 +83,7 @@ router.post('/', async (req, res) => {
       cbdRecords[existingIndex] = { ...cbdRecords[existingIndex], ...record };
     } else {
       cbdRecords.unshift(record);
+    }
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -92,6 +93,7 @@ router.post('/', async (req, res) => {
             plantCode: record.plant || 'Unknown',
             analysisType: record.analysisType || 'Unknown',
             date: record.date,
+            ...(req.user && req.user.company ? { company: req.user.company } : {}),
           },
           {
             plantName: record.plant || 'Plant',
@@ -109,8 +111,6 @@ router.post('/', async (req, res) => {
       }
     } catch (dbErr) {
       console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
-    }
-
     }
 
     // Activity log entry
@@ -156,7 +156,7 @@ router.get('/', async (req, res) => {
     if (date) {
       try {
         if (PlantAnalysisRecord) {
-          const query = { date };
+          const query = { date, analysisType: 'CBD Analysis' };
           if (req.user && req.user.company) {
             query.company = req.user.company;
           }

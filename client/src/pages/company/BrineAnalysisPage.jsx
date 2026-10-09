@@ -104,6 +104,10 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
           
           if (!record) {
              // Leave default
+          } else if (record.shifts) {
+            setData(record.shifts);
+          } else if (record.readings && record.readings.length > 0) {
+            setData(record.readings);
           } else if (record.rows) {
             setData(record.rows);
           } else if (record.data && !Array.isArray(record.data)) {

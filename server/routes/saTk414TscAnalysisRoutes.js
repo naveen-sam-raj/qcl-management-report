@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
-const { ActivityLog } = require("../models");
+const { ActivityLog, PlantAnalysisRecord } = require("../models");
 
 const records = [];
 router.use(protect);
@@ -36,6 +36,33 @@ router.post("/", async (req, res) => {
       submittedAt: new Date().toISOString(),
       company: req.user?.company?._id || req.user?.company,
     };
+    try {
+      if (PlantAnalysisRecord) {
+        await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: record.plant || "SA",
+            analysisType: record.analysisType,
+            date: record.date,
+            ...(req.user && req.user.company ? { company: req.user.company } : {}),
+          },
+          {
+            plantName: record.plant === "SA" ? "SA Plant" : record.plant,
+            plantCode: record.plant || "SA",
+            analysisType: record.analysisType,
+            date: record.date,
+            data: record.shifts || record.rows || {},
+            submittedBy: record.submittedBy,
+            submittedById: record.submittedById,
+            company: record.company,
+            savedAt: new Date(),
+          },
+          { new: true, upsert: true }
+        );
+      }
+    } catch (dbErr) {
+      console.warn("MongoDB save failed:", dbErr.message);
+    }
+
     const existingIndex = records.findIndex((r) => r.date === payload.date);
     if (existingIndex >= 0) {
       records[existingIndex] = { ...records[existingIndex], ...record };
@@ -57,9 +84,40 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { date, startDate, endDate } = req.query;
-    let results = [...records];
-    if (date) results = results.filter((r) => r.date === date);
-    else if (startDate && endDate) results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    let results = [];
+    
+    if (PlantAnalysisRecord) {
+      const query = { analysisType: "TK 414 TSC TANK Analysis" };
+      if (date) query.date = date;
+      else if (startDate && endDate) {
+        query.date = { $gte: startDate, $lte: endDate };
+      }
+      if (req.user && req.user.company) {
+        query.company = req.user.company;
+      }
+      
+      const dbRecords = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      if (dbRecords && dbRecords.length > 0) {
+        results = dbRecords.map(dbRec => ({
+          id: dbRec._id,
+          date: dbRec.date,
+          plant: dbRec.plantCode,
+          analysisType: dbRec.analysisType,
+          shifts: dbRec.data,
+          rows: dbRec.data,
+          submittedBy: dbRec.submittedBy,
+          submittedById: dbRec.submittedById,
+          company: dbRec.company,
+          savedAt: dbRec.savedAt,
+        }));
+      }
+    }
+    
+    if (results.length === 0) {
+      results = [...records];
+      if (date) results = results.filter((r) => r.date === date);
+      else if (startDate && endDate) results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    }
     return res.status(200).json({ success: true, count: results.length, data: results });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error while retrieving TK 414 TSC TANK analysis records." });

@@ -99,6 +99,7 @@ router.post('/', async (req, res) => {
       rawWaterRecords[existingIndex] = { ...rawWaterRecords[existingIndex], ...record };
     } else {
       rawWaterRecords.unshift(record);
+    }
 
     // Persist to MongoDB PlantAnalysisRecord
     try {
@@ -108,6 +109,7 @@ router.post('/', async (req, res) => {
             plantCode: record.plant || 'Unknown',
             analysisType: record.analysisType || 'Unknown',
             date: record.date,
+            ...(req.user && req.user.company ? { company: req.user.company } : {}),
           },
           {
             plantName: record.plant || 'Plant',
@@ -125,8 +127,6 @@ router.post('/', async (req, res) => {
       }
     } catch (dbErr) {
       console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
-    }
-
     }
 
     // Keep memory cache under 50 records
@@ -180,7 +180,7 @@ router.get('/', async (req, res) => {
 
       try {
         if (PlantAnalysisRecord) {
-          const query = { date };
+          const query = { date, analysisType: 'Raw Water Analysis' };
           if (req.user && req.user.company) {
             query.company = req.user.company;
           }
