@@ -2168,7 +2168,7 @@ const validateAnalysisPayload = (payload) => {
     if (typeof paramValues !== 'object' || paramValues === null) return;
 
     // Ignore non-numeric row metadata keys (e.g. shift, label, name, id)
-    const METADATA_KEYS = ['shift', 'label', 'name', 'id', '_id', 'highlight', 'highlightType'];
+    const METADATA_KEYS = ['shift', 'label', 'name', 'id', '_id', 'highlight', 'highlightType', 'unit'];
 
     Object.entries(paramValues).forEach(([paramKey, val]) => {
       if (METADATA_KEYS.includes(paramKey)) return;
