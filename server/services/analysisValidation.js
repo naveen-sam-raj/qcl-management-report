@@ -709,8 +709,7 @@ const ANALYSIS_LIMITS_REGISTRY = {
         co:  { target: 1000, tolerance: 50,  min: 950, max: 1050, unit: 'PPM', paramName: 'CO',  frequency: 'Once in a shift' },
       },
     },
-  },
-  acl: {
+
     'cacl2': {
       day: {
         ph:   { target: 7.7,  tolerance: 1.0, min: 6.7, max: 8.7, unit: '',    paramName: 'pH',   label: 'pH',   frequency: 'Day', formattedRange: '6.7 – 8.7', formattedTarget: '7.7', formattedTolerance: '±1', referenceDisplay: '7.7 ± 1 (6.7 – 8.7)' },
@@ -1600,7 +1599,7 @@ const CACL2_LIMIT_VALIDATION_ENABLED = true;
 const LIMITS_ENABLED = true;
 
 const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKey, paramKey) => {
-  const cleanPlant = (plantKey || 'acl').toLowerCase();
+  const cleanPlant = String(plantKey || 'acl').toLowerCase().replace(/\s+plant$/, '').trim();
   const cleanAnalysis = (analysisType || 'pure-salt').toLowerCase().replace(/\s+/g, '-');
 
   const isPureSalt = cleanAnalysis === 'pure-salt' || cleanAnalysis === 'pure-salt-analysis';

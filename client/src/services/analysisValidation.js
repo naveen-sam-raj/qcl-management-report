@@ -1870,7 +1870,7 @@ export const LIMITS_ENABLED = true;
  * Returns null if no specific target/tolerance is defined for that cell.
  */
 export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKey, paramKey) => {
-  const cleanPlant = (plantKey || 'acl').toLowerCase();
+  const cleanPlant = String(plantKey || 'acl').toLowerCase().replace(/\s+plant$/, '').trim();
   const cleanAnalysis = (analysisType || 'pure-salt').toLowerCase().replace(/\s+/g, '-');
 
   const isPureSalt = cleanAnalysis === 'pure-salt' || cleanAnalysis === 'pure-salt-analysis';
