@@ -756,12 +756,14 @@ const ANALYSIS_LIMITS_REGISTRY = {
         cnh3: { target: 1.89, tolerance: 0.10, min: 1.79, max: 1.99, unit: 'Kgm/m³', paramName: 'CNH3', label: 'CNH₃', frequency: 'Once in a shift', formattedRange: '1.79–1.99 Kgm/m³', formattedTarget: '1.89 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         tcl:  { target: 5.39, tolerance: 0.10, min: 5.29, max: 5.49, unit: 'Kgm/m³', paramName: 'TCL',  label: 'TCl',  frequency: 'Once in a shift', formattedRange: '5.29–5.49 Kgm/m³', formattedTarget: '5.39 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         pcl:  { target: 3.50, tolerance: 0.10, min: 3.40, max: 3.60, unit: 'Kgm/m³', paramName: 'PCL',  label: 'PCl',  frequency: 'Once in a shift', formattedRange: '3.40–3.60 Kgm/m³', formattedTarget: '3.50 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
+        tcao: { hasNumericLimit: false, isNil: true, paramName: 'TCAO', label: 'TCAO' },
       },
       shift: {
         fnh3: { target: 3.86, tolerance: 0.10, min: 3.76, max: 3.96, unit: 'Kgm/m³', paramName: 'FNH3', label: 'FNH₃', frequency: 'Once in a shift', formattedRange: '3.76–3.96 Kgm/m³', formattedTarget: '3.86 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         cnh3: { target: 1.89, tolerance: 0.10, min: 1.79, max: 1.99, unit: 'Kgm/m³', paramName: 'CNH3', label: 'CNH₃', frequency: 'Once in a shift', formattedRange: '1.79–1.99 Kgm/m³', formattedTarget: '1.89 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         tcl:  { target: 5.39, tolerance: 0.10, min: 5.29, max: 5.49, unit: 'Kgm/m³', paramName: 'TCL',  label: 'TCl',  frequency: 'Once in a shift', formattedRange: '5.29–5.49 Kgm/m³', formattedTarget: '5.39 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
         pcl:  { target: 3.50, tolerance: 0.10, min: 3.40, max: 3.60, unit: 'Kgm/m³', paramName: 'PCL',  label: 'PCl',  frequency: 'Once in a shift', formattedRange: '3.40–3.60 Kgm/m³', formattedTarget: '3.50 Kgm/m³', formattedTolerance: '±0.10 Kgm/m³' },
+        tcao: { hasNumericLimit: false, isNil: true, paramName: 'TCAO', label: 'TCAO' },
       },
     },
     'tk414': {
