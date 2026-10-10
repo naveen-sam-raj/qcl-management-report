@@ -150,47 +150,34 @@ router.post('/', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { date, startDate, endDate } = req.query;
-
-    let results = [...tk204Tk209Records];
+    const { date } = req.query;
+    const { PlantAnalysisRecord } = require('../models');
 
     if (date) {
-      try {
-        if (PlantAnalysisRecord) {
-          const query = { date };
-          if (req.user && req.user.company) {
-            query.company = req.user.company;
-          }
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-          if (doc && doc.data) {
-            return res.status(200).json({
-              success: true,
-              data: [doc.data] // return as array because the frontend usually expects array or we modified it to handle both
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
+      const query = { date, plantCode: 'ACL', analysisType: 'TK 204 / TK 209 Analysis' };
+      if (req.user && req.user.company) {
+        query.company = req.user.company;
       }
-    }
 
-
-    if (date) {
-      results = results.filter((r) => r.date === date);
-    } else if (startDate && endDate) {
-      results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+      const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+      
+      if (doc && doc.data) {
+        return res.status(200).json({
+          success: true,
+          data: [doc.data]
+        });
+      }
     }
 
     return res.status(200).json({
       success: true,
-      count: results.length,
-      data: results,
+      data: []
     });
   } catch (error) {
-    console.error('[TK204/TK209 API] Error fetching records:', error);
+    console.error('[ACL GET] Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Server error while retrieving TK 204 / TK 209 records.',
+      message: 'Server error: ' + error.message,
     });
   }
 });

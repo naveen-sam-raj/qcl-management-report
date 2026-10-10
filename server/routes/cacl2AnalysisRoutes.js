@@ -167,64 +167,34 @@ router.post('/', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { date, plant } = req.query;
+    const { date } = req.query;
+    const { PlantAnalysisRecord } = require('../models');
 
     if (date) {
-      // Check MongoDB first if available
-      try {
-        if (PlantAnalysisRecord) {
-          const doc = await PlantAnalysisRecord.findOne({
-            plantCode: 'ACL',
-            analysisType: 'CaCl2 Analysis',
-            date,
-          }).lean();
-
-          if (doc) {
-            return res.status(200).json({
-              success: true,
-              data: {
-                id: doc._id,
-                date: doc.date,
-                plant: doc.plantCode,
-                unit: doc.unit,
-                readings: doc.data?.readings || [],
-                submittedBy: doc.submittedBy,
-                submittedAt: doc.createdAt,
-              },
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
+      const query = { date, plantCode: 'ACL', analysisType: 'CaCl2 Analysis' };
+      if (req.user && req.user.company) {
+        query.company = req.user.company;
       }
 
-      const match = cacl2Records.find(
-        (r) => r.date === date && (!plant || r.plant.toLowerCase() === plant.toLowerCase())
-      );
-      if (match) {
+      const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+      
+      if (doc && doc.data) {
         return res.status(200).json({
           success: true,
-          data: match,
+          data: [doc.data]
         });
       }
-      return res.status(200).json({
-        success: true,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
     }
 
     return res.status(200).json({
       success: true,
-      count: cacl2Records.length,
-      data: cacl2Records,
+      data: []
     });
   } catch (error) {
-    console.error('Error in GET /api/cacl2-analysis:', error);
+    console.error('[ACL GET] Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to fetch CaCl2 Analysis records.',
-      error: error.message,
+      message: 'Server error: ' + error.message,
     });
   }
 });

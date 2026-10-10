@@ -201,42 +201,36 @@ router.get('/:id/download-excel', protect, async (req, res) => {
  * @route   GET /api/pure-salt-analysis
  * @access  Private
  */
-router.get('/', protect, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const { date, startDate, endDate } = req.query;
-    let records = [];
+    const { date } = req.query;
+    const { PlantAnalysisRecord } = require('../models');
 
-    if (PureSaltAnalysis && typeof PureSaltAnalysis.find === 'function') {
-      const query = {};
-      if (date) query.date = date;
-      if (startDate || endDate) {
-        query.date = {};
-        if (startDate) query.date.$gte = startDate;
-        if (endDate) query.date.$lte = endDate;
+    if (date) {
+      const query = { date, plantCode: 'ACL', analysisType: 'Pure Salt Analysis' };
+      if (req.user && req.user.company) {
+        query.company = req.user.company;
       }
-      records = await PureSaltAnalysis.find(query).sort({ createdAt: -1 }).limit(100);
-    }
 
-    // Merge or fallback with in-memory records
-    if (!records || records.length === 0) {
-      records = [...analysisRecords];
-      if (date) {
-        records = records.filter((r) => r.date === date);
-      } else if (startDate || endDate) {
-        if (startDate) records = records.filter((r) => r.date >= startDate);
-        if (endDate) records = records.filter((r) => r.date <= endDate);
+      const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+      
+      if (doc && doc.data) {
+        return res.status(200).json({
+          success: true,
+          data: [doc.data]
+        });
       }
     }
 
     return res.status(200).json({
       success: true,
-      count: records.length,
-      data: records,
+      data: []
     });
   } catch (error) {
+    console.error('[ACL GET] Error:', error);
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Server error: ' + error.message,
     });
   }
 });

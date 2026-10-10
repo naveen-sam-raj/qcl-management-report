@@ -73,7 +73,7 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             // Leave default
+             setParameters(DEFAULT_PARAMETERS);
           } else if (record.parameters) {
             setParameters(record.parameters);
           } else if (record.data && Array.isArray(record.data)) {
@@ -83,7 +83,7 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
           } else if (record.data && record.data.parameters) {
             setParameters(record.data.parameters);
           } else {
-            // Leave default
+            setParameters(DEFAULT_PARAMETERS);
           }
         }
       } catch (err) {

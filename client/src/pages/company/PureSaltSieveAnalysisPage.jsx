@@ -113,7 +113,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             // Leave default
+             setData(buildEmptyData());
           } else if (record.shifts) {
             setData(record.shifts);
           } else if (record.readings && record.readings.length > 0) {
@@ -127,7 +127,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           } else if (record.data && record.data.rows) {
             setData(record.data.rows);
           } else {
-            // Leave default
+            setData(buildEmptyData());
           }
         }
       } catch (err) {

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -305,6 +305,50 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
   const [saving, setSaving]     = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
+
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/cr-203-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
+          const record = response.data.data[0];
+          if (record) {
+            if (record.timeRows) {
+              setTimeRows(record.timeRows);
+            } else {
+              setTimeRows(buildEmptyTimeRows());
+            }
+            if (record.fnh3Row) {
+              setFnh3Row(record.fnh3Row);
+            } else {
+              setFnh3Row(buildEmptyFnh3Row());
+            }
+            if (record.pclRow) {
+              setPclRow(record.pclRow);
+            } else {
+              setPclRow(buildEmptyPclRow());
+            }
+          } else {
+          setTimeRows(buildEmptyTimeRows());
+          setFnh3Row(buildEmptyFnh3Row());
+          setPclRow(buildEmptyPclRow());
+          }
+        } else {
+          setTimeRows(buildEmptyTimeRows());
+          setFnh3Row(buildEmptyFnh3Row());
+          setPclRow(buildEmptyPclRow());
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+          setTimeRows(buildEmptyTimeRows());
+          setFnh3Row(buildEmptyFnh3Row());
+          setPclRow(buildEmptyPclRow());
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Input Changes ──
   const handleTimeCellChange = useCallback((rowKey, paramKey, value) => {

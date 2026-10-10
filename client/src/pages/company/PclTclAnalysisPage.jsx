@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -240,6 +240,34 @@ const PclTclAnalysisPage = ({ plantId = 'acl' }) => {
   const [saving, setSaving]           = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError]     = useState(false);
+
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/pcl-tcl-analysis?date=${date}`);
+        if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
+          const record = response.data.data[0];
+          if (record) {
+            if (record.shiftRows) {
+              setShiftRows(record.shiftRows);
+            } else {
+              setShiftRows(buildEmptyShiftRows());
+            }
+          } else {
+          setShiftRows(buildEmptyShiftRows());
+          }
+        } else {
+          setShiftRows(buildEmptyShiftRows());
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+          setShiftRows(buildEmptyShiftRows());
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Input Changes ──
   const handleCellChange = useCallback((shiftKey, streamKey, value) => {

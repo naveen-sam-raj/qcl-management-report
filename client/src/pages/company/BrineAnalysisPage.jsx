@@ -92,7 +92,7 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError]     = useState(false);
 
-  // Fetch existing data when date changes
+  
   useEffect(() => {
     if (!date) return;
     const fetchExistingData = async () => {
@@ -103,7 +103,7 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             // Leave default
+             setData(buildEmptyData());
           } else if (record.shifts) {
             setData(record.shifts);
           } else if (record.readings && record.readings.length > 0) {
@@ -117,7 +117,7 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
           } else if (record.data && record.data.rows) {
             setData(record.data.rows);
           } else {
-            // Leave default
+            setData(buildEmptyData());
           }
         }
       } catch (err) {

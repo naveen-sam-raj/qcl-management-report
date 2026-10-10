@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -84,6 +84,42 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
   const [saving, setSaving]             = useState(false);
   const [saveSuccess, setSaveSuccess]   = useState(false);
   const [dateError, setDateError]       = useState(false);
+
+  useEffect(() => {
+    if (!date) return;
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/api/acl-product?date=${date}`);
+        if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
+          const record = response.data.data[0];
+          if (record) {
+            if (record.chemicalData) {
+              setChemicalData(record.chemicalData);
+            } else {
+              setChemicalData(buildEmptyChemicalData());
+            }
+            if (record.bssData) {
+              setBssData(record.bssData);
+            } else {
+              setBssData(buildEmptyBssData());
+            }
+          } else {
+          setChemicalData(buildEmptyChemicalData());
+          setBssData(buildEmptyBssData());
+          }
+        } else {
+          setChemicalData(buildEmptyChemicalData());
+          setBssData(buildEmptyBssData());
+        }
+      } catch (err) {
+        console.warn('Could not fetch existing data', err);
+          setChemicalData(buildEmptyChemicalData());
+          setBssData(buildEmptyBssData());
+      }
+    };
+    fetchExistingData();
+  }, [date]);
+
 
   // ── Calculate Live BSS Total ──
   const bssTotal = useMemo(() => {
