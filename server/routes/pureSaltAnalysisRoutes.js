@@ -66,16 +66,76 @@ router.post('/', protect, async (req, res) => {
 
     // ── 3. Save to MongoDB Atlas First (MANDATORY BEFORE EMAIL) ───────────
     let savedRecord = null;
+    let newlySavedShifts = [];
+    const targetRows = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
+
+    const shiftDisplayNames = {
+      rawSalt: 'RAW SALT',
+      shift1: 'I SHIFT',
+      shift2: 'II SHIFT',
+      shift3: 'III SHIFT',
+      composition: 'COMPOSITION'
+    };
+
     try {
-      if (PureSaltAnalysis && typeof PureSaltAnalysis.create === 'function') {
-        savedRecord = await PureSaltAnalysis.create(newAnalysisData);
-      } else {
-        savedRecord = {
-          _id: 'psa_' + Date.now(),
-          ...newAnalysisData,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+      if (PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
+        const query = {
+          date: payload.date,
+          plant: payload.plant || 'ACL Plant',
+          analysisType: payload.analysisType || 'Pure Salt Analysis',
         };
+        if (req.user && req.user.company) {
+          query.$or = [{ company: req.user.company }, { company: null }];
+        }
+
+        let existingRecord = await PureSaltAnalysis.findOne(query);
+
+        if (existingRecord) {
+          for (const key of targetRows) {
+            const hasData = payload.rows[key] && Object.values(payload.rows[key]).some(val => val !== null && val !== '');
+            if (hasData && !existingRecord.lockedShifts[key]) {
+              existingRecord.rows[key] = payload.rows[key];
+              existingRecord.lockedShifts[key] = true;
+              newlySavedShifts.push(key);
+            }
+          }
+
+          if (newlySavedShifts.length === 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'No unlocked shifts with valid data were found to save.',
+            });
+          }
+
+          existingRecord.submittedBy = req.user?.name || payload.submittedBy || 'Plant Operator';
+          existingRecord.submittedById = req.user?._id || null;
+          existingRecord.savedAt = new Date();
+          savedRecord = await existingRecord.save();
+        } else {
+          const lockedShifts = {};
+          for (const key of targetRows) {
+            const hasData = payload.rows[key] && Object.values(payload.rows[key]).some(val => val !== null && val !== '');
+            if (hasData) {
+              lockedShifts[key] = true;
+              newlySavedShifts.push(key);
+            }
+          }
+
+          if (newlySavedShifts.length === 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'No data provided to save.',
+            });
+          }
+
+          savedRecord = await PureSaltAnalysis.create({
+            ...newAnalysisData,
+            lockedShifts
+          });
+        }
+      } else {
+        // Fallback if DB disconnected
+        return res.status(500).json({ success: false, message: 'Database connection error' });
       }
     } catch (dbErr) {
       console.error('[PureSaltAnalysis] Database Save Failure:', dbErr);
@@ -92,26 +152,29 @@ router.post('/', protect, async (req, res) => {
     // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
     
-    // Fire and forget - do not await!
-    executeSaveAndEmailWorkflow({
-      plantIdentifier: plantTarget,
-      analysisType: 'Pure Salt Analysis',
-      unit: '',
-      shift: payload.shift || 'All Shifts (I, II, III)',
-      date: payload.date,
-      data: payload.rows,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id || null,
-      company: req.user?.company?._id || req.user?.company || null,
-      explicitRecord: savedRecord,
-      rawBody: payload,
-    }).catch(err => console.warn('[AutoPlantEmail] Exception in background workflow:', err.message));
+    // Fire and forget - do not await! Dispatch one email per newly saved shift.
+    newlySavedShifts.forEach(shiftKey => {
+      executeSaveAndEmailWorkflow({
+        plantIdentifier: plantTarget,
+        analysisType: 'Pure Salt Analysis',
+        unit: '',
+        shift: shiftDisplayNames[shiftKey],
+        date: payload.date,
+        data: payload.rows,
+        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+        submittedById: req.user?._id || null,
+        company: req.user?.company?._id || req.user?.company || null,
+        explicitRecord: savedRecord,
+        rawBody: payload,
+      }).catch(err => console.warn(`[AutoPlantEmail] Exception in background workflow for ${shiftKey}:`, err.message));
+    });
 
     return res.status(201).json({
       success: true,
-      message: 'Analysis data saved successfully',
+      message: `Successfully saved ${newlySavedShifts.length} shift(s)`,
       data: savedRecord,
-      emailStatus: 'processing'
+      emailStatus: 'processing',
+      newlySavedShifts
     });
   } catch (error) {
     console.error('[PureSaltAnalysis API] Error saving data:', error);

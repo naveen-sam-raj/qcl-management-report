@@ -65,6 +65,13 @@ const pureSaltAnalysisSchema = new mongoose.Schema(
         h2o: { type: Number, default: null },
       },
     },
+    lockedShifts: {
+      rawSalt: { type: Boolean, default: false },
+      shift1: { type: Boolean, default: false },
+      shift2: { type: Boolean, default: false },
+      shift3: { type: Boolean, default: false },
+      composition: { type: Boolean, default: false },
+    },
     submittedBy: {
       type: String,
       default: 'Plant Operator',

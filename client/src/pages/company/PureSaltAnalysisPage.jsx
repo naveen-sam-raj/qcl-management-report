@@ -135,6 +135,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
+  const [lockedShifts, setLockedShifts] = useState({});
 
   // EmailJS & Excel Reporting States
   const [recipientEmail, setRecipientEmail] = useState(
@@ -163,20 +164,26 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
           
           if (record && record.rows) {
             setData(record.rows);
+            setLockedShifts(record.lockedShifts || {});
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
+            setLockedShifts(record.lockedShifts || {});
           } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
+            setLockedShifts(record.lockedShifts || {});
           } else {
             setData(buildEmptyData());
+            setLockedShifts({});
           }
         } else {
           setData(buildEmptyData());
+          setLockedShifts({});
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
+        setLockedShifts({});
       }
     };
     fetchExistingData();
@@ -190,6 +197,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   // ── Real-time input change (Accepts exact values without limits/tolerances) ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
+    if (lockedShifts[rowKey]) return; // Prevent edit if locked
 
     setData((prev) => ({
       ...prev,
@@ -209,6 +217,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     setSavePhase('idle');
     setLastSavedRecord(null);
     setLastExcelData(null);
+    setLockedShifts({});
     showToast('Form cleared successfully.', 'info');
   };
 
@@ -346,6 +355,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     const excelInfo = response.data.excel;
     setLastSavedRecord(savedRecord);
     setLastExcelData(excelInfo);
+    if (savedRecord?.lockedShifts) {
+      setLockedShifts(savedRecord.lockedShifts);
+    }
 
     // Stage 2: "Generating Report..."
     setSavePhase('generating');
@@ -356,10 +368,10 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     // Stage 4: Final Status Messaging (Section 3, 9 & 12)
-    if (response.data.emailSent) {
+    if (response.data.emailSent || response.data.emailStatus === 'processing' || response.data.success) {
       setSavePhase('completed');
       setSaveSuccess(true);
-      showToast('Saved & Emailed Successfully ✓', 'success');
+      showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
 
       // Reset button state to idle after feedback display
       setTimeout(() => {
@@ -627,6 +639,11 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                             {row.highlightType === 'raw' ? 'Input' : 'Final'}
                           </span>
                         )}
+                        {lockedShifts[row.key] && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-slate-200 text-slate-700 whitespace-nowrap shadow-2xs">
+                            Locked
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -646,13 +663,13 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                                 id={`psa-input-${row.key}-${param.key}`}
                                 type="text"
                                 inputMode="decimal"
-                                readOnly={isViewOnly}
-                                disabled={isViewOnly}
+                                readOnly={isViewOnly || lockedShifts[row.key]}
+                                disabled={isViewOnly || lockedShifts[row.key]}
                                 value={cellVal}
                                 onChange={(e) =>
                                   !isViewOnly && handleChange(row.key, param.key, e.target.value)
                                 }
-                                placeholder={isViewOnly ? '—' : '0.00'}
+                                placeholder={isViewOnly || lockedShifts[row.key] ? '—' : '0.00'}
                                 title={
                                   limit
                                     ? isOutOfLimit
@@ -663,10 +680,10 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                                     : ''
                                 }
                                 className={`w-full mx-auto text-center text-xs font-mono font-bold px-2 py-1.5 rounded-lg border shadow-2xs transition-all ${
-                                  isViewOnly
+                                  isViewOnly || lockedShifts[row.key]
                                     ? isOutOfLimit
                                       ? 'bg-rose-50 text-rose-900 border-rose-300 font-black cursor-default select-text'
-                                      : 'bg-slate-50 text-slate-800 border-slate-200 cursor-default select-text'
+                                      : 'bg-slate-50 text-slate-500 border-slate-200 cursor-default select-text opacity-80'
                                     : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
                                     : styles.inputFocus
