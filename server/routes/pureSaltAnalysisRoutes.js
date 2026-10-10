@@ -166,6 +166,9 @@ router.post('/', protect, async (req, res) => {
             return res.status(400).json({ success: false, message: 'No unlocked shifts with valid new data were found to save.' });
           }
 
+          existingRecord.markModified('rows');
+          existingRecord.markModified('lockedShifts');
+
           existingRecord.submittedBy = req.user?.name || payload.submittedBy || 'Plant Operator';
           existingRecord.submittedById = req.user?._id || null;
           existingRecord.savedAt = new Date();
