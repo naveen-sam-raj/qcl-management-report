@@ -94,7 +94,7 @@ router.get("/", async (req, res) => {
         query.date = { $gte: startDate, $lte: endDate };
       }
       if (req.user && req.user.company) {
-        query.company = req.user.company;
+        query.$or = [{ company: req.user.company }, { company: null }];
       }
       
       const dbRecords = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();

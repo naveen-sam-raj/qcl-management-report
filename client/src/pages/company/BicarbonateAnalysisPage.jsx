@@ -92,9 +92,9 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
              // Leave default
           } else if (record.shifts) {
             setReadings(record.shifts);
-          } else if (record.readings && record.readings.length > 0) {
+          } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
-          } else if (record.readings && record.readings.length > 0) {
+          } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
             setReadings(record.data);

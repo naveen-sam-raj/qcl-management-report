@@ -151,7 +151,7 @@ router.get('/', async (req, res) => {
           const query = { date };
           query.analysisType = 'LSA AT 500# Analysis';
           if (req.user && req.user.company) {
-            query.company = req.user.company;
+            query.$or = [{ company: req.user.company }, { company: null }];
           }
           
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();

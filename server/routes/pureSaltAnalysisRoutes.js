@@ -209,7 +209,7 @@ router.get('/', async (req, res) => {
     if (date) {
       const query = { date, plant: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'Pure Salt Analysis' };
       if (req.user && req.user.company) {
-        query.company = req.user.company;
+        query.$or = [{ company: req.user.company }, { company: null }];
       }
 
       const doc = await PureSaltAnalysis.findOne(query).sort({ createdAt: -1 }).lean();
