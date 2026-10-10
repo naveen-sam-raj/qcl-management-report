@@ -105,13 +105,13 @@ router.post('/', async (req, res) => {
       if (PlantAnalysisRecord) {
         await PlantAnalysisRecord.findOneAndUpdate(
           {
-            plantCode: 'ACL',
+            plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
             analysisType: 'CaCl2 Analysis',
             date: payload.date,
           },
           {
             plantName: 'ACL Plant',
-            plantCode: 'ACL',
+            plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
             analysisType: 'CaCl2 Analysis',
             unit: 'CaCl2',
             date: payload.date,
@@ -171,7 +171,7 @@ router.get('/', async (req, res) => {
     const { PlantAnalysisRecord } = require('../models');
 
     if (date) {
-      const query = { date, plantCode: 'ACL', analysisType: 'CaCl2 Analysis' };
+      const query = { date, plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'CaCl2 Analysis' };
       if (req.user && req.user.company) {
         query.company = req.user.company;
       }

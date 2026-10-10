@@ -204,20 +204,20 @@ router.get('/:id/download-excel', protect, async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date } = req.query;
-    const { PlantAnalysisRecord } = require('../models');
+    const { PureSaltAnalysis } = require('../models');
 
     if (date) {
-      const query = { date, plantCode: 'ACL', analysisType: 'Pure Salt Analysis' };
+      const query = { date, plant: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'Pure Salt Analysis' };
       if (req.user && req.user.company) {
         query.company = req.user.company;
       }
 
-      const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+      const doc = await PureSaltAnalysis.findOne(query).sort({ createdAt: -1 }).lean();
       
-      if (doc && doc.data) {
+      if (doc) {
         return res.status(200).json({
           success: true,
-          data: [doc.data]
+          data: [doc]
         });
       }
     }
@@ -227,7 +227,7 @@ router.get('/', async (req, res) => {
       data: []
     });
   } catch (error) {
-    console.error('[ACL GET] Error:', error);
+    console.error('[PureSalt GET] Error:', error);
     return res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message,

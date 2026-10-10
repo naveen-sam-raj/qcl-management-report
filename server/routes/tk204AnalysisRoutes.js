@@ -128,7 +128,7 @@ router.get('/', async (req, res) => {
     const { PlantAnalysisRecord } = require('../models');
 
     if (date) {
-      const query = { date, plantCode: 'ACL', analysisType: 'TK 204 Analysis' };
+      const query = { date, plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'TK 204 Analysis' };
       if (req.user && req.user.company) {
         query.company = req.user.company;
       }
