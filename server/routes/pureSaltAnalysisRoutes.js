@@ -201,7 +201,7 @@ router.get('/:id/download-excel', protect, async (req, res) => {
  * @route   GET /api/pure-salt-analysis
  * @access  Private
  */
-router.get('/', async (req, res) => {
+router.get('/', protect, async (req, res) => {
   try {
     const { date } = req.query;
     const { PureSaltAnalysis } = require('../models');

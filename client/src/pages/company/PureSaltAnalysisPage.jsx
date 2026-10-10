@@ -148,33 +148,42 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     // Fetch existing data when date changes
   useEffect(() => {
     if (!date) return;
+    
+    let active = true;
+    setData(buildEmptyData()); // Clear stale data immediately while loading
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/pure-salt-analysis?date=${date}`);
+        if (!active) return; // Ignore response if date changed
+        
         if (response.data && response.data.success && response.data.data) {
           const records = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
-          const record = records.find(r => r.date === date) || records[0];
+          const record = records.find(r => r.date === date);
           
           if (record && record.rows) {
             setData(record.rows);
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
-          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
+          } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
           } else {
             setData(buildEmptyData());
           }
-        } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
-            setData(record);
-          } else {
-            setData(buildEmptyData());
-          }
+        } else {
+          setData(buildEmptyData());
+        }
       } catch (err) {
+        if (!active) return;
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
       }
     };
     fetchExistingData();
+    
+    return () => {
+      active = false;
+    };
   }, [date]);
 
 
