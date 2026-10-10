@@ -707,18 +707,37 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                           </span>
                         )}
                         {(() => {
-                          let status = 'Editable';
-                          let bg = 'bg-blue-100 text-blue-700';
+                          let status = 'NEW';
+                          let bg = 'bg-indigo-100 text-indigo-700';
+
                           if (lockedShifts[row.key]) {
                             status = 'Locked';
                             bg = 'bg-slate-200 text-slate-700';
-                          } else if (row.key === 'shift2' && !lockedShifts.shift1Saved) {
-                            status = 'Waiting';
-                            bg = 'bg-amber-100 text-amber-700';
-                          } else if (row.key === 'shift3' && !lockedShifts.shift2Saved) {
-                            status = 'Waiting';
-                            bg = 'bg-amber-100 text-amber-700';
+                          } else {
+                            if (row.key === 'shift1') {
+                              if (lockedShifts.shift1Saved) {
+                                status = 'Editable';
+                                bg = 'bg-blue-100 text-blue-700';
+                              }
+                            } else if (row.key === 'shift2') {
+                              if (!lockedShifts.shift1Saved) {
+                                status = 'Waiting';
+                                bg = 'bg-amber-100 text-amber-700';
+                              } else if (lockedShifts.shift2Saved) {
+                                status = 'Editable';
+                                bg = 'bg-blue-100 text-blue-700';
+                              }
+                            } else if (row.key === 'shift3') {
+                              if (!lockedShifts.shift2Saved) {
+                                status = 'Waiting';
+                                bg = 'bg-amber-100 text-amber-700';
+                              } else if (lockedShifts.shift3Saved) {
+                                status = 'Editable';
+                                bg = 'bg-blue-100 text-blue-700';
+                              }
+                            }
                           }
+
                           return (
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
                               {status}
@@ -830,6 +849,74 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
           </p>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-slideUp">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Confirm Save</h3>
+              <button 
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition text-2xl leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+              <p className="text-sm text-slate-600 mb-4">
+                You are about to save the following data for <strong>{formatDateDisplay(confirmData.date)}</strong>.
+              </p>
+              {confirmData.isFinalEdit && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-xs font-medium flex items-start gap-2 shadow-2xs">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Warning:</strong> You are about to save the final correction for this date. After this save succeeds, all three shifts will be locked and cannot be edited again.
+                  </span>
+                </div>
+              )}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                {confirmData.shifts.map((shift) => (
+                  <div key={shift.key}>
+                    <div className="text-xs font-bold text-slate-700 mb-1">{shift.name}</div>
+                    <div className="text-xs text-slate-600 grid grid-cols-3 gap-2">
+                      {Object.entries(shift.values).map(([k, v]) => (
+                        v !== null && v !== '' ? <div key={k}>{k.toUpperCase()}: <span className="font-semibold">{v}</span></div> : null
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-2xs"
+                disabled={saving}
+              >
+                Review / Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-75 cursor-pointer shadow-2xs"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    Saving...
+                  </>
+                ) : (
+                  <>Confirm Save</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
