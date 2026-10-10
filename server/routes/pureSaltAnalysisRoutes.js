@@ -171,7 +171,7 @@ router.post('/', protect, async (req, res) => {
         analysisType: payload.analysisType || 'Pure Salt Analysis',
         shift: payload.shift || 'All Shifts (I, II, III)',
         rows: payload.rows,
-        company: req.user?.company?._id || req.user?.company || null,
+        company: savedRecord.company || req.user?.company?._id || req.user?.company || null,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
         submittedById: req.user?._id || null,
         lockedShifts
@@ -194,7 +194,7 @@ router.post('/', protect, async (req, res) => {
         data: payload.rows,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
         submittedById: req.user?._id || null,
-        company: req.user?.company?._id || req.user?.company || null,
+        company: savedRecord.company || req.user?.company?._id || req.user?.company || null,
         explicitRecord: savedRecord,
         rawBody: payload,
       }).catch(err => console.warn(`[AutoPlantEmail] Exception in background workflow for ${shiftKey}:`, err.message));

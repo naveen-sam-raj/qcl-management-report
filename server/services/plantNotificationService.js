@@ -533,7 +533,7 @@ const executeSaveAndEmailWorkflow = async ({
   rawBody = {},
 }) => {
   // 1. Resolve Plant from MongoDB
-  const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit });
+  const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit, company });
   if (!plantDoc) {
     return {
       success: false,
