@@ -170,9 +170,9 @@ router.get('/', async (req, res) => {
 
       try {
         if (PlantAnalysisRecord) {
-          const query = { date, analysisType: 'Cooling Water (C.W Water) Analysis' };
+          const query = { date, analysisType: 'Cooling Water (C.W Water) Analysis', plantCode: plant || 'OFFSET' };
           if (req.user && req.user.company) {
-            query.company = req.user.company;
+            query.company = req.user.company._id || req.user.company;
           }
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
           if (doc && doc.data) {

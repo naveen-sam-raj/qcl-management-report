@@ -157,9 +157,9 @@ router.get('/', async (req, res) => {
     if (date) {
       try {
         if (PlantAnalysisRecord) {
-          const query = { date };
+          const query = { date, analysisType: 'LSA Bagging Sieve Analysis', plantCode: 'OFFSET' };
           if (req.user && req.user.company) {
-            query.company = req.user.company;
+            query.company = req.user.company._id || req.user.company;
           }
           const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
           if (doc && doc.data) {
