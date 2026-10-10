@@ -198,6 +198,8 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
     if (lockedShifts[rowKey]) return; // Prevent edit if locked
+    if (rowKey === 'shift2' && !lockedShifts.shift1Saved) return; // Enforce sequence
+    if (rowKey === 'shift3' && !lockedShifts.shift2Saved) return; // Enforce sequence
 
     setData((prev) => ({
       ...prev,
@@ -639,11 +641,25 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                             {row.highlightType === 'raw' ? 'Input' : 'Final'}
                           </span>
                         )}
-                        {lockedShifts[row.key] && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-slate-200 text-slate-700 whitespace-nowrap shadow-2xs">
-                            Locked
-                          </span>
-                        )}
+                        {(() => {
+                          let status = 'Editable';
+                          let bg = 'bg-blue-100 text-blue-700';
+                          if (lockedShifts[row.key]) {
+                            status = 'Locked';
+                            bg = 'bg-slate-200 text-slate-700';
+                          } else if (row.key === 'shift2' && !lockedShifts.shift1Saved) {
+                            status = 'Waiting';
+                            bg = 'bg-amber-100 text-amber-700';
+                          } else if (row.key === 'shift3' && !lockedShifts.shift2Saved) {
+                            status = 'Waiting';
+                            bg = 'bg-amber-100 text-amber-700';
+                          }
+                          return (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
+                              {status}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </td>
 
@@ -659,37 +675,44 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                         <td key={param.key} className="px-3 py-2 text-center align-top">
                           <div className="flex flex-col items-center justify-start min-h-[50px]">
                             <div className="relative w-full max-w-[98px]">
-                              <input
-                                id={`psa-input-${row.key}-${param.key}`}
-                                type="text"
-                                inputMode="decimal"
-                                readOnly={isViewOnly || lockedShifts[row.key]}
-                                disabled={isViewOnly || lockedShifts[row.key]}
-                                value={cellVal}
-                                onChange={(e) =>
-                                  !isViewOnly && handleChange(row.key, param.key, e.target.value)
-                                }
-                                placeholder={isViewOnly || lockedShifts[row.key] ? '—' : '0.00'}
-                                title={
-                                  limit
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%, Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
-                                      : hasValue
-                                      ? `Normal: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%)`
-                                      : `Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}% (Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
-                                    : ''
-                                }
-                                className={`w-full mx-auto text-center text-xs font-mono font-bold px-2 py-1.5 rounded-lg border shadow-2xs transition-all ${
-                                  isViewOnly || lockedShifts[row.key]
-                                    ? isOutOfLimit
-                                      ? 'bg-rose-50 text-rose-900 border-rose-300 font-black cursor-default select-text'
-                                      : 'bg-slate-50 text-slate-500 border-slate-200 cursor-default select-text opacity-80'
-                                    : isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
-                                    : styles.inputFocus
-                                }`}
-                                aria-label={`${row.label} ${param.label}`}
-                              />
+                              {(() => {
+                                const isLocked = lockedShifts[row.key];
+                                const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
+                                const isDisabled = isViewOnly || isLocked || isWaiting;
+                                return (
+                                  <input
+                                    id={`psa-input-${row.key}-${param.key}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    readOnly={isDisabled}
+                                    disabled={isDisabled}
+                                    value={cellVal}
+                                    onChange={(e) =>
+                                      !isViewOnly && handleChange(row.key, param.key, e.target.value)
+                                    }
+                                    placeholder={isDisabled ? '—' : '0.00'}
+                                    title={
+                                      limit
+                                        ? isOutOfLimit
+                                          ? `OUT OF LIMIT: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%, Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
+                                          : hasValue
+                                          ? `Normal: ${cellVal}% (Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}%)`
+                                          : `Allowed range: ${limit.min.toFixed(2)}% – ${limit.max.toFixed(2)}% (Target: ${limit.target.toFixed(2)} ± ${limit.tolerance.toFixed(2)}%)`
+                                        : ''
+                                    }
+                                    className={`w-full mx-auto text-center text-xs font-mono font-bold px-2 py-1.5 rounded-lg border shadow-2xs transition-all ${
+                                      isDisabled
+                                        ? isOutOfLimit
+                                          ? 'bg-rose-50 text-rose-900 border-rose-300 font-black cursor-default select-text'
+                                          : 'bg-slate-50 text-slate-500 border-slate-200 cursor-default select-text opacity-80'
+                                        : isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                        : styles.inputFocus
+                                    }`}
+                                    aria-label={`${row.label} ${param.label}`}
+                                  />
+                                );
+                              })()}
                               {isOutOfLimit && (
                                 <span
                                   className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"

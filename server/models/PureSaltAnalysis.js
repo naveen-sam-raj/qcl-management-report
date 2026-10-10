@@ -71,6 +71,10 @@ const pureSaltAnalysisSchema = new mongoose.Schema(
       shift2: { type: Boolean, default: false },
       shift3: { type: Boolean, default: false },
       composition: { type: Boolean, default: false },
+      shift1Saved: { type: Boolean, default: false },
+      shift2Saved: { type: Boolean, default: false },
+      shift3Saved: { type: Boolean, default: false },
+      shift3Edits: { type: Number, default: 0 },
     },
     submittedBy: {
       type: String,
