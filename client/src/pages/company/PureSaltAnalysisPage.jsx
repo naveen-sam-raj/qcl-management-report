@@ -136,6 +136,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
   const [lockedShifts, setLockedShifts] = useState({});
+  const [originalData, setOriginalData] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
 
   // EmailJS & Excel Reporting States
   const [recipientEmail, setRecipientEmail] = useState(
@@ -164,25 +167,31 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
           
           if (record && record.rows) {
             setData(record.rows);
+            setOriginalData(JSON.parse(JSON.stringify(record.rows)));
             setLockedShifts(record.lockedShifts || {});
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
+            setOriginalData(JSON.parse(JSON.stringify(record.data)));
             setLockedShifts(record.lockedShifts || {});
           } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
+            setOriginalData(JSON.parse(JSON.stringify(record)));
             setLockedShifts(record.lockedShifts || {});
           } else {
             setData(buildEmptyData());
+            setOriginalData(null);
             setLockedShifts({});
           }
         } else {
           setData(buildEmptyData());
+          setOriginalData(null);
           setLockedShifts({});
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
+        setOriginalData(null);
         setLockedShifts({});
       }
     };
@@ -220,6 +229,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     setLastSavedRecord(null);
     setLastExcelData(null);
     setLockedShifts({});
+    setOriginalData(null);
     showToast('Form cleared successfully.', 'info');
   };
 
@@ -298,12 +308,61 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     }
   };
 
-  // ── Section 2 & 3: Save to MongoDB, Generate Excel & Send via Nodemailer Backend ──
-  const handleSave = async () => {
-    if (!validate()) {
+  const handleSaveClick = () => {
+    if (!validate()) return;
+    
+    const targetRows = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
+    const shiftDisplayNames = {
+      rawSalt: 'RAW SALT',
+      shift1: 'I SHIFT',
+      shift2: 'II SHIFT',
+      shift3: 'III SHIFT',
+      composition: 'COMPOSITION'
+    };
+    
+    const isDiff = (oldRow, newRow) => {
+      if (!oldRow && newRow) return true;
+      if (oldRow && !newRow) return false;
+      return Object.keys(newRow).some(k => {
+        let oldVal = oldRow[k];
+        if (oldVal === undefined) oldVal = null;
+        let newVal = newRow[k];
+        if (newVal === undefined || newVal === '') newVal = null;
+        return String(oldVal) !== String(newVal);
+      });
+    };
+    
+    let toSave = [];
+    let isFinalEdit = false;
+    for (const key of targetRows) {
+      const hasData = data[key] && Object.values(data[key]).some(val => val !== null && val !== '');
+      const canEdit = !lockedShifts[key] && !(key === 'shift2' && !lockedShifts.shift1Saved) && !(key === 'shift3' && !lockedShifts.shift2Saved);
+      if (hasData && canEdit) {
+        const diff = isDiff(originalData ? originalData[key] : null, data[key]);
+        if (diff) {
+          toSave.push({ key, name: shiftDisplayNames[key], values: data[key] });
+          if (key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
+            isFinalEdit = true;
+          }
+        }
+      }
+    }
+    
+    if (toSave.length === 0) {
+      showToast('No new unlocked changes to save.', 'info');
       return;
     }
+    
+    setConfirmData({
+      date,
+      shifts: toSave,
+      isFinalEdit
+    });
+    setShowConfirmModal(true);
+  };
 
+  // ── Section 2 & 3: Save to MongoDB, Generate Excel & Send via Nodemailer Backend ──
+  const handleConfirmSave = async () => {
     // Stage 1: "Saving..."
     setSaving(true);
     setSavePhase('saving');
@@ -336,12 +395,13 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       // Step: Send data to backend API (handles DB Save + ExcelJS Generate + Nodemailer Email with .xlsx attachment)
       response = await api.post('/pure-salt-analysis', payload);
     } catch (err) {
-      setSaving(false);
       setSavePhase('idle');
       console.error('[PureSaltAnalysis] Database save failed:', err);
 
       // Section 12: If MongoDB save fails: "Unable to save the data. Please try again."
-      showToast('Unable to save the data. Please try again.', 'error');
+      showToast(err.response?.data?.message || 'Unable to save the data. Please try again.', 'error');
+      // DO NOT close modal if there's a backend validation error, just let them see the error and retry or close it themselves. Or close it and let them fix it.
+      setShowConfirmModal(false);
       return;
     }
 
@@ -350,6 +410,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       setSaving(false);
       setSavePhase('idle');
       showToast('Unable to save the data. Please try again.', 'error');
+      setShowConfirmModal(false);
       return;
     }
 
@@ -360,6 +421,10 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     if (savedRecord?.lockedShifts) {
       setLockedShifts(savedRecord.lockedShifts);
     }
+    if (savedRecord?.rows) {
+      setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
+    }
+    setShowConfirmModal(false);
 
     // Stage 2: "Generating Report..."
     setSavePhase('generating');
@@ -495,7 +560,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
                 <button
                   id="btn-psa-save"
-                  onClick={handleSave}
+                  onClick={handleSaveClick}
                   disabled={saving}
                   className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-75 cursor-pointer ${
                     savePhase === 'completed'
