@@ -104,6 +104,8 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
             setData(record);
           } else if (record.data && record.data.rows) {
             setData(record.data.rows);
+          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
+            setData(record);
           } else {
             setData(buildEmptyData());
           }

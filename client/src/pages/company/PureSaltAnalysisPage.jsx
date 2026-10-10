@@ -159,12 +159,16 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
             setData(record.rows);
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
+          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
+            setData(record);
           } else {
             setData(buildEmptyData());
           }
-        } else {
-          setData(buildEmptyData());
-        }
+        } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
+            setData(record);
+          } else {
+            setData(buildEmptyData());
+          }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());

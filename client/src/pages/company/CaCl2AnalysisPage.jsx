@@ -93,6 +93,8 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
             setReadings(record);
           } else if (record.data && record.data.readings) {
             setReadings(record.data.readings);
+          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
+            setData(record);
           } else {
             setData(buildEmptyData());
           }
