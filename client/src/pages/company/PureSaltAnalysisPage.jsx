@@ -150,7 +150,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/pure-salt-analysis?date=${date}`);
+        const response = await api.get(`/pure-salt-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const records = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
           const record = records.find(r => r.date === date) || records[0];

@@ -97,7 +97,7 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/brine-analysis?date=${date}`);
+        const response = await api.get(`/brine-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

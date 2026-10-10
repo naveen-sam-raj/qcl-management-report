@@ -303,7 +303,7 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
       // Fetch accurate real-time records from MongoDB backend
       let savedRecords = [];
       try {
-        const res = await api.get(`/api/pure-salt-analysis?startDate=${dateFrom}&endDate=${dateTo}`);
+        const res = await api.get(`/pure-salt-analysis?startDate=${dateFrom}&endDate=${dateTo}`);
         if (res.data?.success && Array.isArray(res.data.data)) {
           savedRecords = res.data.data;
         }

@@ -68,7 +68,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/cooling-water-analysis?date=${date}&unit=${encodeURIComponent(is200 ? 'cooling water 200#' : 'cooling water')}`);
+        const response = await api.get(`/cooling-water-analysis?date=${date}&unit=${encodeURIComponent(is200 ? 'cooling water 200#' : 'cooling water')}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

@@ -180,7 +180,7 @@ const TK401SAAnalysisPage = ({ plantId = "sa" }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/sa-tk-401-analysis?date=${date}`);
+        const response = await api.get(`/sa-tk-401-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

@@ -48,7 +48,7 @@ const PlantDetailsPage = () => {
       try {
         setLoading(true);
         // Find plant by id via API
-        const response = await api.get(`/api/plants/${id}`);
+        const response = await api.get(`/plants/${id}`);
         if (response.data?.success && response.data?.plant) {
           setPlant(response.data.plant);
           if (response.data.telemetry && response.data.telemetry.length > 0) {

@@ -89,7 +89,7 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/acl-product?date=${date}`);
+        const response = await api.get(`/acl-product?date=${date}`);
         if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
           const record = response.data.data[0];
           if (record) {

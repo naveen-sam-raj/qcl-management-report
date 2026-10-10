@@ -188,7 +188,7 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/bicarbonate-moisture?date=${date}`);
+        const response = await api.get(`/bicarbonate-moisture?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

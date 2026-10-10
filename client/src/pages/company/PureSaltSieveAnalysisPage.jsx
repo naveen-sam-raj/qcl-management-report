@@ -107,7 +107,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/pure-salt-sieve-analysis?date=${date}`);
+        const response = await api.get(`/pure-salt-sieve-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

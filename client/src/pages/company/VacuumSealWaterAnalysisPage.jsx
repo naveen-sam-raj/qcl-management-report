@@ -60,7 +60,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/vacuum-seal-water?date=${date}`);
+        const response = await api.get(`/vacuum-seal-water?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

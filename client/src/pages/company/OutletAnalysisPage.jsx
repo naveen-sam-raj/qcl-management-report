@@ -132,7 +132,7 @@ const OutletAnalysisPage = ({ plantId = 'co2' }) => {
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/api/outlet-analysis?date=${date}`);
+        const response = await api.get(`/outlet-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;

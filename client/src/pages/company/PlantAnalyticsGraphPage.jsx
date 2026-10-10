@@ -165,7 +165,7 @@ const PlantAnalyticsGraphPage = ({ plantId, plantTitle }) => {
         to: toDate,
       });
 
-      const res = await api.get(`/api/tfl/plant-analytics/${plantKey}?${params.toString()}`);
+      const res = await api.get(`/tfl/plant-analytics/${plantKey}?${params.toString()}`);
       if (res.data?.success) {
         setPlantData(res.data);
       } else {

@@ -64,7 +64,7 @@ const UserProfileDashboard = () => {
       if (plant) {
         const plantId = plant._id || plant.code || plant.name || plant;
         try {
-          const resTelemetry = await api.get(`/api/plants/${plantId}`);
+          const resTelemetry = await api.get(`/plants/${plantId}`);
           if(resTelemetry.data?.telemetry && resTelemetry.data.telemetry.length > 0) {
             setTelemetry(resTelemetry.data.telemetry);
           } else {
@@ -78,7 +78,7 @@ const UserProfileDashboard = () => {
       // Fetch real reports for this user
       try {
         const [reportsRes, psaRes] = await Promise.allSettled([
-          api.get(`/api/reports?userId=${userId}`),
+          api.get(`/reports?userId=${userId}`),
           api.get('/api/pure-salt-analysis')
         ]);
 

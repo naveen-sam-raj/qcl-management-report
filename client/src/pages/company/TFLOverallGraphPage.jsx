@@ -168,7 +168,7 @@ const TFLOverallGraphPage = () => {
         plants: selectedPlants.join(','),
       });
 
-      const res = await api.get(`/api/tfl/overall-analytics?${params.toString()}`);
+      const res = await api.get(`/tfl/overall-analytics?${params.toString()}`);
       if (res.data?.success) {
         setAnalyticsData(res.data);
       } else {
