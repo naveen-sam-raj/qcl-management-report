@@ -217,7 +217,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
     // Clear global success on any edit
     setSaveSuccess(false);
-  }, []);
+  }, [lockedShifts]);
 
   const handleReset = () => {
     setData(buildEmptyData());

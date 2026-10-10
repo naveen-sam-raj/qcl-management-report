@@ -19,218 +19,165 @@ router.post('/', protect, async (req, res) => {
   try {
     const payload = req.body;
 
-    // ── 1. Validate payload (respects PURE_SALT_LIMIT_VALIDATION_ENABLED feature flag) ──
+    const { validateAnalysisPayload } = require('../services/analysisValidation');
     const validation = validateAnalysisPayload(payload);
     if (!validation.isValid) {
-      return res.status(400).json({
-        success: false,
-        message: validation.errors[0] || 'Validation failed. Please verify submitted data.',
-        errors: validation.errors,
-        errorDetails: validation.errorDetails,
-      });
+      return res.status(400).json({ success: false, message: validation.errors[0], errors: validation.errors });
     }
 
     if (!payload.date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis date is required.',
-      });
+      return res.status(400).json({ success: false, message: 'Analysis date is required.' });
     }
 
-    // ── 2. Format filename & document structure ───────────────────────────
-    const formattedDate = payload.date.includes('-')
-      ? payload.date.split('-').length === 3 && payload.date.split('-')[0].length === 4
-        ? `${payload.date.split('-')[2]}-${payload.date.split('-')[1]}-${payload.date.split('-')[0]}`
-        : payload.date
-      : payload.date;
-
-    const reportFileName = `ACL_Plant_Pure_Salt_Analysis_${formattedDate}.xlsx`;
-
-    // ── Dynamic Plant-Wise User Resolution from MongoDB ──
     const plantTarget = payload.plant || 'ACL Plant';
-    const { primaryEmail: assignedEmail } = await getPlantAssignedUser(plantTarget, { analysisType: 'Pure Salt Analysis' });
-
-    const newAnalysisData = {
-      date: payload.date,
-      plant: payload.plant || 'ACL Plant',
-      analysisType: payload.analysisType || 'Pure Salt Analysis',
-      shift: payload.shift || 'All Shifts (I, II, III)',
-      rows: payload.rows,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id || null,
-      company: req.user?.company?._id || req.user?.company || null,
-      emailRecipient: assignedEmail || '',
-      emailStatus: 'pending',
-      savedAt: new Date(),
-    };
-
-    // ── 3. Save to MongoDB Atlas First (MANDATORY BEFORE EMAIL) ───────────
-    let savedRecord = null;
-    let newlySavedShifts = [];
     const targetRows = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
+    const newlySavedShifts = [];
+    let savedRecord;
 
-    const shiftDisplayNames = {
-      rawSalt: 'RAW SALT',
-      shift1: 'I SHIFT',
-      shift2: 'II SHIFT',
-      shift3: 'III SHIFT',
-      composition: 'COMPOSITION'
+    const query = {
+      date: payload.date,
+      plant: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
+      analysisType: payload.analysisType || 'Pure Salt Analysis',
+    };
+    if (req.user && req.user.company) {
+      query.$or = [{ company: req.user.company }, { company: null }];
+    }
+
+    let existingRecord = await PureSaltAnalysis.findOne(query);
+
+    // Instead of checking non-zero values, check if the frontend actually sent any numbers (including 0)
+    const hasData = (rowObj) => rowObj && Object.values(rowObj).some(val => val !== null && val !== '');
+    
+    const isDiff = (oldRow, newRow) => {
+      if (!oldRow && newRow) return true;
+      if (oldRow && !newRow) return false;
+      return Object.keys(newRow).some(k => {
+        let oldVal = oldRow[k] ?? null;
+        let newVal = newRow[k] ?? null;
+        if (newVal === '') newVal = null;
+        return oldVal !== newVal;
+      });
     };
 
-    try {
-      if (PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
-        const query = {
-          date: payload.date,
-          plant: payload.plant || 'ACL Plant',
-          analysisType: payload.analysisType || 'Pure Salt Analysis',
-        };
-        if (req.user && req.user.company) {
-          query.$or = [{ company: req.user.company }, { company: null }];
+    if (existingRecord) {
+      const willSave = {};
+      
+      // Check if user is trying to edit locked shifts
+      for (const key of targetRows) {
+        if (hasData(payload.rows[key]) && existingRecord.lockedShifts[key]) {
+          if (isDiff(existingRecord.rows[key], payload.rows[key])) {
+             return res.status(400).json({ success: false, message: `Cannot edit ${key} because it is locked.` });
+          }
         }
-
-        const isDiff = (oldRow, newRow) => {
-          if (!oldRow && newRow) return true;
-          if (oldRow && !newRow) return false;
-          return Object.keys(newRow).some(k => {
-            let oldVal = oldRow[k];
-            if (oldVal === undefined) oldVal = null;
-            let newVal = newRow[k];
-            if (newVal === undefined || newVal === '') newVal = null;
-            return oldVal !== newVal;
-          });
-        };
-        const hasData = (rowObj) => rowObj && Object.values(rowObj).some(val => val !== null && val !== '');
-
-        let existingRecord = await PureSaltAnalysis.findOne(query);
-
-        if (existingRecord) {
-          let s1Saved = existingRecord.lockedShifts.shift1Saved;
-          let s2Saved = existingRecord.lockedShifts.shift2Saved;
-          let s3Saved = existingRecord.lockedShifts.shift3Saved;
-          let s3Edits = existingRecord.lockedShifts.shift3Edits || 0;
-
-          const willSave = {};
-          for (const key of targetRows) {
-            const dataPresent = hasData(payload.rows[key]);
-            const diff = isDiff(existingRecord.rows[key], payload.rows[key]);
-            if (dataPresent && diff && !existingRecord.lockedShifts[key]) {
-              willSave[key] = true;
-            }
-          }
-
-          let newS1Saved = s1Saved || willSave.shift1;
-          let newS2Saved = s2Saved || willSave.shift2;
-          let newS3Saved = s3Saved || willSave.shift3;
-
-          if (willSave.shift2 && !newS1Saved) {
-            return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
-          }
-          if (willSave.shift3 && !newS2Saved) {
-            return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
-          }
-          if (willSave.shift3 && s3Saved && s3Edits >= 1) {
-            return res.status(400).json({ success: false, message: 'III SHIFT has already reached its maximum edit limit.' });
-          }
-
-          for (const key of targetRows) {
-            if (willSave[key]) {
-              existingRecord.rows[key] = payload.rows[key];
-              newlySavedShifts.push(key);
-              
-              if (key === 'rawSalt') existingRecord.lockedShifts.rawSalt = true;
-              if (key === 'composition') existingRecord.lockedShifts.composition = true;
-              
-              if (key === 'shift1') existingRecord.lockedShifts.shift1Saved = true;
-              if (key === 'shift2') existingRecord.lockedShifts.shift2Saved = true;
-              if (key === 'shift3') {
-                 if (!existingRecord.lockedShifts.shift3Saved) {
-                   existingRecord.lockedShifts.shift3Saved = true;
-                 } else {
-                   existingRecord.lockedShifts.shift3Edits += 1;
-                 }
-              }
-            }
-          }
-
-          if (existingRecord.lockedShifts.shift2Saved) {
-            existingRecord.lockedShifts.shift1 = true;
-          }
-          if (existingRecord.lockedShifts.shift3Saved) {
-            existingRecord.lockedShifts.shift2 = true;
-          }
-          if (existingRecord.lockedShifts.shift3Saved && existingRecord.lockedShifts.shift3Edits >= 1) {
-            existingRecord.lockedShifts.shift3 = true;
-          }
-
-          if (newlySavedShifts.length === 0) {
-            return res.status(400).json({ success: false, message: 'No unlocked shifts with valid new data were found to save.' });
-          }
-
-          existingRecord.markModified('rows');
-          existingRecord.markModified('lockedShifts');
-
-          existingRecord.submittedBy = req.user?.name || payload.submittedBy || 'Plant Operator';
-          existingRecord.submittedById = req.user?._id || null;
-          existingRecord.savedAt = new Date();
-          savedRecord = await existingRecord.save();
-        } else {
-          const lockedShifts = {
-            rawSalt: false, shift1: false, shift2: false, shift3: false, composition: false,
-            shift1Saved: false, shift2Saved: false, shift3Saved: false, shift3Edits: 0
-          };
-          const willSave = {};
-          
-          for (const key of targetRows) {
-            const dataPresent = hasData(payload.rows[key]);
-            if (dataPresent) {
-              willSave[key] = true;
-            }
-          }
-
-          if (willSave.shift2 && !willSave.shift1) {
-            return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
-          }
-          if (willSave.shift3 && !willSave.shift2) {
-            return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
-          }
-
-          for (const key of targetRows) {
-            if (willSave[key]) {
-              newlySavedShifts.push(key);
-              if (key === 'rawSalt') lockedShifts.rawSalt = true;
-              if (key === 'composition') lockedShifts.composition = true;
-              if (key === 'shift1') lockedShifts.shift1Saved = true;
-              if (key === 'shift2') lockedShifts.shift2Saved = true;
-              if (key === 'shift3') lockedShifts.shift3Saved = true;
-            }
-          }
-          
-          if (lockedShifts.shift2Saved) lockedShifts.shift1 = true;
-          if (lockedShifts.shift3Saved) lockedShifts.shift2 = true;
-
-          if (newlySavedShifts.length === 0) {
-            return res.status(400).json({ success: false, message: 'No data provided to save.' });
-          }
-
-          savedRecord = await PureSaltAnalysis.create({
-            ...newAnalysisData,
-            lockedShifts
-          });
-        }
-      } else {
-        // Fallback if DB disconnected
-        return res.status(500).json({ success: false, message: 'Database connection error' });
       }
-    } catch (dbErr) {
-      console.error('[PureSaltAnalysis] Database Save Failure:', dbErr);
-      return res.status(500).json({
-        success: false,
-        message: 'Unable to save the data. Please try again.',
-        error: dbErr.message,
+
+      for (const key of targetRows) {
+        if (hasData(payload.rows[key]) && isDiff(existingRecord.rows[key], payload.rows[key]) && !existingRecord.lockedShifts[key]) {
+          willSave[key] = true;
+        }
+      }
+
+      let newS1Saved = existingRecord.lockedShifts.shift1Saved || willSave.shift1;
+      let newS2Saved = existingRecord.lockedShifts.shift2Saved || willSave.shift2;
+      let newS3Saved = existingRecord.lockedShifts.shift3Saved || willSave.shift3;
+
+      if (willSave.shift2 && !newS1Saved) {
+        return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
+      }
+      if (willSave.shift3 && !newS2Saved) {
+        return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
+      }
+      if (willSave.shift3 && existingRecord.lockedShifts.shift3Saved && (existingRecord.lockedShifts.shift3Edits || 0) >= 1) {
+        return res.status(400).json({ success: false, message: 'III SHIFT has already reached its maximum edit limit.' });
+      }
+
+      for (const key of targetRows) {
+        if (willSave[key]) {
+          existingRecord.rows[key] = payload.rows[key];
+          newlySavedShifts.push(key);
+        }
+      }
+
+      if (newlySavedShifts.length === 0) {
+        return res.status(400).json({ success: false, message: 'No unlocked shifts with valid new data were found to save.' });
+      }
+
+      if (willSave.rawSalt) existingRecord.lockedShifts.rawSalt = true;
+      if (willSave.composition) existingRecord.lockedShifts.composition = true;
+      
+      if (willSave.shift1) existingRecord.lockedShifts.shift1Saved = true;
+      if (willSave.shift2) existingRecord.lockedShifts.shift2Saved = true;
+      if (willSave.shift3) {
+         if (!existingRecord.lockedShifts.shift3Saved) {
+           existingRecord.lockedShifts.shift3Saved = true;
+         } else {
+           existingRecord.lockedShifts.shift3Edits = (existingRecord.lockedShifts.shift3Edits || 0) + 1;
+         }
+      }
+
+      if (existingRecord.lockedShifts.shift2Saved) existingRecord.lockedShifts.shift1 = true;
+      if (existingRecord.lockedShifts.shift3Saved) existingRecord.lockedShifts.shift2 = true;
+      if (existingRecord.lockedShifts.shift3Saved && (existingRecord.lockedShifts.shift3Edits || 0) >= 1) {
+        existingRecord.lockedShifts.shift3 = true;
+      }
+
+      existingRecord.markModified('rows');
+      existingRecord.markModified('lockedShifts');
+      existingRecord.submittedBy = req.user?.name || payload.submittedBy || 'Plant Operator';
+      existingRecord.submittedById = req.user?._id || null;
+      existingRecord.savedAt = new Date();
+      savedRecord = await existingRecord.save();
+    } else {
+      const willSave = {};
+      const lockedShifts = {
+        rawSalt: false, shift1: false, shift2: false, shift3: false, composition: false,
+        shift1Saved: false, shift2Saved: false, shift3Saved: false, shift3Edits: 0
+      };
+
+      for (const key of targetRows) {
+        if (hasData(payload.rows[key])) {
+          willSave[key] = true;
+        }
+      }
+
+      if (willSave.shift2 && !willSave.shift1) {
+        return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
+      }
+      if (willSave.shift3 && !willSave.shift2) {
+        return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
+      }
+
+      for (const key of targetRows) {
+        if (willSave[key]) {
+          newlySavedShifts.push(key);
+          if (key === 'rawSalt') lockedShifts.rawSalt = true;
+          if (key === 'composition') lockedShifts.composition = true;
+          if (key === 'shift1') lockedShifts.shift1Saved = true;
+          if (key === 'shift2') lockedShifts.shift2Saved = true;
+          if (key === 'shift3') lockedShifts.shift3Saved = true;
+        }
+      }
+
+      if (lockedShifts.shift2Saved) lockedShifts.shift1 = true;
+      if (lockedShifts.shift3Saved) lockedShifts.shift2 = true;
+
+      if (newlySavedShifts.length === 0) {
+        return res.status(400).json({ success: false, message: 'No data provided to save.' });
+      }
+
+      savedRecord = await PureSaltAnalysis.create({
+        date: payload.date,
+        plant: plantTarget,
+        analysisType: payload.analysisType || 'Pure Salt Analysis',
+        shift: payload.shift || 'All Shifts (I, II, III)',
+        rows: payload.rows,
+        company: req.user?.company?._id || req.user?.company || null,
+        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+        submittedById: req.user?._id || null,
+        lockedShifts
       });
     }
 
-    // Cache in memory array as well
     analysisRecords.unshift(savedRecord.toObject ? savedRecord.toObject() : savedRecord);
 
     // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
