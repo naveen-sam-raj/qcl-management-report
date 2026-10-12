@@ -9,6 +9,7 @@ const MongooseActivityLog = require('./ActivityLog');
 const MongooseSuperAdmin = require('./SuperAdmin');
 
 const MongoosePureSaltAnalysis = require('./PureSaltAnalysis');
+const MongoosePureSaltSieveAnalysis = require('./PureSaltSieveAnalysis');
 
 const MongoosePlantAnalysisRecord = require('./PlantAnalysisRecord');
 
@@ -44,6 +45,7 @@ module.exports = {
   Report: createModelProxy(MongooseReport, 'reports'),
   ActivityLog: createModelProxy(MongooseActivityLog, 'logs'),
   PureSaltAnalysis: createModelProxy(MongoosePureSaltAnalysis, 'pureSaltAnalyses'),
+  PureSaltSieveAnalysis: createModelProxy(MongoosePureSaltSieveAnalysis, 'pureSaltSieveAnalyses'),
   PlantAnalysisRecord: createModelProxy(MongoosePlantAnalysisRecord, 'plantAnalysisRecords'),
   isMongooseConnected,
 };

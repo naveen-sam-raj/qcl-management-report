@@ -628,7 +628,18 @@ const executeSaveAndEmailWorkflow = async ({
   const excelFileName = `${cleanCode}_Plant_${cleanType}_${filenameDate}.xlsx`;
 
   try {
-    if (analysisType === 'Pure Salt Analysis' || cleanType.toLowerCase().includes('pure_salt')) {
+    if (analysisType === 'Pure Salt Sieve Analysis' || cleanType.toLowerCase().includes('pure_salt_sieve')) {
+      const { generatePureSaltSieveAnalysisExcel } = require('./excelService');
+      excelResult = await generatePureSaltSieveAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (analysisType === 'Pure Salt Analysis' || (cleanType.toLowerCase().includes('pure_salt') && !cleanType.toLowerCase().includes('sieve'))) {
       const { generatePureSaltAnalysisExcel } = require('./excelService');
       excelResult = await generatePureSaltAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),

@@ -1362,9 +1362,267 @@ const generateGasConcExcel = async (data) => {
   };
 };
 
+/**
+ * Generates an authentic .xlsx Excel workbook for Pure Salt Sieve Analysis using ExcelJS.
+ * Sheet Name: "Pure Salt Sieve Analysis"
+ * Title: "PURE SALT SIEVE ANALYSIS"
+ * Subtitle: "Tuticorin Alkali Chemicals and Fertilizers Limited - ACL Plant"
+ *
+ * @param {Object} data - Analysis data containing date, plant, shift, rows, submittedBy
+ * @returns {Promise<{ filename: string, buffer: Buffer, base64: string }>}
+ */
+const generatePureSaltSieveAnalysisExcel = async (data) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Tuticorin Alkali Chemicals and Fertilizers Limited - ACL Plant';
+  workbook.lastModifiedBy = data.submittedBy || 'Plant Admin';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = `ACL_Plant_Pure_Salt_Sieve_Analysis_${formattedDate}.xlsx`;
+
+  const worksheet = workbook.addWorksheet('Pure Salt Sieve Analysis', {
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true },
+    views: [{ showGridLines: true }],
+  });
+
+  worksheet.columns = [
+    { key: 'paramShift', width: 28 }, // B S S / Shift
+    { key: 'p18',  width: 18 },       // BSS 18 (%)
+    { key: 'p44',  width: 18 },       // BSS 44 (%)
+    { key: 'p60',  width: 18 },       // BSS 60 (%)
+    { key: 'p100', width: 18 },       // BSS 100 (%)
+    { key: 'm100', width: 18 },       // -100 (%)
+  ];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  const formatCellValue = (val) => {
+    if (
+      val === null ||
+      val === undefined ||
+      String(val).trim() === '' ||
+      String(val).trim() === '—' ||
+      String(val).trim() === '-' ||
+      String(val).trim() === 'null' ||
+      String(val).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? val : n;
+  };
+
+  // 1. Title
+  worksheet.mergeCells('A1:F1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'PURE SALT SIEVE ANALYSIS';
+  titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 32;
+
+  // 2. Subtitle
+  worksheet.mergeCells('A2:F2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = 'Tuticorin Alkali Chemicals and Fertilizers Limited - ACL Plant';
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E293B' } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 20;
+
+  // 3. Metadata box
+  const metaRows = [
+    { row: 3, label1: 'Date:', val1: data.date || '—', label2: 'Shift:', val2: data.shift || 'All Shifts (I, II, III)' },
+    { row: 4, label1: 'Plant:', val1: 'ACL Plant (Pure Salt Sieve)', label2: 'Submitted By:', val2: data.submittedBy || 'Plant Operator' },
+    { row: 5, label1: 'Saved Timestamp:', val1: `${data.savedDateFormatted || ''} ${data.savedTimeFormatted || ''}`.trim() || '—', label2: 'Record Status:', val2: 'Official Recorded Sieve Data' },
+  ];
+
+  metaRows.forEach(({ row, label1, val1, label2, val2 }) => {
+    worksheet.mergeCells(`B${row}:C${row}`);
+    worksheet.mergeCells(`E${row}:F${row}`);
+
+    const cA = worksheet.getCell(`A${row}`);
+    cA.value = label1;
+    cA.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    cA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    cA.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    cA.border = metaBorder;
+
+    const cB = worksheet.getCell(`B${row}`);
+    cB.value = val1;
+    cB.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+    cB.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+    cB.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    cB.border = metaBorder;
+
+    const cD = worksheet.getCell(`D${row}`);
+    cD.value = label2;
+    cD.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    cD.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    cD.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    cD.border = metaBorder;
+
+    const cE = worksheet.getCell(`E${row}`);
+    cE.value = val2;
+    cE.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+    cE.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+    cE.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    cE.border = metaBorder;
+
+    worksheet.getRow(row).height = 20;
+  });
+
+  worksheet.getRow(6).height = 10;
+
+  // 4. Headers Row
+  const headers = ['B S S / SHIFT', 'BSS 18 (%)', 'BSS 44 (%)', 'BSS 60 (%)', 'BSS 100 (%)', '-100 (%)'];
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = headers;
+  headerRow.height = 26;
+
+  headers.forEach((_, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = {
+      top: { style: 'medium', color: { argb: 'FF091E3A' } },
+      bottom: { style: 'medium', color: { argb: 'FF091E3A' } },
+      left: { style: 'thin', color: { argb: 'FF475569' } },
+      right: { style: 'thin', color: { argb: 'FF475569' } },
+    };
+  });
+  headerRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+
+  const getRowData = (key) => {
+    if (!data.rows) return {};
+    if (data.rows[key]) return data.rows[key];
+    return {};
+  };
+
+  const colKeys = ['p18', 'p44', 'p60', 'p100', 'm100'];
+
+  const shiftConfigs = [
+    { rowNum: 8, key: 'shift1', label: 'I SHIFT',   fillColor: 'FFF8FAFC' },
+    { rowNum: 9, key: 'shift2', label: 'II SHIFT',  fillColor: 'FFF1F5F9' },
+    { rowNum: 10, key: 'shift3', label: 'III SHIFT', fillColor: 'FFF8FAFC' },
+  ];
+
+  shiftConfigs.forEach((cfg) => {
+    const sData = getRowData(cfg.key);
+    const row = worksheet.getRow(cfg.rowNum);
+    row.values = [
+      cfg.label,
+      formatCellValue(sData.p18),
+      formatCellValue(sData.p44),
+      formatCellValue(sData.p60),
+      formatCellValue(sData.p100),
+      formatCellValue(sData.m100),
+    ];
+    row.height = 24;
+
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cfg.fillColor } };
+
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else {
+        const colKey = colKeys[c - 2];
+        const cellNum = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+
+        // Tolerance limits apply strictly to II SHIFT
+        let isShiftOutOfLimit = false;
+        let limit = null;
+        if (cfg.key === 'shift2') {
+          limit = getCellLimit('acl', 'pure-salt-sieve', 'shift2', colKey);
+          if (limit && !isNaN(cellNum)) {
+            const min = limit.min;
+            const max = limit.max;
+            if (min !== undefined && max !== undefined) {
+              if (cellNum < min - 0.0001 || cellNum > max + 0.0001) isShiftOutOfLimit = true;
+            } else if (max !== undefined && cellNum > max + 0.0001) {
+              isShiftOutOfLimit = true;
+            } else if (min !== undefined && cellNum < min - 0.0001) {
+              isShiftOutOfLimit = true;
+            }
+          }
+        }
+
+        if (isShiftOutOfLimit && limit) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFDC2626' } };
+          cell.note = `OUT OF SIEVE LIMIT: ${cellNum}%\nAllowed Range: ${limit.formattedRange || ''}`;
+        } else {
+          cell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF1E293B' } };
+        }
+
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.0';
+      }
+    }
+  });
+
+  // Footer Reference Row: Official II SHIFT Tolerance Limits
+  const specRow = worksheet.getRow(11);
+  specRow.values = [
+    'II SHIFT LIMITS (SPEC)',
+    '1.0% Max',
+    '30.0% Max',
+    '30.0% – 50.0%',
+    '15.0% – 30.0%',
+    '2.0% Max',
+  ];
+  specRow.height = 22;
+  for (let c = 1; c <= 6; c++) {
+    const cell = specRow.getCell(c);
+    cell.border = thinBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+    if (c === 1) {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, italic: true, color: { argb: 'FF1E3A8A' } };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    } else {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF1D4ED8' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  }
+
+  // Footer note
+  worksheet.mergeCells('A13:F13');
+  const footerCell = worksheet.getCell('A13');
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (ACL Pure Salt Sieve Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(13).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
+  generatePureSaltSieveAnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,
