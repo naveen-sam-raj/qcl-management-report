@@ -4,20 +4,50 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 
-// In-memory / cache storage for TK 209 analysis records
+// In-memory fallback
 const tk209Records = [];
 
 // Apply authentication middleware
 router.use(protect);
 
+const SHIFT_DISPLAY_NAMES = {
+  shift1: 'I SHIFT',
+  shift2: 'II SHIFT',
+  shift3: 'III SHIFT',
+};
+
+const SHIFT_PARAMETERS = ['fnh3', 'cnh3', 'tcl', 'pcl'];
+
+// Asia/Kolkata date helper
+const getTodayKolkata = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
+};
+
 /**
- * @desc    Save TK 209 Analysis data (Once in a shift)
+ * @desc    Save TK 209 Analysis data (Shift-wise workflow, today date restriction, locking & instant email)
  * @route   POST /api/tk-209-analysis
  * @access  Private
  */
 router.post('/', async (req, res) => {
   try {
     const payload = req.body;
+
+    // 1. Authorization: Standard users in View-Only mode cannot modify TK 209
+    if (req.user && req.user.role === 'user') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: TK 209 Analysis data entry and modification is restricted to Company Admins.',
+      });
+    }
 
     const validation = validateAnalysisPayload(payload);
     if (!validation.isValid) {
@@ -35,78 +65,303 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Record creation
-    const record = {
-      id: `tk209_${Date.now()}`,
+    // 2. Strict Today's Date Restriction (Asia/Kolkata)
+    const todayKolkata = getTodayKolkata();
+    if (payload.date !== todayKolkata) {
+      return res.status(400).json({
+        success: false,
+        message: `Date restriction enforced: TK 209 Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+      });
+    }
+
+    const plantTarget = payload.plant || 'ACL Plant';
+    const targetShifts = ['shift1', 'shift2', 'shift3'];
+    const newlySavedShifts = [];
+
+    // Query existing record for this date
+    const query = {
       date: payload.date,
-      plant: payload.plant || 'ACL',
-      analysisType: payload.analysisType || 'TK 209 Analysis',
+      plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
+      analysisType: 'TK 209 Analysis',
+    };
+    if (req.user && req.user.company) {
+      query.$or = [{ company: req.user.company }, { company: null }];
+    }
+
+    let existingDoc = await PlantAnalysisRecord.findOne(query);
+    let existingData = existingDoc?.data || {};
+    let existingRows = existingData.rows || existingData.shifts || existingData.readings || existingData;
+
+    // Helper: check if a shift has non-empty values
+    const hasShiftData = (shiftKey, rowsSource) => {
+      const shift = rowsSource ? rowsSource[shiftKey] : null;
+      return shift && Object.values(shift).some((v) => v !== null && v !== '');
+    };
+
+    // Helper: check if incoming shift data differs from existing
+    const isShiftDiff = (shiftKey, oldRows, newRows) => {
+      const oldShift = (oldRows && oldRows[shiftKey]) || {};
+      const newShift = (newRows && newRows[shiftKey]) || {};
+      return SHIFT_PARAMETERS.some((p) => {
+        let oVal = oldShift[p] ?? null;
+        let nVal = newShift[p] ?? null;
+        if (nVal === '') nVal = null;
+        if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
+          return Number(oVal) !== Number(nVal);
+        }
+        return oVal !== nVal;
+      });
+    };
+
+    let lockedShifts = existingData.lockedShifts || {
+      shift1: false,
+      shift2: false,
+      shift3: false,
+      shift1Saved: false,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift3Edits: 0,
+    };
+    let editedFields = existingData.editedFields || {};
+    let editAuditHistory = existingData.editAuditHistory || [];
+
+    // Helper: check if a shift is locked according to workflow rules
+    const isShiftLocked = (key) => {
+      if (lockedShifts[key]) return true;
+      if (key === 'shift1' && lockedShifts.shift2Saved) return true;
+      if (key === 'shift2' && lockedShifts.shift3Saved) return true;
+      if (key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+      return false;
+    };
+
+    const willSave = {};
+
+    // Check lock violations
+    for (const key of targetShifts) {
+      if (hasShiftData(key, payload.rows) && isShiftLocked(key)) {
+        if (isShiftDiff(key, existingRows, payload.rows)) {
+          return res.status(400).json({
+            success: false,
+            message: `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is locked.`,
+          });
+        }
+      }
+    }
+
+    // Determine which shift has changes and is unlocked
+    for (const key of targetShifts) {
+      if (hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows) && !isShiftLocked(key)) {
+        willSave[key] = true;
+      }
+    }
+
+    // Enforce Shift-Wise Locking: Only one shift can be saved at a time
+    const shiftsToSave = targetShifts.filter((k) => willSave[k]);
+    if (shiftsToSave.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shift-wise input locking enforced: Only one shift can be entered and saved at a time.',
+      });
+    }
+
+    let newS1Saved = lockedShifts.shift1Saved || willSave.shift1;
+    let newS2Saved = lockedShifts.shift2Saved || willSave.shift2;
+
+    if (willSave.shift2 && !newS1Saved) {
+      return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
+    }
+    if (willSave.shift3 && !newS2Saved) {
+      return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
+    }
+    if (willSave.shift3 && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'III SHIFT has already reached its maximum edit limit (one final edit allowed).',
+      });
+    }
+
+    const activeShiftKey = shiftsToSave[0];
+    if (!activeShiftKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'No unlocked shifts with valid new or modified data were found to save.',
+      });
+    }
+
+    // Merge rows separately without overwriting untouched shifts
+    const mergedRows = { ...(existingRows || {}) };
+    const oldShift = mergedRows[activeShiftKey] || {};
+    const newShift = payload.rows[activeShiftKey] || {};
+
+    const isPriorSavedShift =
+      (activeShiftKey === 'shift1' && lockedShifts.shift1Saved) ||
+      (activeShiftKey === 'shift2' && lockedShifts.shift2Saved) ||
+      (activeShiftKey === 'shift3' && lockedShifts.shift3Saved);
+
+    if (isPriorSavedShift) {
+      SHIFT_PARAMETERS.forEach((paramKey) => {
+        const oVal = oldShift[paramKey] ?? null;
+        let nVal = newShift[paramKey] ?? null;
+        if (nVal === '') nVal = null;
+
+        let isParamChanged = false;
+        if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
+          isParamChanged = Number(oVal) !== Number(nVal);
+        } else {
+          isParamChanged = oVal !== nVal;
+        }
+
+        if (isParamChanged) {
+          editedFields[`${activeShiftKey}_${paramKey}`] = true;
+          editAuditHistory.push({
+            shiftKey: activeShiftKey,
+            shiftName: SHIFT_DISPLAY_NAMES[activeShiftKey],
+            paramKey,
+            oldValue: oVal !== null ? Number(oVal) : null,
+            newValue: nVal !== null ? Number(nVal) : null,
+            editedBy: req.user?.name || payload.submittedBy || 'Admin',
+            editedById: req.user?._id || null,
+            timestamp: new Date(),
+          });
+        }
+      });
+    }
+
+    mergedRows[activeShiftKey] = newShift;
+    newlySavedShifts.push(activeShiftKey);
+
+    // Update locked status
+    if (activeShiftKey === 'shift1') lockedShifts.shift1Saved = true;
+    if (activeShiftKey === 'shift2') lockedShifts.shift2Saved = true;
+    if (activeShiftKey === 'shift3') {
+      if (!lockedShifts.shift3Saved) {
+        lockedShifts.shift3Saved = true;
+      } else {
+        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+      }
+    }
+
+    if (lockedShifts.shift2Saved) lockedShifts.shift1 = true;
+    if (lockedShifts.shift3Saved) lockedShifts.shift2 = true;
+    if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
+      lockedShifts.shift3 = true;
+    }
+
+    // Package complete data structure
+    const updatedRecordData = {
+      id: existingData.id || `tk209_${Date.now()}`,
+      date: payload.date,
+      plant: plantTarget,
+      analysisType: 'TK 209 Analysis',
       tank: 'TK 209',
       unit: 'TK 209',
       frequency: 'Once in a shift',
-      rows: payload.rows,
-      parameters: payload.parameters,
+      shift: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
+      rows: mergedRows,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id,
+      submittedById: req.user?._id || null,
       submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company,
+      company: req.user?.company?._id || req.user?.company || null,
     };
 
-    // Upsert by date
-    const existingIndex = tk209Records.findIndex((r) => r.date === payload.date);
-    if (existingIndex >= 0) {
-      tk209Records[existingIndex] = { ...tk209Records[existingIndex], ...record };
-    } else {
-      tk209Records.unshift(record);
+    // Save / Upsert directly to MongoDB PlantAnalysisRecord
+    const savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
+      {
+        plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
+        analysisType: 'TK 209 Analysis',
+        date: payload.date,
+      },
+      {
+        plantName: 'ACL Plant',
+        plantCode: 'ACL',
+        analysisType: 'TK 209 Analysis',
+        unit: 'TK 209',
+        date: payload.date,
+        shift: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
+        data: updatedRecordData,
+        submittedBy: updatedRecordData.submittedBy,
+        submittedById: updatedRecordData.submittedById,
+        company: updatedRecordData.company,
+        savedAt: new Date(),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
-    // Persist to MongoDB PlantAnalysisRecord
-    try {
-      if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
-          },
-          {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
-    } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
-    }
+    // Update in-memory cache
+    tk209Records.unshift(updatedRecordData);
 
-    }
-
-    // Activity log entry
+    // Activity Log Entry
     try {
       if (ActivityLog && typeof ActivityLog.create === 'function') {
         await ActivityLog.create({
           action: 'TK_209_ANALYSIS_SAVED',
           user: req.user?._id,
           userName: req.user?.name,
-          details: `TK 209 Analysis saved for date: ${payload.date} (FNH3, CNH3, TCL, PCL).`,
+          details: `TK 209 Analysis saved for date: ${payload.date}, shift: ${SHIFT_DISPLAY_NAMES[activeShiftKey]}.`,
           timestamp: new Date(),
         });
       }
-    } catch (logErr) {
-      console.warn('[ActivityLog] Could not log TK 209 activity:', logErr.message);
+    } catch (logErr) {}
+
+    // ── Execute Instant Email Dispatch Workflow ──
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+
+    const emailPromises = newlySavedShifts.map((shiftKey) =>
+      executeSaveAndEmailWorkflow({
+        plantIdentifier: plantTarget,
+        analysisType: 'TK 209 Analysis',
+        unit: 'TK 209',
+        shift: SHIFT_DISPLAY_NAMES[shiftKey],
+        date: payload.date,
+        data: mergedRows,
+        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+        submittedById: req.user?._id || null,
+        company: updatedRecordData.company,
+        explicitRecord: savedDoc,
+        rawBody: payload,
+      }).catch((err) => {
+        console.warn(`[AutoPlantEmail] Instant workflow note for TK 209 ${shiftKey}:`, err.message);
+        return { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+      })
+    );
+
+    let lastEmailResult = null;
+    let emailTimedOut = false;
+    const fastCheck = Promise.all(emailPromises);
+    const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 800));
+
+    const raceResult = await Promise.race([fastCheck, fastLimit]);
+    if (raceResult === 'TIMEOUT') {
+      emailTimedOut = true;
+    } else if (Array.isArray(raceResult) && raceResult.length > 0) {
+      lastEmailResult = raceResult[raceResult.length - 1];
     }
+
+    const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
+    const finalEmailStatus = emailTimedOut
+      ? 'pending'
+      : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const emailRecipient =
+      lastEmailResult?.recipient ||
+      lastEmailResult?.data?.emailRecipient ||
+      savedDoc?.emailRecipient ||
+      '';
 
     return res.status(201).json({
       success: true,
-      message: 'TK 209 Analysis data saved successfully.',
-      data: record,
+      message: emailSent
+        ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} & email sent ✓`
+        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email dispatching immediately 🚀`,
+      data: updatedRecordData,
+      emailSent,
+      emailPending: emailTimedOut,
+      emailStatus: finalEmailStatus,
+      emailRecipient,
+      emailNotification: lastEmailResult,
+      newlySavedShifts,
     });
   } catch (error) {
     console.error('[TK209Analysis API] Error saving data:', error);
@@ -125,7 +380,13 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date } = req.query;
-    const { PlantAnalysisRecord } = require('../models');
+    const { getPlantAssignedUser } = require('../services/plantNotificationService');
+
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('ACL');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+    } catch (uErr) {}
 
     if (date) {
       const query = { date, plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'TK 209 Analysis' };
@@ -134,18 +395,24 @@ router.get('/', async (req, res) => {
       }
 
       const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-      
+
       if (doc && doc.data) {
         return res.status(200).json({
           success: true,
-          data: [doc.data]
+          data: [doc.data],
+          assignedOperatorEmail,
+          emailStatus: doc.emailStatus || 'pending',
+          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
         });
       }
     }
 
     return res.status(200).json({
       success: true,
-      data: []
+      data: [],
+      assignedOperatorEmail,
+      emailStatus: 'pending',
+      emailRecipient: assignedOperatorEmail,
     });
   } catch (error) {
     console.error('[ACL GET] Error:', error);
@@ -153,6 +420,48 @@ router.get('/', async (req, res) => {
       success: false,
       message: 'Server error: ' + error.message,
     });
+  }
+});
+
+/**
+ * @desc    Retry sending email for an existing saved TK 209 analysis record
+ * @route   POST /api/tk-209-analysis/:id/retry-email
+ * @access  Private
+ */
+router.post('/:id/retry-email', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let record = null;
+    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
+      record = await PlantAnalysisRecord.findById(id);
+    }
+    if (!record) {
+      record = tk209Records.find((r) => (r._id || r.id).toString() === id.toString());
+    }
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'TK 209 analysis record not found.' });
+    }
+
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: record.plantCode || 'ACL Plant',
+      analysisType: record.analysisType || 'TK 209 Analysis',
+      unit: 'TK 209',
+      shift: req.body?.shift || record.shift || 'All Shifts',
+      date: record.date,
+      data: record.data?.rows || record.data,
+      submittedBy: record.submittedBy || req.user?.name || 'Plant Operator',
+      submittedById: req.user?._id || record.submittedById,
+      company: req.user?.company?._id || req.user?.company || record.company,
+      explicitRecord: record,
+    });
+
+    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
+  } catch (error) {
+    console.error('[TK209 Retry Email] Error:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 

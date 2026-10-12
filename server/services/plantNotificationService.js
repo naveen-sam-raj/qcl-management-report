@@ -358,10 +358,39 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 204') ||
     String(analysisType || '').toLowerCase().includes('tk204');
 
+  const isTK209Analysis =
+    analysisType === 'TK 209 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('tk 209') ||
+    String(analysisType || '').toLowerCase().includes('tk209');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
-  if (isTK204Analysis) {
+  if (isTK209Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    let sKey = 'shift1';
+    const cleanShift = String(shiftLabel).trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else {
+      sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT' : sKey === 'shift2' ? 'II SHIFT' : 'III SHIFT';
+    const sValues = rawData[sKey] || rawData || {};
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Shift:
+${shiftDisplay}
+
+TK 209 Shift Measurements (Unit: Kgm/m³):
+- FNH3 (Free Ammonia): ${formatVal(sValues.fnh3)}
+- CNH3 (Combined Ammonia): ${formatVal(sValues.cnh3)}
+- TCL (Total Chlorine): ${formatVal(sValues.tcl)}
+- PCL (Polymer Chloride): ${formatVal(sValues.pcl)}
+`;
+  } else if (isTK204Analysis) {
     const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
     let sKey = 'shift1';
     const cleanShift = String(shiftLabel).trim();
@@ -511,7 +540,57 @@ Attachment: ${excelFileName}
 `;
 
   let dataHtml = '';
-  if (isTK204Analysis) {
+  if (isTK209Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    let sKey = 'shift1';
+    const cleanShift = String(shiftLabel).trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else {
+      sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT (06:00 – 14:00)' : sKey === 'shift2' ? 'II SHIFT (14:00 – 22:00)' : 'III SHIFT (22:00 – 06:00)';
+    const sValues = rawData[sKey] || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label">TK 209 Shift Measurements (${shiftDisplay}) — Unit: Kgm/m³</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Measured Value (Kgm/m³)</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Tolerance Range</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">FNH₃ (Free Ammonia)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.fnh3)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 11px;">0.58 – 0.78</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">CNH₃ (Combined Ammonia)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.cnh3)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 11px;">2.26 – 2.46</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">TCl (Total Chlorine)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.tcl)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 11px;">2.94 – 3.14</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">PCl (Polymer Chloride)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.pcl)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 11px;">0.58 – 0.78</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isTK204Analysis) {
     const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
     let sKey = 'shift1';
     const cleanShift = String(shiftLabel).trim();
