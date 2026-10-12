@@ -76,6 +76,11 @@ const pureSaltAnalysisSchema = new mongoose.Schema(
       shift3Saved: { type: Boolean, default: false },
       shift3Edits: { type: Number, default: 0 },
     },
+    editedFields: {
+      type: Map,
+      of: Boolean,
+      default: {},
+    },
     submittedBy: {
       type: String,
       default: 'Plant Operator',

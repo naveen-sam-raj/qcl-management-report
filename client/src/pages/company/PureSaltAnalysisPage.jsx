@@ -136,6 +136,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dateError, setDateError] = useState(false);
   const [lockedShifts, setLockedShifts] = useState({});
+  const [editedFields, setEditedFields] = useState({});
   const [originalData, setOriginalData] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
@@ -169,23 +170,28 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
             setData(record.rows);
             setOriginalData(JSON.parse(JSON.stringify(record.rows)));
             setLockedShifts(record.lockedShifts || {});
+            setEditedFields(record.editedFields || {});
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
             setOriginalData(JSON.parse(JSON.stringify(record.data)));
             setLockedShifts(record.lockedShifts || {});
+            setEditedFields(record.editedFields || {});
           } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
             setOriginalData(JSON.parse(JSON.stringify(record)));
             setLockedShifts(record.lockedShifts || {});
+            setEditedFields(record.editedFields || {});
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
             setLockedShifts({});
+            setEditedFields({});
           }
         } else {
           setData(buildEmptyData());
           setOriginalData(null);
           setLockedShifts({});
+          setEditedFields({});
         }
       } catch (err) {
         if (!active) return;
@@ -193,6 +199,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         setData(buildEmptyData());
         setOriginalData(null);
         setLockedShifts({});
+        setEditedFields({});
       }
     };
     fetchExistingData();
@@ -229,6 +236,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     setLastSavedRecord(null);
     setLastExcelData(null);
     setLockedShifts({});
+    setEditedFields({});
     setOriginalData(null);
     showToast('Form cleared successfully.', 'info');
   };
@@ -409,6 +417,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       setLastExcelData(excelInfo);
       if (savedRecord?.lockedShifts) {
         setLockedShifts(savedRecord.lockedShifts);
+      }
+      if (savedRecord?.editedFields) {
+        setEditedFields(savedRecord.editedFields);
       }
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
@@ -808,6 +819,20 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                                 </span>
                               )}
                             </div>
+
+                            {/* Tiny Compact EDITED badge beside / below modified field */}
+                            {Boolean(
+                              (editedFields && (editedFields[`${row.key}_${param.key}`] || (editedFields.get && editedFields.get(`${row.key}_${param.key}`)))) ||
+                              (row.key === 'shift3' && (lockedShifts.shift3Edits || 0) >= 1 && hasValue)
+                            ) && (
+                              <div
+                                id={`psa-edited-badge-${row.key}-${param.key}`}
+                                className="mt-0.5 inline-flex items-center px-1 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
+                                title="This parameter was modified and saved"
+                              >
+                                EDITED
+                              </div>
+                            )}
 
                             {/* Show actual allowed range when value is out of range */}
                             {isOutOfLimit && limit && (

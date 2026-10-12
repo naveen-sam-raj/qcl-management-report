@@ -138,6 +138,6 @@ async function testPureSaltE2E() {
 }
 
 testPureSaltE2E().catch(err => {
-  console.error('Test Failed:', err.response?.data || err.message);
+  console.error('Test Failed:', err);
   process.exit(1);
 });

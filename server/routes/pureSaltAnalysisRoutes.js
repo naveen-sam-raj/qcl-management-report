@@ -98,8 +98,33 @@ router.post('/', protect, async (req, res) => {
         return res.status(400).json({ success: false, message: 'III SHIFT has already reached its maximum edit limit.' });
       }
 
+      if (!existingRecord.editedFields) {
+        existingRecord.editedFields = new Map();
+      }
+
       for (const key of targetRows) {
         if (willSave[key]) {
+          // If this shift was already saved previously, track specifically which parameters were changed
+          const isPriorSavedShift = (key === 'shift1' && existingRecord.lockedShifts.shift1Saved) ||
+                                    (key === 'shift2' && existingRecord.lockedShifts.shift2Saved) ||
+                                    (key === 'shift3' && existingRecord.lockedShifts.shift3Saved);
+          if (isPriorSavedShift) {
+            const oldVals = existingRecord.rows[key] || {};
+            const newVals = payload.rows[key] || {};
+            Object.keys(newVals).forEach(paramKey => {
+              const oVal = oldVals[paramKey] ?? null;
+              let nVal = newVals[paramKey] ?? null;
+              if (nVal === '') nVal = null;
+              if (oVal !== nVal) {
+                if (existingRecord.editedFields.set) {
+                  existingRecord.editedFields.set(`${key}_${paramKey}`, true);
+                } else {
+                  existingRecord.editedFields[`${key}_${paramKey}`] = true;
+                }
+              }
+            });
+          }
+
           existingRecord.rows[key] = payload.rows[key];
           newlySavedShifts.push(key);
         }
@@ -130,6 +155,7 @@ router.post('/', protect, async (req, res) => {
 
       existingRecord.markModified('rows');
       existingRecord.markModified('lockedShifts');
+      existingRecord.markModified('editedFields');
       existingRecord.submittedBy = req.user?.name || payload.submittedBy || 'Plant Operator';
       existingRecord.submittedById = req.user?._id || null;
       existingRecord.savedAt = new Date();
