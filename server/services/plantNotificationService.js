@@ -348,10 +348,49 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'Pure Salt Sieve Analysis' ||
     String(analysisType || '').toLowerCase().includes('sieve');
 
+  const isTK203Analysis =
+    analysisType === 'TK 203 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('tk 203') ||
+    String(analysisType || '').toLowerCase().includes('tk203');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
-  if (isSieveAnalysis) {
+  if (isTK203Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't09', time: '09:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't13', time: '13:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't17', time: '17:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't21', time: '21:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't01', time: '01:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+      { key: 't05', time: '05:00', shift: 'III Shift' },
+    ];
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Shift:
+${shiftLabel || 'All Shifts'}
+
+TK 203 Analysis Parameters (Unit: Kgm/m³):
+` + activeSlots.map(s => {
+      const row = rawData[s.key] || {};
+      return `- ${s.time} (${s.shift}): FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCL: ${formatVal(row.tcl)}, PCL: ${formatVal(row.pcl)}, CO2: ${formatVal(row.co2)}`;
+    }).join('\n') + '\n\n';
+  } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -442,9 +481,66 @@ Timezone: Asia/Kolkata (${fullIST})
 Attachment: ${excelFileName}
 `;
 
-  // Extract data values
   let dataHtml = '';
-  if (isSieveAnalysis) {
+  if (isTK203Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't09', time: '09:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't13', time: '13:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't17', time: '17:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't21', time: '21:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't01', time: '01:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+      { key: 't05', time: '05:00', shift: 'III Shift' },
+    ];
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label">TK 203 Analysis Results (${shiftLabel || 'All Shifts'}) — Unit: Kgm/m³</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 8px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">FNH₃</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">CNH₃</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">TCl</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">PCl</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">CO₂</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${activeSlots.map((s, idx) => {
+              const r = rawData[s.key] || {};
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : '';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.time} <span style="font-size: 10px; color: #64748b; font-weight: normal;">(${s.shift})</span></td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.fnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.cnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.tcl)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.pcl)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.co2)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
       try {
