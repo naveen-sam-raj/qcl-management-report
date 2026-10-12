@@ -171,7 +171,7 @@ router.post('/', protect, async (req, res) => {
         analysisType: payload.analysisType || 'Pure Salt Analysis',
         shift: payload.shift || 'All Shifts (I, II, III)',
         rows: payload.rows,
-        company: savedRecord.company || req.user?.company?._id || req.user?.company || null,
+        company: existingRecord?.company || req.user?.company?._id || req.user?.company || null,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
         submittedById: req.user?._id || null,
         lockedShifts
