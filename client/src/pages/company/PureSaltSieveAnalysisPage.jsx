@@ -151,9 +151,8 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     return true;
   }, [isViewOnly, lockedShifts]);
 
-  const [recipientEmail, setRecipientEmail] = useState(
-    user?.email || import.meta.env.VITE_DEFAULT_REPORT_RECIPIENT_EMAIL || ''
-  );
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
   // 'idle' | 'saving' | 'generating' | 'emailing' | 'completed' | 'email_failed'
   const [savePhase, setSavePhase] = useState('idle');
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
@@ -176,6 +175,10 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       try {
         const response = await api.get(`/pure-salt-sieve-analysis?date=${date}`);
         if (!active) return;
+
+        if (response.data && response.data.assignedOperatorEmail) {
+          setRecipientEmail(response.data.assignedOperatorEmail);
+        }
 
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
@@ -534,13 +537,24 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs flex-1">
-            <span className="font-bold text-emerald-800">
-              Saved & Dispatched Successfully ✓
-            </span>{' '}
-            <span className="text-emerald-700">
-              Pure Salt Sieve Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
-            </span>
+          <div className="text-xs flex-1 space-y-1">
+            <div>
+              <span className="font-bold text-emerald-800">
+                Saved & Dispatched Successfully ✓
+              </span>{' '}
+              <span className="text-emerald-700">
+                Pure Salt Sieve Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
+              </span>
+            </div>
+            {recipientEmail && (
+              <div className="text-[11.5px] text-emerald-800 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-semibold text-emerald-900">Notification Recipient:</span>
+                <span className="font-mono bg-emerald-100/70 border border-emerald-300/60 px-1.5 py-0.2 rounded text-emerald-950">
+                  {recipientEmail}
+                </span>
+                <span className="text-emerald-600">(Registered ACL Plant Operator)</span>
+              </div>
+            )}
           </div>
           <button
             onClick={() => setSaveSuccess(false)}

@@ -399,6 +399,15 @@ router.get('/', protect, async (req, res) => {
   try {
     const { date } = req.query;
 
+    // Dynamically resolve the active User assigned to ACL Plant under the company
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('ACL');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+    } catch (uErr) {
+      console.warn('[PureSaltSieve GET] Operator lookup warning:', uErr.message);
+    }
+
     if (date) {
       const query = { date, plant: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'Pure Salt Sieve Analysis' };
       if (req.user && req.user.company) {
@@ -411,6 +420,7 @@ router.get('/', protect, async (req, res) => {
         return res.status(200).json({
           success: true,
           data: [doc],
+          assignedOperatorEmail,
         });
       }
     }
@@ -418,6 +428,7 @@ router.get('/', protect, async (req, res) => {
     return res.status(200).json({
       success: true,
       data: [],
+      assignedOperatorEmail,
     });
   } catch (error) {
     console.error('[PureSaltSieve GET] Error:', error);

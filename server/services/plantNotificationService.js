@@ -312,6 +312,7 @@ const sendPlantAnalysisEmail = async ({
   plantDoc,
   assignedUser,
   analysisType,
+  shift = '',
   savedRecord,
   excelBuffer,
   excelFileName,
@@ -334,6 +335,42 @@ const sendPlantAnalysisEmail = async ({
   // Exact Subject: [PLANT NAME] Analysis Saved - [DATE]
   const subject = `[${plantName}] Analysis Saved - ${dateFormatted}`;
 
+  const isSieveAnalysis =
+    analysisType === 'Pure Salt Sieve Analysis' ||
+    String(analysisType || '').toLowerCase().includes('sieve');
+
+  // Format sieve-specific values if applicable
+  let sieveTextSummary = '';
+  let shiftLabel = shift || savedRecord?.shift || '';
+  if (isSieveAnalysis) {
+    // Map shift name if available
+    let sKey = 'shift1';
+    if (/II|2/i.test(shiftLabel)) sKey = 'shift2';
+    else if (/III|3/i.test(shiftLabel)) sKey = 'shift3';
+
+    const sieveRows = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
+    const sValues = sieveRows[sKey] || sieveRows[shiftLabel] || {};
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? `${v}%` : 'N/A');
+
+    const p18Val = formatVal(sValues.p18 ?? sValues['p18']);
+    const p44Val = formatVal(sValues.p44 ?? sValues['p44']);
+    const p60Val = formatVal(sValues.p60 ?? sValues['p60']);
+    const p100Val = formatVal(sValues.p100 ?? sValues['p100']);
+    const m100Val = formatVal(sValues.m100 ?? sValues['m100']);
+
+    sieveTextSummary = `Shift:
+${shiftLabel || 'All Shifts'}
+
+Pure Salt Sieve Analysis Fractions:
+- BSS 18: ${p18Val}
+- BSS 44: ${p44Val}
+- BSS 60: ${p60Val}
+- BSS 100: ${p100Val}
+- -100: ${m100Val}
+`;
+  }
+
   // Exact Body format
   const textBody = `Plant:
 ${plantName}
@@ -341,13 +378,13 @@ ${plantName}
 Analysis:
 ${analysisType}
 
-Saved Date:
+${shiftLabel ? `Shift:\n${shiftLabel}\n\n` : ''}Saved Date:
 ${dateFormatted}
 
 Saved Time:
 ${timeFormatted}
 
-Status:
+${sieveTextSummary}Status:
 Saved Successfully
 
 Record ID:
@@ -359,7 +396,50 @@ Attachment: ${excelFileName}
 
   // Extract data values
   let dataHtml = '';
-  if (savedRecord?.data) {
+  if (isSieveAnalysis) {
+    let sKey = 'shift1';
+    if (/II|2/i.test(shiftLabel)) sKey = 'shift2';
+    else if (/III|3/i.test(shiftLabel)) sKey = 'shift3';
+
+    const sieveRows = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
+    const sValues = sieveRows[sKey] || sieveRows[shiftLabel] || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? `${v}%` : 'N/A');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label">Sieve Analysis Results (${shiftLabel || 'Shift'})</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1; font-size: 12px;">Sieve Mesh Fraction</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1; font-size: 12px;">Persisted Value (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 18</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p18)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 44</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p44)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 60</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p60)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 100</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p100)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">-100</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.m100)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } else if (savedRecord?.data) {
     let dataEntries = [];
     const extractEntries = (obj, prefix = '') => {
       for (const [key, val] of Object.entries(obj)) {
@@ -428,6 +508,11 @@ Attachment: ${excelFileName}
         <div class="field-label">Analysis</div>
         <div class="field-value">${analysisType}</div>
       </div>
+      ${shiftLabel ? `
+      <div class="field-group">
+        <div class="field-label">Shift</div>
+        <div class="field-value">${shiftLabel}</div>
+      </div>` : ''}
       <div class="field-group">
         <div class="field-label">Saved Date</div>
         <div class="field-value">${dateFormatted}</div>
@@ -714,6 +799,7 @@ const executeSaveAndEmailWorkflow = async ({
       plantDoc,
       assignedUser,
       analysisType: analysisType || `${plantName} Analysis`,
+      shift: targetShift,
       savedRecord,
       excelBuffer: excelResult.buffer,
       excelFileName: excelResult.filename || excelFileName,
