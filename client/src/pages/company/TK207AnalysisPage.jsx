@@ -17,6 +17,11 @@ import {
   ChevronRight,
   Factory,
   Database,
+  Lock,
+  Clock,
+  Mail,
+  RefreshCw,
+  Send,
 } from 'lucide-react';
 
 // ─── TK 207 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
@@ -110,10 +115,30 @@ const TIME_SLOTS = [
   { key: 't05', time: '05:00', shiftId: 'shift3' },
 ];
 
+const SHIFT_MAPPING = [
+  { key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't09', 't11', 't13'] },
+  { key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't17', 't19', 't21'] },
+  { key: 'shift3', name: 'III SHIFT (22:00 – 06:00)', slotKeys: ['t23', 't01', 't03', 't05'] },
+];
+
 const buildEmptyData = () =>
   Object.fromEntries(
     TIME_SLOTS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
+
+// Asia/Kolkata current date helper
+const getTodayAsiaKolkata = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -138,18 +163,21 @@ const formatDateDisplay = (isoDate) => {
 const getRowStyles = (shiftId) => {
   if (shiftId === 'shift1') {
     return {
-      row:        'bg-sky-50/40 hover:bg-sky-100/60 border-l-4 border-l-blue-600',
+      row:        'bg-sky-50/60 hover:bg-sky-100/70 border-l-4 border-l-blue-600',
+      badge:      'bg-blue-100 text-blue-800 border border-blue-200',
       inputFocus: 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900 font-bold hover:border-slate-400',
     };
   }
   if (shiftId === 'shift2') {
     return {
-      row:        'bg-indigo-50/30 hover:bg-indigo-100/50 border-l-4 border-l-indigo-600',
+      row:        'bg-indigo-50/40 hover:bg-indigo-100/60 border-l-4 border-l-indigo-600',
+      badge:      'bg-indigo-100 text-indigo-800 border border-indigo-200',
       inputFocus: 'border-2 border-slate-300 bg-white focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-900 font-bold hover:border-slate-400',
     };
   }
   return {
-    row:        'bg-purple-50/30 hover:bg-purple-100/50 border-l-4 border-l-purple-600',
+    row:        'bg-purple-50/40 hover:bg-purple-100/60 border-l-4 border-l-purple-600',
+    badge:      'bg-purple-100 text-purple-800 border border-purple-200',
     inputFocus: 'border-2 border-slate-300 bg-white focus:border-purple-600 focus:ring-2 focus:ring-purple-100 text-slate-900 font-bold hover:border-slate-400',
   };
 };
@@ -161,151 +189,423 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── State ──
-  const [date, setDate]               = useState('');
-  const [data, setData]               = useState(buildEmptyData());
-  const [errors, setErrors]           = useState({});
-  const [saving, setSaving]           = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError]     = useState(false);
+  // ── State (Date strictly restricted to Today in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [data, setData]                             = useState(buildEmptyData());
+  const [originalData, setOriginalData]             = useState(null);
+  const [errors, setErrors]                         = useState({});
+  const [saving, setSaving]                         = useState(false);
+  const [saveSuccess, setSaveSuccess]               = useState(false);
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                     = useState(null);
+  const [recipientEmail, setRecipientEmail]         = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lockedShifts, setLockedShifts]             = useState({});
+  const [editedFields, setEditedFields]             = useState({});
 
-  // Fetch existing data when date changes
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal]     = useState(false);
+  const [confirmData, setConfirmData]               = useState(null);
+
+  // Sequential Shift Workflow:
+  // - On initial load: I SHIFT is editable; II SHIFT & III SHIFT are waiting/disabled.
+  // - After I SHIFT save: I SHIFT remains editable until II SHIFT is saved; II SHIFT becomes available.
+  // - After II SHIFT save: I SHIFT is permanently locked; II SHIFT remains editable until III SHIFT is saved; III SHIFT becomes available.
+  // - After III SHIFT initial save: II SHIFT is permanently locked; exactly 1 final edit allowed for III SHIFT.
+  // - After III SHIFT final edit: all 3 shifts permanently locked for that date.
+  const isShiftDisabled = useCallback((shiftKey) => {
+    if (isViewOnly) return true;
+    if (shiftKey === 'shift1') {
+      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+    }
+    if (shiftKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return true;
+      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+    }
+    if (shiftKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift3) return true;
+      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+      return false;
+    }
+    return true;
+  }, [isViewOnly, lockedShifts]);
+
+  // Fetch existing data for current date
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/tk-207-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             setData(buildEmptyData());
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else if (record.data && record.data.rows) {
-            setData(record.data.rows);
-          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
-            setData(record);
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+
+          if (record) {
+            const fetchedRows = record.rows || record.shifts || record.readings || record.data?.rows || record.data;
+            if (fetchedRows && typeof fetchedRows === 'object') {
+              const populated = buildEmptyData();
+              TIME_SLOTS.forEach((slot) => {
+                if (fetchedRows[slot.key]) {
+                  PARAMETERS.forEach((p) => {
+                    const val = fetchedRows[slot.key][p.key];
+                    populated[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+                  });
+                }
+              });
+              setData(populated);
+              setOriginalData(JSON.parse(JSON.stringify(populated)));
+            } else {
+              setData(buildEmptyData());
+              setOriginalData(null);
+            }
+
+            setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
+            setEditedFields(record.editedFields || record.data?.editedFields || {});
           } else {
             setData(buildEmptyData());
+            setOriginalData(null);
+            setLockedShifts({});
+            setEditedFields({});
           }
+        } else {
+          setData(buildEmptyData());
+          setOriginalData(null);
+          setLockedShifts({});
+          setEditedFields({});
         }
       } catch (err) {
+        if (!active) return;
         console.warn('Could not fetch existing data', err);
+        setData(buildEmptyData());
+        setOriginalData(null);
+        setLockedShifts({});
+        setEditedFields({});
       }
     };
     fetchExistingData();
-  }, [date]);
 
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   const visibleRows = TIME_SLOTS;
 
-  // ── Real-time input change (Does NOT modify entered value) ──
+  // ── Real-time input change ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
+
+    // Find shift of this row
+    const slotObj = TIME_SLOTS.find((s) => s.key === rowKey);
+    const shiftId = slotObj ? slotObj.shiftId : null;
+    if (shiftId && isShiftDisabled(shiftId)) return;
 
     setData((prev) => ({
       ...prev,
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
     }));
 
-    // Clear cell format error if any
+    // Clear cell error if any
     setErrors((prev) => {
       const next = { ...prev };
       delete next[`${rowKey}_${paramKey}`];
       return next;
     });
-    setSaveSuccess(false);
-  }, []);
 
-  // ── Reset form ──
-  const handleReset = useCallback(() => {
-    setData(buildEmptyData());
+    setSaveSuccess(false);
+  }, [isShiftDisabled]);
+
+  const handleReset = () => {
+    if (originalData) {
+      setData(JSON.parse(JSON.stringify(originalData)));
+    } else {
+      setData(buildEmptyData());
+    }
     setErrors({});
-    setDateError(false);
     setSaveSuccess(false);
-    showToast('TK 207 analysis form cleared successfully.', 'info');
-  }, [showToast]);
+    showToast('TK 207 analysis form reset.', 'info');
+  };
 
-  // ── Validation ──
-  const validateForm = useCallback(() => {
-    let isValid = true;
+  // Full dataset validation before opening confirmation modal
+  const validate = () => {
+    let hasError = false;
     const newErrors = {};
 
-    if (!date) {
-      setDateError(true);
-      isValid = false;
-    } else {
-      setDateError(false);
-    }
-
-    TIME_SLOTS.forEach((row) => {
+    TIME_SLOTS.forEach((r) => {
       PARAMETERS.forEach((p) => {
-        const val = data[row.key][p.key];
-        if (val !== '' && isNaN(Number(val))) {
-          newErrors[`${row.key}_${p.key}`] = 'Must be a valid number';
-          isValid = false;
+        const val = data[r.key]?.[p.key];
+        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
+          newErrors[`${r.key}_${p.key}`] = 'Numbers only';
+          hasError = true;
         }
       });
     });
 
     setErrors(newErrors);
-    return isValid;
-  }, [date, data]);
+    return !hasError;
+  };
 
-  // ── Save / Submit ──
-  const handleSave = async () => {
-    if (!validateForm()) {
-      showToast('Please correct highlighted errors before saving.', 'error');
+  // Check if a row differs from originalData
+  const isRowDiff = (oldRow, newRow) => {
+    if (!oldRow && newRow) return true;
+    if (oldRow && !newRow) return false;
+    return PARAMETERS.some((p) => {
+      let oldVal = oldRow?.[p.key] ?? null;
+      let newVal = newRow?.[p.key] ?? null;
+      if (newVal === '') newVal = null;
+      if (oldVal !== null && newVal !== null && !isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
+        return Number(oldVal) !== Number(newVal);
+      }
+      return String(oldVal) !== String(newVal);
+    });
+  };
+
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
+    if (!validate()) {
+      showToast('Please correct validation errors before saving.', 'error');
       return;
     }
 
-    // Check if at least one cell is filled
-    const hasData = TIME_SLOTS.some((row) =>
-      PARAMETERS.some((p) => data[row.key][p.key] !== '')
-    );
-    if (!hasData) {
-      showToast('Please enter at least one measurement value.', 'warning');
+    const shiftsToSave = [];
+    let isFinalEdit = false;
+
+    SHIFT_MAPPING.forEach((shift) => {
+      if (isShiftDisabled(shift.key)) return;
+
+      const hasAnyData = shift.slotKeys.some((sKey) => {
+        const row = data[sKey];
+        return row && Object.values(row).some((val) => val !== null && val !== '');
+      });
+
+      const hasDiff = shift.slotKeys.some((sKey) => {
+        const oldRow = originalData ? originalData[sKey] : null;
+        const newRow = data[sKey];
+        return isRowDiff(oldRow, newRow);
+      });
+
+      if (hasAnyData && hasDiff) {
+        shiftsToSave.push({
+          key: shift.key,
+          name: shift.name,
+          slotKeys: shift.slotKeys,
+        });
+
+        if (shift.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
+          isFinalEdit = true;
+        }
+      }
+    });
+
+    if (shiftsToSave.length === 0) {
+      showToast('No new or modified shift data found to save.', 'info');
       return;
     }
 
+    if (shiftsToSave.length > 1) {
+      showToast('Only one shift can be saved at a time. Please save changes shift-by-by.', 'warning');
+      return;
+    }
+
+    setConfirmData({
+      date,
+      shift: shiftsToSave[0],
+      isFinalEdit,
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
     setSaveSuccess(false);
 
-    try {
-      const payload = {
-        date,
-        plant: 'ACL',
-        analysisType: 'TK 207 Analysis',
-        tank: 'TK 207',
-        rows: data,
-        submittedBy: user?.name || 'Plant Operator',
-      };
+    // Close confirmation modal immediately to prevent modal freeze
+    setShowConfirmModal(false);
 
+    const shiftBeingSaved = confirmData?.shift;
+    const payload = {
+      date,
+      plant: plantId ? plantId.toUpperCase() : 'ACL',
+      analysisType: 'TK 207 Analysis',
+      tank: 'TK 207',
+      shift: shiftBeingSaved ? shiftBeingSaved.name : 'I SHIFT',
+      submittedBy: user?.name || 'Plant Operator',
+      submittedAt: new Date().toISOString(),
+      rows: Object.fromEntries(
+        TIME_SLOTS.map((r) => [
+          r.key,
+          Object.fromEntries(
+            PARAMETERS.map((p) => {
+              const val = data[r.key]?.[p.key];
+              return [p.key, val !== '' && val !== null && val !== undefined ? parseFloat(val) : null];
+            })
+          ),
+        ])
+      ),
+    };
+
+    try {
       const response = await api.post('/api/tk-207-analysis', payload);
 
+      if (!response?.data?.success) {
+        showToast(response?.data?.message || 'Unable to save TK 207 data. Please try again.', 'error');
+        setSavePhase('idle');
+        return;
+      }
+
       setSaveSuccess(true);
-      showToast(response.data?.message || 'TK 207 Analysis data saved successfully!', 'success');
+      const savedDoc = response.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      if (savedDoc?.lockedShifts) {
+        setLockedShifts(savedDoc.lockedShifts);
+      }
+      if (savedDoc?.editedFields) {
+        setEditedFields(savedDoc.editedFields);
+      }
+      if (savedDoc?.rows) {
+        const synced = buildEmptyData();
+        TIME_SLOTS.forEach((slot) => {
+          if (savedDoc.rows[slot.key]) {
+            PARAMETERS.forEach((p) => {
+              const val = savedDoc.rows[slot.key][p.key];
+              synced[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+            });
+          }
+        });
+        setData(synced);
+        setOriginalData(JSON.parse(JSON.stringify(synced)));
+      }
+
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const emailPending = response.data?.emailPending;
+      const statusFromApi = response.data?.emailStatus;
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+        showToast('Saved — Email Sent ✓', 'success');
+      } else if (emailPending || statusFromApi === 'pending') {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast('Saved — Email Dispatching 🚀', 'info');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
+        showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+      }
     } catch (err) {
-      const msg =
-        err.response?.data?.message ||
-        err.response?.data?.errors?.[0] ||
-        'Failed to save TK 207 Analysis data.';
-      showToast(msg, 'error');
+      setSavePhase('idle');
+      console.error('[TK207Analysis] Save failed:', err);
+      const serverMessage = err.response?.data?.message || err.message;
+      showToast('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast('Cannot retry email: Record ID is not available.', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await api.post(`/api/tk-207-analysis/${recordId}/retry-email`);
+      if (response.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email sent successfully on retry.');
+        showToast('Email resent successfully!', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed on retry.');
+        showToast('Email retry failed: ' + (response.data?.emailError || 'Rejected by server'), 'error');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
+      setSavePhase('email_failed');
+      setEmailStatusDetail(msg);
+      showToast('Retry Email Error: ' + msg, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Helper for Shift Status Badges
+  const getShiftBadge = (shiftId) => {
+    let status = 'NEW';
+    let bg = 'bg-indigo-100 text-indigo-700';
+
+    if (lockedShifts[shiftId]) {
+      status = 'Locked';
+      bg = 'bg-slate-200 text-slate-700';
+    } else {
+      if (shiftId === 'shift1') {
+        if (lockedShifts.shift2Saved) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift1Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      } else if (shiftId === 'shift2') {
+        if (!lockedShifts.shift1Saved) {
+          status = 'Waiting';
+          bg = 'bg-amber-100 text-amber-700';
+        } else if (lockedShifts.shift3Saved) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift2Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      } else if (shiftId === 'shift3') {
+        if (!lockedShifts.shift2Saved) {
+          status = 'Waiting';
+          bg = 'bg-amber-100 text-amber-700';
+        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift3Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      }
+    }
+
+    return (
+      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-300 shadow-2xs ${bg}`}>
+        {status.toUpperCase()}
+      </span>
+    );
   };
 
   return (
@@ -338,182 +638,218 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                 <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
                   SHIFT TWICE
                 </span>
+                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                  Unit: Kgm/m³
+                </span>
               </h1>
             </div>
           </div>
 
           {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
+            {/* Current Date Display (Strictly Asia/Kolkata Today) */}
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
               <label
                 htmlFor="tk207-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+                className="text-xs font-bold text-slate-600 flex items-center gap-1 cursor-default shrink-0"
               >
+                <Calendar className="w-3.5 h-3.5 text-slate-500" />
                 <span>Date:</span>
-                <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="tk207-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    if (typeof setDateError === 'function') setDateError(false);
-                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    typeof dateError !== 'undefined' && dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
-                />
-              </div>
-              {date && (
-                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {typeof dateError !== 'undefined' && dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
+              <input
+                id="tk207-date-input"
+                type="date"
+                value={date}
+                readOnly
+                disabled
+                className="text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded px-2 py-0.5 shadow-2xs cursor-not-allowed opacity-90"
+                title="Date is strictly locked to today's date in Asia/Kolkata timezone"
+              />
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                Today
+              </span>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-tk207-reset"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-                title="Clear all fields"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              {!isViewOnly && (
+                <button
+                  type="button"
+                  id="btn-tk207-reset"
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Reset form to last saved data"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Reset</span>
+                </button>
+              )}
 
-              <button
-                id="btn-tk207-save"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
-                title="Save TK 207 data"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
+              {!isViewOnly && (
+                <button
+                  type="button"
+                  id="btn-tk207-save"
+                  onClick={handleSaveClick}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-blue-700 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  title="Save active shift data and notify assigned user"
+                >
+                  {saving ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Shift</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
+      {/* ── Status Banner (Persistence & Email Result) ────────────────────────── */}
+      {savePhase !== 'idle' && (
         <div
-          id="tk207-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
+          id="tk207-status-banner"
+          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
+            savePhase === 'completed'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+              : savePhase === 'email_pending'
+              ? 'bg-sky-50 border-sky-300 text-sky-900'
+              : savePhase === 'saving'
+              ? 'bg-blue-50 border-blue-200 text-blue-900'
+              : 'bg-amber-50 border-amber-300 text-amber-900'
+          }`}
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              TK 207 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
+          <div className="flex items-center gap-2.5">
+            {savePhase === 'completed' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : savePhase === 'email_pending' ? (
+              <Clock className="w-4 h-4 text-sky-600 animate-pulse shrink-0" />
+            ) : savePhase === 'saving' ? (
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            )}
+            <div>
+              <span className="font-extrabold text-sm">
+                {savePhase === 'completed'
+                  ? 'Saved & Emailed Successfully ✓'
+                  : savePhase === 'email_pending'
+                  ? 'Saved — Email Pending ⏳'
+                  : savePhase === 'saving'
+                  ? 'Saving to MongoDB & preparing notification...'
+                  : 'Saved to Database — Email Delivery Alert ⚠️'}
+              </span>
+              <div className="text-slate-600 mt-0.5 flex items-center gap-2 flex-wrap">
+                {recipientEmail && (
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    <Mail className="w-3 h-3 text-slate-500" />
+                    Recipient: {recipientEmail}
+                  </span>
+                )}
+                {emailStatusDetail && <span>Detail: {emailStatusDetail}</span>}
+              </div>
+            </div>
           </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
+
+          {savePhase === 'email_failed' && recordId && !isViewOnly && (
+            <button
+              onClick={handleRetryEmail}
+              disabled={saving}
+              className="inline-flex items-center gap-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded shadow-xs transition cursor-pointer self-start sm:self-auto shrink-0"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry Email</span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* ── Analysis Table Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-
-        {/* Table Header Bar */}
-        <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-blue-600" />
-            <h2 className="text-xs font-extrabold text-slate-800 tracking-tight uppercase">
-              TK 207 Measurements
-            </h2>
-            <span className="text-[10px] bg-blue-100 text-blue-800 font-extrabold px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
-              SHIFT TWICE
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 text-[11px] text-slate-600 font-semibold flex-wrap">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Unit: Kgm/m³</span>
-            <span>•</span>
-            <span>FNH₃: 3.92–4.12</span>
-            <span>•</span>
-            <span>CNH₃: 1.82–2.02</span>
-            <span>•</span>
-            <span>TCl: 5.37–5.57</span>
-            <span>•</span>
-            <span>PCl: 3.45–3.65</span>
-          </div>
+      {/* ── Shift Status Tracker Bar ───────────────────────────────────────── */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-slate-500" />
+          <span className="font-bold text-slate-700">Shift Workflow Status:</span>
         </div>
+        <div className="flex items-center gap-4 flex-wrap">
+          {SHIFT_MAPPING.map((shift) => (
+            <div key={shift.key} className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-600 text-[11px]">{shift.name.split(' ')[0]}:</span>
+              {getShiftBadge(shift.key)}
+            </div>
+          ))}
+        </div>
+        {isViewOnly && (
+          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+            View Only Mode (Operator/User)
+          </span>
+        )}
+      </div>
 
-        {/* Scrollable table wrapper */}
+      {/* ── Main Data Entry Table ─────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            {/* Column headers */}
+          <table className="w-full text-xs border-collapse">
+            {/* Header */}
             <thead>
-              <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-28 sm:w-32 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
-                  Time
+              <tr className="bg-slate-900 text-white font-bold text-center select-none">
+                <th className="px-5 py-3.5 text-left text-xs uppercase tracking-wider font-extrabold border-r border-slate-800/80 w-36">
+                  <div className="flex items-center gap-1.5 text-slate-300">
+                    <Clock className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Time Slot</span>
+                  </div>
                 </th>
-                {PARAMETERS.map((p, idx) => (
+                {PARAMETERS.map((param) => (
                   <th
-                    key={p.key}
-                    className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
-                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
-                    } ${p.colClass}`}
+                    key={param.key}
+                    className={`px-4 py-3.5 text-center text-xs font-extrabold uppercase tracking-wider border-r border-slate-800/80 last:border-r-0 ${param.colClass}`}
                   >
-                    <div className="font-extrabold text-blue-300 text-xs">
-                      {p.label}
-                    </div>
-                    <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
-                      Kgm/m³
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-white text-sm font-black">{param.label}</span>
+                      <span className="text-[10px] text-blue-300 font-semibold mt-0.5">({param.unit})</span>
+                      <span className="text-[9.5px] font-mono font-medium text-slate-400 mt-0.5">
+                        {TK207_LIMITS[param.key]?.formattedRange}
+                      </span>
                     </div>
                   </th>
                 ))}
               </tr>
             </thead>
 
-            {/* Data rows */}
-            <tbody className="divide-y divide-slate-200">
+            {/* Table Body */}
+            <tbody className="divide-y divide-slate-200/80 font-medium">
               {visibleRows.map((row) => {
                 const styles = getRowStyles(row.shiftId);
+                const shiftLocked = isShiftDisabled(row.shiftId);
+
                 return (
                   <tr
                     key={row.key}
-                    className={`transition-colors duration-100 ${styles.row}`}
+                    className={`transition-colors duration-100 ${styles.row} ${shiftLocked ? 'opacity-85' : ''}`}
                   >
-                    {/* Time slot label */}
+                    {/* Time slot label & Shift indicator */}
                     <td className="px-5 py-2.5 align-middle">
-                      <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2.5 py-1 rounded border border-slate-200 shadow-2xs inline-block">
-                        {row.time}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2.5 py-1 rounded border border-slate-200 shadow-2xs inline-block">
+                          {row.time}
+                        </span>
+                        {shiftLocked && (
+                          <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                        )}
+                      </div>
                     </td>
 
-                    {/* Parameter input cells with Tolerance / Limit Validation */}
+                    {/* Parameter input cells */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
-                      const cellVal = data[row.key][param.key];
+                      const cellVal = data[row.key]?.[param.key] ?? '';
                       const isFormatError = !!errors[fieldKey];
                       const formatErrorMessage = errors[fieldKey];
 
@@ -522,10 +858,11 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                       const isOutOfLimit = validation.isOutOfLimit;
                       const isNormal = validation.isNormal;
                       const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
+                      const isEdited = Boolean(editedFields[fieldKey]);
 
                       return (
-                        <td key={param.key} className="px-4 py-2.5 text-center align-top">
-                          <div className="flex flex-col items-center justify-start min-h-[62px]">
+                        <td key={param.key} className="px-4 py-2 text-center align-top">
+                          <div className="flex flex-col items-center justify-start min-h-[58px]">
                             <div className="relative w-full max-w-[115px]">
                               <input
                                 id={`tk207-input-${row.key}-${param.key}`}
@@ -533,21 +870,26 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                                 inputMode="decimal"
                                 value={cellVal}
                                 placeholder="0.00"
+                                disabled={shiftLocked}
                                 onChange={(e) =>
                                   handleChange(row.key, param.key, e.target.value)
                                 }
                                 title={
-                                  limit
+                                  shiftLocked
+                                    ? 'Field is locked for editing'
+                                    : limit
                                     ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange}, Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                                      ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
                                       : hasValue
-                                      ? `NORMAL: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
-                                      : `Allowed range: ${limit.formattedRange} (Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                                      ? `NORMAL: ${cellVal} Kgm/m³`
+                                      : `Target: ${limit.formattedTarget} (${limit.formattedTolerance})`
                                     : ''
                                 }
                                 className={`w-full max-w-[115px] mx-auto text-center text-sm font-mono font-bold px-3 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                                  isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+                                  shiftLocked
+                                    ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed font-semibold'
+                                    : isOutOfLimit
+                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
                                     : isFormatError
                                     ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
                                     : hasValue && isNormal
@@ -556,6 +898,18 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                                 }`}
                                 aria-label={`${param.label} at ${row.time}`}
                               />
+
+                              {/* EDITED badge */}
+                              {isEdited && (
+                                <span
+                                  className="absolute -top-1.5 -left-1.5 bg-amber-500 text-white rounded px-1 text-[8.5px] font-black tracking-wider uppercase shadow-xs pointer-events-none"
+                                  title="Modified after initial save"
+                                >
+                                  EDITED
+                                </span>
+                              )}
+
+                              {/* Out of limit alert dot */}
                               {isOutOfLimit && (
                                 <span
                                   className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -570,20 +924,19 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                             {isFormatError && (
                               <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
                                 <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
-                                <span className="whitespace-nowrap">{formatErrorMessage}</span>
+                                <span>{formatErrorMessage}</span>
                               </div>
                             )}
 
-                            {/* Status and Allowed Range Display */}
+                            {/* Status and Range */}
                             {!isFormatError && (
-                              <div className="mt-1 flex flex-col items-center justify-center">
+                              <div className="mt-0.5 flex flex-col items-center justify-center">
                                 {hasValue && isNormal && (
                                   <span
                                     id={`tk207-status-${row.key}-${param.key}`}
-                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
-                                    title={`NORMAL: within ${limit?.formattedRange || ''}`}
+                                    className="text-[9.5px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5"
                                   >
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
                                     <span>NORMAL</span>
                                   </span>
                                 )}
@@ -591,25 +944,22 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                                 {hasValue && isOutOfLimit && (
                                   <span
                                     id={`tk207-status-${row.key}-${param.key}`}
-                                    className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
-                                    title={`OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit?.formattedRange || ''})`}
+                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9px] font-black tracking-tight whitespace-nowrap flex items-center justify-center gap-0.5 shadow-2xs"
                                   >
-                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    <AlertCircle className="w-2 h-2 text-rose-600 shrink-0" />
                                     <span>OUT OF LIMIT</span>
                                   </span>
                                 )}
 
-                                {/* Allowed range displayed below each input field */}
                                 <span
                                   id={`tk207-range-${row.key}-${param.key}`}
-                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
+                                  className={`text-[9px] font-semibold tracking-tight ${
                                     isOutOfLimit
                                       ? 'text-rose-700 font-bold'
                                       : hasValue
                                       ? 'text-slate-600 font-bold'
                                       : 'text-slate-400'
                                   }`}
-                                  title={`Target: ${limit?.formattedTarget || ''} (${limit?.formattedTolerance || ''})`}
                                 >
                                   {limit?.formattedRange}
                                 </span>
@@ -631,14 +981,84 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>TK 207</strong> (FNH₃, CNH₃, TCl, PCl). Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>. Enter numeric values only. Leave blank if not applicable.
+              Values for <strong>TK 207</strong> (FNH₃, CNH₃, TCl, PCl). Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">
-            Total Slots: {visibleRows.length} (24-hour monitoring)
+            Total Slots: {visibleRows.length} (24-hour monitoring across 3 shifts)
           </div>
         </div>
       </div>
+
+      {/* ── Save Confirmation Modal ────────────────────────────────────────── */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                <Send className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Confirm Shift Submission
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Please review the shift details before saving.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Plant / Tank:</span>
+                <span className="font-bold text-slate-900">ACL Plant → TK 207</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Selected Date:</span>
+                <span className="font-bold text-slate-900">{formatDateDisplay(confirmData.date)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Shift to Save:</span>
+                <span className="font-extrabold text-blue-600">{confirmData.shift.name}</span>
+              </div>
+              {confirmData.isFinalEdit && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px] font-bold">
+                  ⚠️ Notice: This is the final allowed edit for III SHIFT. After this save, all shifts for today will lock permanently.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Review / Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

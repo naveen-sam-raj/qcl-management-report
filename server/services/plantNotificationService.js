@@ -368,10 +368,49 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 209') ||
     String(analysisType || '').toLowerCase().includes('tk209');
 
+  const isTK207Analysis =
+    analysisType === 'TK 207 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('tk 207') ||
+    String(analysisType || '').toLowerCase().includes('tk207');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
-  if (isTK205Analysis) {
+  if (isTK207Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't09', time: '09:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't13', time: '13:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't17', time: '17:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't21', time: '21:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't01', time: '01:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+      { key: 't05', time: '05:00', shift: 'III Shift' },
+    ];
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Shift:
+${shiftLabel || 'All Shifts'}
+
+TK 207 Analysis Parameters (Unit: Kgm/m³):
+` + activeSlots.map(s => {
+      const row = rawData[s.key] || {};
+      return `- ${s.time} (${s.shift}): FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCL: ${formatVal(row.tcl)}, PCL: ${formatVal(row.pcl)}`;
+    }).join('\n') + '\n\n';
+  } else if (isTK205Analysis) {
     const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
     const slots = [
       { key: 't07', time: '07:00', shift: 'I Shift' },
@@ -731,6 +770,62 @@ Attachment: ${excelFileName}
                   <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.tcl)}</td>
                   <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.pcl)}</td>
                   <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.co2)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isTK207Analysis) {
+    const rawData = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows || {};
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't09', time: '09:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't13', time: '13:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't17', time: '17:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't21', time: '21:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't01', time: '01:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+      { key: 't05', time: '05:00', shift: 'III Shift' },
+    ];
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label">TK 207 Analysis Results (${shiftLabel || 'All Shifts'}) — Unit: Kgm/m³</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 8px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ (3.92–4.12)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">CNH₃ (1.82–2.02)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">TCl (5.37–5.57)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">PCl (3.45–3.65)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${activeSlots.map((s, idx) => {
+              const r = rawData[s.key] || {};
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : '';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.time} <span style="font-size: 10px; color: #64748b; font-weight: normal;">(${s.shift})</span></td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.fnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.cnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.tcl)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.pcl)}</td>
                 </tr>
               `;
             }).join('')}
