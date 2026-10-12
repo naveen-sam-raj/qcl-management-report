@@ -29,6 +29,14 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Analysis date is required.' });
     }
 
+    // ── Enforce Authorization: Only Admins can modify Pure Salt Analysis ──
+    if (req.user && req.user.role === 'user') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Pure Salt Analysis data entry and modification is restricted to Company Admins.',
+      });
+    }
+
     // ── Enforce Today's Date Restriction (Asia/Kolkata) for Pure Salt Analysis ──
     const getTodayKolkata = () => {
       const parts = new Intl.DateTimeFormat('en-CA', {
@@ -104,6 +112,15 @@ router.post('/', protect, async (req, res) => {
         if (hasData(payload.rows[key]) && isDiff(existingRecord.rows[key], payload.rows[key]) && !existingRecord.lockedShifts[key]) {
           willSave[key] = true;
         }
+      }
+
+      // Enforce Shift-Wise Locking: Only one shift can be saved at a time
+      const shiftsToSave = ['shift1', 'shift2', 'shift3'].filter(k => willSave[k]);
+      if (shiftsToSave.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift-wise input locking enforced: Only one shift can be edited and saved at a time.',
+        });
       }
 
       let newS1Saved = existingRecord.lockedShifts.shift1Saved || willSave.shift1;
@@ -193,6 +210,15 @@ router.post('/', protect, async (req, res) => {
         if (hasData(payload.rows[key])) {
           willSave[key] = true;
         }
+      }
+
+      // Enforce Shift-Wise Locking: Only one shift can be saved at a time
+      const shiftsToSave = ['shift1', 'shift2', 'shift3'].filter(k => willSave[k]);
+      if (shiftsToSave.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift-wise input locking enforced: Only one shift can be entered and saved at a time.',
+        });
       }
 
       if (willSave.shift2 && !willSave.shift1) {

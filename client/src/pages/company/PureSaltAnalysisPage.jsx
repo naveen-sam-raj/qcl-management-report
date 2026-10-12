@@ -23,6 +23,10 @@ import {
   Eye,
   RefreshCw,
   FileSpreadsheet,
+  Lock,
+  Pencil,
+  Clock,
+  Sliders,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -154,6 +158,10 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
+  // Shift-Wise Input Locking: null | 'shift1' | 'shift2' | 'shift3'
+  // When null, all shifts are read-only until Admin explicitly selects an available shift
+  const [activeEditingShift, setActiveEditingShift] = useState(null);
+
   // EmailJS & Excel Reporting States
   const [recipientEmail, setRecipientEmail] = useState(
     user?.email || import.meta.env.VITE_DEFAULT_REPORT_RECIPIENT_EMAIL || ''
@@ -169,6 +177,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     
     let active = true;
     setData(buildEmptyData()); // Clear stale data immediately while loading
+    setActiveEditingShift(null); // When date changes, all shifts default to read-only until explicitly selected
 
     const fetchExistingData = async () => {
       try {
@@ -230,6 +239,11 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     if (rowKey === 'shift2' && !lockedShifts.shift1Saved) return; // Enforce sequence
     if (rowKey === 'shift3' && !lockedShifts.shift2Saved) return; // Enforce sequence
 
+    // Shift-Wise Locking: shifts can only be edited when actively selected
+    if (['shift1', 'shift2', 'shift3'].includes(rowKey) && activeEditingShift !== rowKey) {
+      return;
+    }
+
     setData((prev) => ({
       ...prev,
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
@@ -237,11 +251,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
     // Clear global success on any edit
     setSaveSuccess(false);
-  }, [lockedShifts]);
+  }, [lockedShifts, activeEditingShift]);
 
   const handleReset = () => {
     setData(buildEmptyData());
     setDate(getTodayAsiaKolkata());
+    setActiveEditingShift(null);
     setErrors({});
     setSaveSuccess(false);
     setDateError(false);
@@ -356,8 +371,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     let toSave = [];
     let isFinalEdit = false;
     for (const key of targetRows) {
+      const isShift = ['shift1', 'shift2', 'shift3'].includes(key);
       const hasData = data[key] && Object.values(data[key]).some(val => val !== null && val !== '');
-      const canEdit = !lockedShifts[key] && !(key === 'shift2' && !lockedShifts.shift1Saved) && !(key === 'shift3' && !lockedShifts.shift2Saved);
+      const canEdit = !lockedShifts[key] &&
+        !(key === 'shift2' && !lockedShifts.shift1Saved) &&
+        !(key === 'shift3' && !lockedShifts.shift2Saved) &&
+        (!isShift || activeEditingShift === key);
       if (hasData && canEdit) {
         const diff = isDiff(originalData ? originalData[key] : null, data[key]);
         if (diff) {
@@ -370,7 +389,11 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     }
     
     if (toSave.length === 0) {
-      showToast('No new unlocked changes to save.', 'info');
+      if (!activeEditingShift) {
+        showToast('Please select an available shift to edit first, or enter RAW SALT / COMPOSITION.', 'info');
+      } else {
+        showToast(`No modified changes found in ${shiftDisplayNames[activeEditingShift]} to save.`, 'info');
+      }
       return;
     }
     
@@ -437,6 +460,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
       }
+      setActiveEditingShift(null); // Return to read-only state upon successful save
       setShowConfirmModal(false);
 
       // Stage 2: "Generating Report..."
@@ -684,13 +708,155 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
+        {/* ── Shift-Wise Input Editing Control Bar ────────────────────────── */}
+        {!isViewOnly && (
+          <div className="px-5 py-3 bg-gradient-to-r from-slate-50 via-blue-50/30 to-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-700 tracking-tight flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                <span>Shift Input Mode:</span>
+              </span>
+              {activeEditingShift ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+                  Editing {shiftDisplayNames[activeEditingShift]}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-slate-200 text-slate-700 shadow-2xs">
+                  <Lock className="w-3 h-3 text-slate-500" />
+                  All Shifts Read-Only (Select a shift to edit)
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Read-Only Mode Button */}
+              <button
+                type="button"
+                onClick={() => setActiveEditingShift(null)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer ${
+                  activeEditingShift === null
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+                title="Lock all shifts in read-only mode"
+              >
+                Read-Only
+              </button>
+
+              {/* I SHIFT Button */}
+              {(() => {
+                const isLocked = Boolean(lockedShifts.shift1);
+                const isEligible = !isLocked;
+                const isActive = activeEditingShift === 'shift1';
+                return (
+                  <button
+                    type="button"
+                    id="btn-psa-select-bar-shift1"
+                    disabled={!isEligible}
+                    onClick={() => setActiveEditingShift(isActive ? null : 'shift1')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                        : isLocked
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
+                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}
+                  >
+                    {isLocked ? <Lock className="w-3 h-3 text-slate-400" /> : <Pencil className="w-3 h-3" />}
+                    <span>I SHIFT</span>
+                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
+                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
+                  </button>
+                );
+              })()}
+
+              {/* II SHIFT Button */}
+              {(() => {
+                const isLocked = Boolean(lockedShifts.shift2);
+                const isWaiting = !lockedShifts.shift1Saved;
+                const isEligible = !isLocked && !isWaiting;
+                const isActive = activeEditingShift === 'shift2';
+                return (
+                  <button
+                    type="button"
+                    id="btn-psa-select-bar-shift2"
+                    disabled={!isEligible}
+                    onClick={() => setActiveEditingShift(isActive ? null : 'shift2')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                        : isLocked
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
+                        : isWaiting
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}
+                  >
+                    {isLocked ? (
+                      <Lock className="w-3 h-3 text-slate-400" />
+                    ) : isWaiting ? (
+                      <Clock className="w-3 h-3 text-amber-500" />
+                    ) : (
+                      <Pencil className="w-3 h-3" />
+                    )}
+                    <span>II SHIFT</span>
+                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
+                    {isWaiting && <span className="text-[10px] text-amber-700 font-normal">(Waiting)</span>}
+                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
+                  </button>
+                );
+              })()}
+
+              {/* III SHIFT Button */}
+              {(() => {
+                const isLocked = Boolean(lockedShifts.shift3);
+                const isWaiting = !lockedShifts.shift2Saved;
+                const isFinalUsed = Boolean(lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
+                const isEligible = !isLocked && !isWaiting && !isFinalUsed;
+                const isActive = activeEditingShift === 'shift3';
+                return (
+                  <button
+                    type="button"
+                    id="btn-psa-select-bar-shift3"
+                    disabled={!isEligible}
+                    onClick={() => setActiveEditingShift(isActive ? null : 'shift3')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                        : isLocked || isFinalUsed
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
+                        : isWaiting
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}
+                  >
+                    {isLocked || isFinalUsed ? (
+                      <Lock className="w-3 h-3 text-slate-400" />
+                    ) : isWaiting ? (
+                      <Clock className="w-3 h-3 text-amber-500" />
+                    ) : (
+                      <Pencil className="w-3 h-3" />
+                    )}
+                    <span>III SHIFT</span>
+                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
+                    {isWaiting && <span className="text-[10px] text-amber-700 font-normal">(Waiting)</span>}
+                    {isFinalUsed && <span className="text-[10px] text-slate-400 font-normal">(Final Used)</span>}
+                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[840px] text-sm">
             {/* Column headers */}
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-36 sm:w-44 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
+                <th className="px-4 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-48 sm:w-56 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
                   Parameter / Shift
                 </th>
                 {PARAMETERS.map((p, idx) => (
@@ -715,55 +881,98 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                     className={`transition-colors duration-100 ${styles.row}`}
                   >
                     {/* Row label */}
-                    <td className="px-5 py-2.5 align-middle">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-bold ${styles.label} whitespace-nowrap`}>
-                          {row.label}
-                        </span>
-                        {row.highlight && (!isViewOnly || row.highlightType === 'comp') && (
-                          <span
-                            className={`text-[8.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}
-                          >
-                            {row.highlightType === 'raw' ? 'Input' : 'Final'}
+                    <td className="px-4 py-2.5 align-middle">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-xs font-bold ${styles.label} whitespace-nowrap`}>
+                            {row.label}
                           </span>
-                        )}
-                        {(() => {
-                          let status = 'NEW';
-                          let bg = 'bg-indigo-100 text-indigo-700';
+                          {row.highlight && (!isViewOnly || row.highlightType === 'comp') && (
+                            <span
+                              className={`text-[8.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}
+                            >
+                              {row.highlightType === 'raw' ? 'Input' : 'Final'}
+                            </span>
+                          )}
+                          {(() => {
+                            let status = 'NEW';
+                            let bg = 'bg-indigo-100 text-indigo-700';
 
-                          if (lockedShifts[row.key]) {
-                            status = 'Locked';
-                            bg = 'bg-slate-200 text-slate-700';
-                          } else {
-                            if (row.key === 'shift1') {
-                              if (lockedShifts.shift1Saved) {
-                                status = 'Editable';
-                                bg = 'bg-blue-100 text-blue-700';
-                              }
-                            } else if (row.key === 'shift2') {
-                              if (!lockedShifts.shift1Saved) {
-                                status = 'Waiting';
-                                bg = 'bg-amber-100 text-amber-700';
-                              } else if (lockedShifts.shift2Saved) {
-                                status = 'Editable';
-                                bg = 'bg-blue-100 text-blue-700';
-                              }
-                            } else if (row.key === 'shift3') {
-                              if (!lockedShifts.shift2Saved) {
-                                status = 'Waiting';
-                                bg = 'bg-amber-100 text-amber-700';
-                              } else if (lockedShifts.shift3Saved) {
-                                status = 'Editable';
-                                bg = 'bg-blue-100 text-blue-700';
+                            if (lockedShifts[row.key]) {
+                              status = 'Locked';
+                              bg = 'bg-slate-200 text-slate-700';
+                            } else {
+                              if (row.key === 'shift1') {
+                                if (lockedShifts.shift1Saved) {
+                                  status = 'Editable';
+                                  bg = 'bg-blue-100 text-blue-700';
+                                }
+                              } else if (row.key === 'shift2') {
+                                if (!lockedShifts.shift1Saved) {
+                                  status = 'Waiting';
+                                  bg = 'bg-amber-100 text-amber-700';
+                                } else if (lockedShifts.shift2Saved) {
+                                  status = 'Editable';
+                                  bg = 'bg-blue-100 text-blue-700';
+                                }
+                              } else if (row.key === 'shift3') {
+                                if (!lockedShifts.shift2Saved) {
+                                  status = 'Waiting';
+                                  bg = 'bg-amber-100 text-amber-700';
+                                } else if (lockedShifts.shift3Saved) {
+                                  status = 'Editable';
+                                  bg = 'bg-blue-100 text-blue-700';
+                                }
                               }
                             }
+
+                            return (
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
+                                {status}
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Shift Edit Selector Action Button */}
+                        {!isViewOnly && ['shift1', 'shift2', 'shift3'].includes(row.key) && (() => {
+                          const isLocked = Boolean(lockedShifts[row.key]);
+                          const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
+                          const isFinalUsed = Boolean(row.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
+                          const canEdit = !isLocked && !isWaiting && !isFinalUsed;
+                          const isActive = activeEditingShift === row.key;
+
+                          if (isActive) {
+                            return (
+                              <button
+                                type="button"
+                                id={`btn-psa-active-${row.key}`}
+                                onClick={() => setActiveEditingShift(null)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-600 hover:bg-blue-700 text-white shadow-2xs cursor-pointer transition shrink-0"
+                                title="Click to stop editing this shift (set to read-only)"
+                              >
+                                <Pencil className="w-2.5 h-2.5" />
+                                <span>Editing</span>
+                              </button>
+                            );
                           }
 
-                          return (
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
-                              {status}
-                            </span>
-                          );
+                          if (canEdit) {
+                            return (
+                              <button
+                                type="button"
+                                id={`btn-psa-select-${row.key}`}
+                                onClick={() => setActiveEditingShift(row.key)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 hover:border-blue-500 shadow-2xs cursor-pointer transition shrink-0"
+                                title={`Click to edit ${row.label}`}
+                              >
+                                <Pencil className="w-2.5 h-2.5" />
+                                <span>{lockedShifts[`${row.key}Saved`] ? 'Edit' : 'Enter'}</span>
+                              </button>
+                            );
+                          }
+
+                          return null;
                         })()}
                       </div>
                     </td>
@@ -781,9 +990,18 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                           <div className="flex flex-col items-center justify-start min-h-[50px]">
                             <div className="relative w-full max-w-[98px]">
                               {(() => {
-                                const isLocked = lockedShifts[row.key];
-                                const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
-                                const isDisabled = isViewOnly || isLocked || isWaiting;
+                                const isShift = ['shift1', 'shift2', 'shift3'].includes(row.key);
+                                let isDisabled;
+                                if (isShift) {
+                                  const isLocked = Boolean(lockedShifts[row.key]);
+                                  const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
+                                  const isShiftActive = activeEditingShift === row.key;
+                                  isDisabled = isViewOnly || isLocked || isWaiting || !isShiftActive;
+                                } else {
+                                  // RAW SALT and COMPOSITION retain their independent rules
+                                  const isLocked = Boolean(lockedShifts[row.key]);
+                                  isDisabled = isViewOnly || isLocked;
+                                }
                                 return (
                                   <input
                                     id={`psa-input-${row.key}-${param.key}`}
