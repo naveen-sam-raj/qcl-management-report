@@ -391,6 +391,48 @@ router.get('/:id/download-excel', protect, async (req, res) => {
 });
 
 /**
+ * @desc    Retry sending email with Excel report for an existing saved Sieve analysis record
+ * @route   POST /api/pure-salt-sieve-analysis/:id/retry-email
+ * @access  Private
+ */
+router.post('/:id/retry-email', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let record = null;
+    if (PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findById === 'function') {
+      record = await PureSaltSieveAnalysis.findById(id);
+    }
+    if (!record) {
+      record = analysisRecords.find((r) => (r._id || r.id).toString() === id.toString());
+    }
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'Sieve analysis record not found.' });
+    }
+
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: record.plant || 'ACL Plant',
+      analysisType: record.analysisType || 'Pure Salt Sieve Analysis',
+      unit: '',
+      shift: req.body?.shift || record.shift || 'All Shifts (I, II, III)',
+      date: record.date,
+      data: record.rows,
+      submittedBy: record.submittedBy || req.user?.name || 'Plant Operator',
+      submittedById: req.user?._id || record.submittedById,
+      company: req.user?.company?._id || req.user?.company || record.company,
+      explicitRecord: record,
+    });
+
+    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
+  } catch (error) {
+    console.error('[PureSaltSieve Retry Email] Error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
  * @desc    Retrieve Pure Salt Sieve Analysis records from MongoDB Atlas
  * @route   GET /api/pure-salt-sieve-analysis
  * @access  Private

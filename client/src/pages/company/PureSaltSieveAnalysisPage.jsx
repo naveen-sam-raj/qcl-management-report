@@ -394,14 +394,26 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       setSavePhase('emailing');
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      setSavePhase('completed');
+      // Check email status from server
+      const statusFromApi = response.data.emailStatus || savedRecord?.emailStatus || 'sent';
+      if (statusFromApi === 'failed') {
+        setSavePhase('email_failed');
+        setEmailStatusDetail('Email delivery failed to mail server');
+        showToast('Data saved successfully, but notification email delivery failed.', 'warning');
+      } else if (statusFromApi === 'processing' || statusFromApi === 'pending') {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Email is queued for delivery');
+        showToast('Saved successfully — Email queued for delivery', 'info');
+      } else {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email accepted by SMTP server');
+        showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
+      }
       setSaveSuccess(true);
-      showToast(response.data.message || 'Saved & Dispatched Successfully ✓', 'success');
 
       setTimeout(() => {
         setSaving(false);
-        setSavePhase('idle');
-      }, 4000);
+      }, 3000);
     } catch (err) {
       setSavePhase('idle');
       setSaving(false);
@@ -412,6 +424,35 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       if (!response?.data?.success) {
         setSaving(false);
       }
+    }
+  };
+
+  // ── Retry Email Dispatch Handler ──
+  const handleRetryEmail = async () => {
+    if (!lastSavedRecord?._id) {
+      showToast('No saved record available to retry email.', 'error');
+      return;
+    }
+    setSaving(true);
+    setSavePhase('emailing');
+    try {
+      const response = await api.post(`/pure-salt-sieve-analysis/${lastSavedRecord._id}/retry-email`);
+      if (response.data && (response.data.emailSent || response.data.emailStatus === 'sent')) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email accepted by SMTP server');
+        showToast('Notification email sent successfully ✓', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed');
+        showToast('Email retry failed: ' + (response.data?.emailError || 'Server error'), 'error');
+      }
+    } catch (err) {
+      setSavePhase('email_failed');
+      const msg = err.response?.data?.message || err.response?.data?.emailError || err.message;
+      setEmailStatusDetail(msg);
+      showToast('Email retry failed: ' + msg, 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -513,7 +554,11 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
                       : savePhase === 'emailing'
                       ? 'Sending Email...'
                       : savePhase === 'completed'
-                      ? 'Saved & Dispatched ✓'
+                      ? 'Saved & Emailed ✓'
+                      : savePhase === 'email_failed'
+                      ? 'Saved — Email Failed'
+                      : savePhase === 'email_pending'
+                      ? 'Saved — Email Pending'
                       : 'Save / Submit'}
                   </span>
                 </button>
@@ -530,35 +575,61 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
+      {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       {saveSuccess && (
         <div
-          id="sieve-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
+          id="sieve-status-banner"
+          className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
+            savePhase === 'email_failed'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : savePhase === 'email_pending'
+              ? 'bg-sky-50 border-sky-200 text-sky-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          {savePhase === 'email_failed' ? (
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          )}
           <div className="text-xs flex-1 space-y-1">
-            <div>
-              <span className="font-bold text-emerald-800">
-                Saved & Dispatched Successfully ✓
-              </span>{' '}
-              <span className="text-emerald-700">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold">
+                {savePhase === 'email_failed'
+                  ? 'Saved — Email Failed ⚠️'
+                  : savePhase === 'email_pending'
+                  ? 'Saved — Email Pending ⏳'
+                  : 'Saved — Email Sent ✓'}
+              </span>
+              <span className="text-slate-600">
                 Pure Salt Sieve Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
               </span>
             </div>
             {recipientEmail && (
-              <div className="text-[11.5px] text-emerald-800 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="font-semibold text-emerald-900">Notification Recipient:</span>
-                <span className="font-mono bg-emerald-100/70 border border-emerald-300/60 px-1.5 py-0.2 rounded text-emerald-950">
+              <div className="text-[11.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-semibold">Notification Recipient:</span>
+                <span className="font-mono bg-white/70 border px-1.5 py-0.2 rounded font-bold">
                   {recipientEmail}
                 </span>
-                <span className="text-emerald-600">(Registered ACL Plant Operator)</span>
+                <span className="text-slate-500">(Registered ACL Plant Operator)</span>
+                {emailStatusDetail && (
+                  <span className="italic text-slate-600">— {emailStatusDetail}</span>
+                )}
               </div>
             )}
           </div>
+          {savePhase === 'email_failed' && (
+            <button
+              onClick={handleRetryEmail}
+              disabled={saving}
+              className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/90 hover:bg-amber-300 rounded border border-amber-400/50 transition cursor-pointer shrink-0 shadow-2xs"
+            >
+              Retry Email
+            </button>
+          )}
           <button
             onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0 cursor-pointer"
+            className="ml-auto text-slate-400 hover:text-slate-600 transition text-base leading-none shrink-0 cursor-pointer"
             aria-label="Dismiss"
           >
             ×

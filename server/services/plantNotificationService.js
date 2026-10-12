@@ -372,7 +372,10 @@ Pure Salt Sieve Analysis Fractions:
   }
 
   // Exact Body format
-  const textBody = `Plant:
+  const textBody = `Company:
+TFL
+
+Plant:
 ${plantName}
 
 Analysis:
@@ -500,6 +503,10 @@ Attachment: ${excelFileName}
       <p>SPIC / TFL Plant Management System</p>
     </div>
     <div class="body-content">
+      <div class="field-group">
+        <div class="field-label">Company</div>
+        <div class="field-value">TFL</div>
+      </div>
       <div class="field-group">
         <div class="field-label">Plant</div>
         <div class="field-value">${plantName}</div>
