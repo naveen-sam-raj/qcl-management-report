@@ -325,47 +325,37 @@ router.post('/', protect, async (req, res) => {
     // ── Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
 
-    const runEmailNotification = async () => {
-      let emailResult = null;
-      for (const shiftKey of newlySavedShifts) {
-        try {
-          emailResult = await executeSaveAndEmailWorkflow({
-            plantIdentifier: plantTarget,
-            analysisType: 'Pure Salt Sieve Analysis',
-            unit: '',
-            shift: shiftDisplayNames[shiftKey],
-            date: payload.date,
-            data: payload.rows,
-            submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-            submittedById: req.user?._id || null,
-            company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
-            explicitRecord: savedRecord,
-            rawBody: payload,
-          });
-        } catch (err) {
-          console.warn(`[AutoPlantEmail] Exception in workflow for sieve ${shiftKey}:`, err.message);
-          emailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
-        }
-      }
-      return emailResult;
-    };
+    // Trigger instant email dispatch immediately
+    const emailPromises = newlySavedShifts.map((shiftKey) =>
+      executeSaveAndEmailWorkflow({
+        plantIdentifier: plantTarget,
+        analysisType: 'Pure Salt Sieve Analysis',
+        unit: '',
+        shift: shiftDisplayNames[shiftKey],
+        date: payload.date,
+        data: payload.rows,
+        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+        submittedById: req.user?._id || null,
+        company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
+        explicitRecord: savedRecord,
+        rawBody: payload,
+      }).catch((err) => {
+        console.warn(`[AutoPlantEmail] Instant workflow note for sieve ${shiftKey}:`, err.message);
+        return { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+      })
+    );
 
+    // Give Nodemailer up to 800ms to finish fast over persistent connection pool; otherwise return response and complete in background
     let lastEmailResult = null;
     let emailTimedOut = false;
+    const fastCheck = Promise.all(emailPromises);
+    const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 800));
 
-    // Race email dispatch with a fast timeout (1200ms) so DB save response is never delayed or stuck
-    const emailPromise = runEmailNotification();
-    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 1200));
-
-    const raceResult = await Promise.race([emailPromise, timeoutPromise]);
+    const raceResult = await Promise.race([fastCheck, fastLimit]);
     if (raceResult === 'TIMEOUT') {
       emailTimedOut = true;
-      // Allow background dispatch to complete safely and update DB record
-      emailPromise.catch((err) => {
-        console.warn('[AutoPlantEmail] Background email execution note:', err.message);
-      });
-    } else {
-      lastEmailResult = raceResult;
+    } else if (Array.isArray(raceResult) && raceResult.length > 0) {
+      lastEmailResult = raceResult[raceResult.length - 1];
     }
 
     const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
@@ -381,10 +371,8 @@ router.post('/', protect, async (req, res) => {
     return res.status(201).json({
       success: true,
       message: emailSent
-        ? `Successfully saved ${newlySavedShifts.length} shift(s) & email sent ✓`
-        : emailTimedOut
-        ? `Successfully saved ${newlySavedShifts.length} shift(s) — Email delivery in progress ⏳`
-        : `Successfully saved ${newlySavedShifts.length} shift(s), email status: ${finalEmailStatus}`,
+        ? `Successfully saved & email sent ✓`
+        : `Successfully saved — Email dispatching immediately 🚀`,
       data: savedRecord,
       emailSent,
       emailPending: emailTimedOut,

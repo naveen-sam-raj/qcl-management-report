@@ -25,6 +25,9 @@ const createNodemailerTransporter = () => {
   const secure = process.env.MAIL_SECURE === 'true' || port === 465;
 
   return nodemailer.createTransport({
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
     host: host.trim(),
     port,
     secure,

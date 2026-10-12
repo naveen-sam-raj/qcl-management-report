@@ -426,11 +426,11 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         showToast('Saved — Email Sent ✓', 'success');
       } else if (response.data?.emailPending || statusFromApi === 'pending') {
         setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email Pending (Delivery in progress)');
-        showToast('Saved — Email Pending', 'info');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast('Saved — Email Dispatching 🚀', 'info');
 
-        // Poll once after 2.5s to see if SMTP finalized
-        setTimeout(async () => {
+        // Poll fast (800ms and 1800ms) so user sees sent status right away
+        const checkStatus = async () => {
           try {
             const checkRes = await api.get('/pure-salt-sieve-analysis?date=' + date);
             const latestDoc = checkRes.data?.data?.[0];
@@ -438,12 +438,22 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
               setSavePhase('completed');
               setEmailStatusDetail('Email accepted by SMTP server ✓');
               showToast('Saved — Email Sent ✓', 'success');
+              return true;
             } else if (latestDoc?.emailStatus === 'failed') {
               setSavePhase('email_failed');
               setEmailStatusDetail('Saved — Email Failed');
+              return true;
             }
           } catch (cErr) {}
-        }, 2500);
+          return false;
+        };
+
+        setTimeout(async () => {
+          const done = await checkStatus();
+          if (!done) {
+            setTimeout(checkStatus, 1000);
+          }
+        }, 800);
       } else if (statusFromApi === 'failed' || (emailNotification && !emailNotification.success)) {
         setSavePhase('email_failed');
         const errDetail = emailNotification?.error || emailNotification?.message || 'Email delivery failed to mail server';
