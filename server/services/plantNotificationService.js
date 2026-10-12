@@ -368,6 +368,11 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 209') ||
     String(analysisType || '').toLowerCase().includes('tk209');
 
+  const isCR203Analysis =
+    analysisType === 'CR 203 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('cr 203') ||
+    String(analysisType || '').toLowerCase().includes('cr203');
+
   const isCR202Analysis =
     analysisType === 'CR 202 Analysis' ||
     String(analysisType || '').toLowerCase().includes('cr 202') ||
@@ -381,7 +386,43 @@ const sendPlantAnalysisEmail = async ({
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
-  if (isCR202Analysis) {
+  if (isCR203Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const tRows = rawData.timeRows || {};
+    const fRow = rawData.fnh3Row || {};
+    const pRow = rawData.pclRow || {};
+    const streams = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+    ];
+
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    sieveTextSummary = `Shift:
+${shiftLabel || 'All Shifts'}
+
+CR 203 Analysis Parameters (Unit: Kgm/m³):
+` + activeSlots.map(s => {
+      const r = tRows[s.key] || {};
+      const streamsStr = streams.map(st => `${st.toUpperCase()}: ${formatVal(r[st])}`).join(', ');
+      return `- ${s.time} (${s.shift}) CNH3: [${streamsStr}] | AVG TCL: ${formatVal(r.avgTcl)}`;
+    }).join('\n') + `\n- FNH3: [${streams.map(st => `${st.toUpperCase()}: ${formatVal(fRow[st])}`).join(', ')}] | AVG TCL: ${formatVal(fRow.avgTcl)}\n- PCL: [${streams.map(st => `${st.toUpperCase()}: ${formatVal(pRow[st])}`).join(', ')}] | AVG TCL: ${formatVal(pRow.avgTcl)}\n\n`;
+  } else if (isCR202Analysis) {
     const rawData = savedRecord?.data || savedRecord || {};
     const tRows = rawData.timeRows || {};
     const fRow = rawData.fnh3Row || {};
@@ -814,6 +855,69 @@ Attachment: ${excelFileName}
                 </tr>
               `;
             }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isCR203Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const tRows = rawData.timeRows || {};
+    const fRow = rawData.fnh3Row || {};
+    const pRow = rawData.pclRow || {};
+    const streams = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const slots = [
+      { key: 't07', time: '07:00', shift: 'I Shift' },
+      { key: 't11', time: '11:00', shift: 'I Shift' },
+      { key: 't15', time: '15:00', shift: 'II Shift' },
+      { key: 't19', time: '19:00', shift: 'II Shift' },
+      { key: 't23', time: '23:00', shift: 'III Shift' },
+      { key: 't03', time: '03:00', shift: 'III Shift' },
+    ];
+
+    let activeSlots = slots;
+    if (shiftLabel && /I SHIFT|Shift 1|shift1/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'I Shift');
+    } else if (shiftLabel && /II SHIFT|Shift 2|shift2/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'II Shift');
+    } else if (shiftLabel && /III SHIFT|Shift 3|shift3/i.test(shiftLabel)) {
+      activeSlots = slots.filter(s => s.shift === 'III Shift');
+    }
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label">CR 203 Analysis Results (${shiftLabel || 'All Shifts'}) — Unit: Kgm/m³</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 5px; text-align: left; border: 1px solid #cbd5e1;">Slot / Row</th>
+              ${streams.map(st => `<th style="padding: 6px 4px; text-align: center; border: 1px solid #cbd5e1;">${st.toUpperCase()}</th>`).join('')}
+              <th style="padding: 6px 4px; text-align: center; border: 1px solid #cbd5e1;">AVG TCl (5.54–5.74)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${activeSlots.map((s, idx) => {
+              const r = tRows[s.key] || {};
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : '';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.time} <span style="font-size: 9.5px; color: #64748b;">(${s.shift})</span></td>
+                  ${streams.map(st => `<td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r[st])}</td>`).join('')}
+                  <td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #4338ca;">${formatVal(r.avgTcl)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #ecfdf5; border-top: 2px solid #a7f3d0;">
+              <td style="padding: 5px 6px; border: 1px solid #e2e8f0; font-weight: 800; color: #065f46;">FNH₃ (3.07–3.27)</td>
+              ${streams.map(st => `<td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(fRow[st])}</td>`).join('')}
+              <td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #4338ca;">${formatVal(fRow.avgTcl)}</td>
+            </tr>
+            <tr style="background-color: #f0f9ff; border-top: 1px solid #bae6fd;">
+              <td style="padding: 5px 6px; border: 1px solid #e2e8f0; font-weight: 800; color: #0369a1;">PCl (3.56–3.76)</td>
+              ${streams.map(st => `<td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(pRow[st])}</td>`).join('')}
+              <td style="padding: 5px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0369a1;">${formatVal(pRow.avgTcl)}</td>
+            </tr>
           </tbody>
         </table>
       </div>`;
