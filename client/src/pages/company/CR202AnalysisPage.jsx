@@ -17,6 +17,11 @@ import {
   ChevronRight,
   Factory,
   Database,
+  Lock,
+  Clock,
+  Mail,
+  RefreshCw,
+  Send,
 } from 'lucide-react';
 
 // ─── CR 202 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
@@ -100,14 +105,20 @@ const STREAMS = [
   { key: 'h', label: 'H', colClass: 'min-w-[80px] border-r border-slate-800/50' },
 ];
 
-// 4-Hourly Time Slots (07:00, 11:00, 15:00, 19:00, 23:00, 03:00)
+// 4-Hourly Time Slots mapped to 3 shifts
 const TIME_SLOTS = [
-  { key: 't07', time: '07:00', shiftGroup: 'shift1' },
-  { key: 't11', time: '11:00', shiftGroup: 'shift1' },
-  { key: 't15', time: '15:00', shiftGroup: 'shift2' },
-  { key: 't19', time: '19:00', shiftGroup: 'shift2' },
-  { key: 't23', time: '23:00', shiftGroup: 'shift3' },
-  { key: 't03', time: '03:00', shiftGroup: 'shift3' },
+  { key: 't07', time: '07:00', shift: 'I Shift',   shiftGroup: 'shift1' },
+  { key: 't11', time: '11:00', shift: 'I Shift',   shiftGroup: 'shift1' },
+  { key: 't15', time: '15:00', shift: 'II Shift',  shiftGroup: 'shift2' },
+  { key: 't19', time: '19:00', shift: 'II Shift',  shiftGroup: 'shift2' },
+  { key: 't23', time: '23:00', shift: 'III Shift', shiftGroup: 'shift3' },
+  { key: 't03', time: '03:00', shift: 'III Shift', shiftGroup: 'shift3' },
+];
+
+const SHIFT_MAPPING = [
+  { key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't11'] },
+  { key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't19'] },
+  { key: 'shift3', name: 'III SHIFT (22:00 – 06:00)', slotKeys: ['t23', 't03'] },
 ];
 
 const buildEmptyTimeRows = () =>
@@ -134,6 +145,20 @@ const buildEmptyPclRow = () => ({
   avgAH: '',
 });
 
+// Asia/Kolkata current date helper
+const getTodayAsiaKolkata = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -155,18 +180,21 @@ const formatDateDisplay = (isoDate) => {
 const getRowStyles = (shiftGroup) => {
   if (shiftGroup === 'shift1') {
     return {
-      row:        'bg-sky-50/40 hover:bg-sky-100/60 border-l-4 border-l-blue-600',
+      row:        'bg-sky-50/60 hover:bg-sky-100/70 border-l-4 border-l-blue-600',
+      badge:      'bg-blue-100 text-blue-800 border border-blue-200',
       inputFocus: 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900 font-bold hover:border-slate-400',
     };
   }
   if (shiftGroup === 'shift2') {
     return {
-      row:        'bg-indigo-50/30 hover:bg-indigo-100/50 border-l-4 border-l-indigo-600',
+      row:        'bg-indigo-50/40 hover:bg-indigo-100/60 border-l-4 border-l-indigo-600',
+      badge:      'bg-indigo-100 text-indigo-800 border border-indigo-200',
       inputFocus: 'border-2 border-slate-300 bg-white focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-900 font-bold hover:border-slate-400',
     };
   }
   return {
-    row:        'bg-purple-50/30 hover:bg-purple-100/50 border-l-4 border-l-purple-600',
+    row:        'bg-purple-50/40 hover:bg-purple-100/60 border-l-4 border-l-purple-600',
+    badge:      'bg-purple-100 text-purple-800 border border-purple-200',
     inputFocus: 'border-2 border-slate-300 bg-white focus:border-purple-600 focus:ring-2 focus:ring-purple-100 text-slate-900 font-bold hover:border-slate-400',
   };
 };
@@ -177,7 +205,7 @@ const computeAvgAH = (rowObj) => {
   let count = 0;
   STREAMS.forEach((s) => {
     const val = rowObj[s.key];
-    if (val !== '' && !isNaN(Number(val))) {
+    if (val !== '' && val !== null && val !== undefined && !isNaN(Number(val))) {
       sum += Number(val);
       count++;
     }
@@ -186,7 +214,7 @@ const computeAvgAH = (rowObj) => {
   return (sum / 8).toFixed(2);
 };
 
-// ─── Individual Cell Component with Limit Badges & Formatting ─────────────────
+// ─── Individual Cell Component with Limit Badges & EDITED Indicator ─────────
 const CR202Cell = ({
   id,
   value,
@@ -198,6 +226,7 @@ const CR202Cell = ({
   ariaLabel,
   disabled = false,
   maxWidth = 'max-w-[80px]',
+  isEdited = false,
 }) => {
   const validation = validateCellValue(value, limit);
   const isOutOfLimit = validation.isOutOfLimit;
@@ -205,94 +234,102 @@ const CR202Cell = ({
   const hasValue = value !== '' && value !== null && value !== undefined;
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-[58px]">
-      <div className={`relative w-full ${maxWidth}`}>
+    <div className={`flex flex-col items-center justify-start min-h-[58px] ${maxWidth} mx-auto`}>
+      <div className="relative w-full">
         <input
           id={id}
           type="text"
           inputMode="decimal"
-          value={value}
-          placeholder="0.00"
-          onChange={onChange}
+          value={value ?? ''}
+          placeholder={limit?.placeholder || '0.00'}
           disabled={disabled}
+          onChange={onChange}
           title={
-            limit
+            disabled
+              ? 'Field is locked for editing'
+              : limit
               ? isOutOfLimit
-                ? `OUT OF LIMIT: ${value} Kgm/m³ (Allowed: ${limit.formattedRange}, Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                ? `OUT OF LIMIT: ${value} Kgm/m³ (Allowed: ${limit.formattedRange})`
                 : hasValue
-                ? `NORMAL: ${value} Kgm/m³ (Allowed: ${limit.formattedRange})`
-                : `Allowed range: ${limit.formattedRange} (Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
+                ? `NORMAL: ${value} Kgm/m³`
+                : `Target: ${limit.formattedTarget} (${limit.formattedTolerance})`
               : ''
           }
-          className={`w-full ${maxWidth} mx-auto px-1.5 py-1.5 text-xs font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs ${
-            isOutOfLimit
-              ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
+          className={`w-full text-center text-xs font-mono font-bold px-1.5 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
+            disabled
+              ? 'bg-slate-100 border-slate-300 text-slate-600 cursor-not-allowed font-semibold'
+              : isOutOfLimit
+              ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
               : isInvalidFormat
-              ? 'border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
+              ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
               : hasValue && isNormal
               ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
-              : hasValue
-              ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
               : inputFocusStyle
           }`}
           aria-label={ariaLabel}
         />
+
+        {/* Small EDITED badge */}
+        {isEdited && (
+          <span
+            className="absolute -top-1.5 -left-1.5 bg-amber-500 text-white rounded px-1 text-[8px] font-black tracking-wider uppercase shadow-xs pointer-events-none"
+            title="Modified after initial save"
+          >
+            EDITED
+          </span>
+        )}
+
+        {/* Out of limit alert dot */}
         {isOutOfLimit && (
           <span
-            className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
+            className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
             title="Out of limit"
           >
-            <AlertCircle className="w-2.5 h-2.5 text-white" />
+            <AlertCircle className="w-2 h-2 text-white" />
           </span>
         )}
       </div>
 
+      {/* Invalid numeric error message */}
       {isInvalidFormat && (
-        <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
-          <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
-          <span className="whitespace-nowrap">{formatErrorMessage || 'Invalid'}</span>
+        <div className="text-[8.5px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
+          <AlertCircle className="w-2 h-2 shrink-0 text-red-600" />
+          <span>{formatErrorMessage}</span>
         </div>
       )}
 
+      {/* Status & Range */}
       {!isInvalidFormat && (
         <div className="mt-0.5 flex flex-col items-center justify-center">
           {hasValue && isNormal && (
             <span
-              id={`${id}-status`}
-              className="text-[9.5px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
-              title={`NORMAL: within ${limit?.formattedRange || ''}`}
+              className="text-[9px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5"
             >
-              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
-              <span>NORMAL</span>
+              <CheckCircle2 className="w-2 h-2 text-emerald-600 shrink-0" />
+              <span>OK</span>
             </span>
           )}
 
           {hasValue && isOutOfLimit && (
             <span
-              id={`${id}-status`}
-              className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
-              title={`OUT OF LIMIT: ${value} Kgm/m³ (Allowed: ${limit?.formattedRange || ''})`}
+              className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[8.5px] font-black tracking-tight whitespace-nowrap flex items-center justify-center gap-0.5 shadow-2xs"
             >
               <AlertCircle className="w-2 h-2 text-rose-600 shrink-0" />
-              <span>OUT OF LIMIT</span>
+              <span>OUT</span>
             </span>
           )}
 
-          {limit?.formattedRange && (
-            <span
-              id={`${id}-range`}
-              className={`text-[9px] font-semibold mt-0.5 tracking-tight whitespace-nowrap ${
-                isOutOfLimit
-                  ? 'text-rose-700 font-bold'
-                  : hasValue
-                  ? 'text-slate-600 font-bold'
-                  : 'text-slate-400'
-              }`}
-              title={`Target: ${limit?.formattedTarget || ''} (${limit?.formattedTolerance || ''})`}
-            >
-              {limit.formattedRange}
-            </span>
-          )}
+          <span
+            className={`text-[8.5px] font-semibold tracking-tight ${
+              isOutOfLimit
+                ? 'text-rose-700 font-bold'
+                : hasValue
+                ? 'text-slate-600 font-bold'
+                : 'text-slate-400'
+            }`}
+          >
+            {limit?.min && limit?.max ? `${limit.min}–${limit.max}` : ''}
+          </span>
         </div>
       )}
     </div>
@@ -306,74 +343,191 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── Limits from Central Registry with local fallback ──
+  // ── Limits from Central Registry ──
   const limitFNH3 = getCellLimit(plantId, 'cr202', 'shift', 'fnh3') || CR202_LIMITS.fnh3;
   const limitCNH3 = getCellLimit(plantId, 'cr202', 'shift', 'cnh3') || CR202_LIMITS.cnh3;
   const limitTCL  = getCellLimit(plantId, 'cr202', 'shift', 'tcl')  || CR202_LIMITS.tcl;
   const limitPCL  = getCellLimit(plantId, 'cr202', 'shift', 'pcl')  || CR202_LIMITS.pcl;
 
-  // ── State ──
-  const [date, setDate]         = useState('');
-  const [timeRows, setTimeRows] = useState(buildEmptyTimeRows());
-  const [fnh3Row, setFnh3Row]   = useState(buildEmptyFnh3Row());
-  const [pclRow, setPclRow]     = useState(buildEmptyPclRow());
-  const [errors, setErrors]     = useState({});
-  const [saving, setSaving]     = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError] = useState(false);
+  // ── State (Date strictly restricted to Today in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [timeRows, setTimeRows]                     = useState(buildEmptyTimeRows());
+  const [fnh3Row, setFnh3Row]                       = useState(buildEmptyFnh3Row());
+  const [pclRow, setPclRow]                         = useState(buildEmptyPclRow());
+  const [originalTimeRows, setOriginalTimeRows]     = useState(null);
+  const [originalFnh3Row, setOriginalFnh3Row]       = useState(null);
+  const [originalPclRow, setOriginalPclRow]         = useState(null);
+  const [errors, setErrors]                         = useState({});
+  const [saving, setSaving]                         = useState(false);
+  const [saveSuccess, setSaveSuccess]               = useState(false);
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                     = useState(null);
+  const [recipientEmail, setRecipientEmail]         = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lockedShifts, setLockedShifts]             = useState({});
+  const [editedFields, setEditedFields]             = useState({});
 
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal]     = useState(false);
+  const [confirmData, setConfirmData]               = useState(null);
+
+  // Sequential Shift Workflow:
+  // - On initial load: I SHIFT is editable; II SHIFT & III SHIFT are waiting/disabled.
+  // - After I SHIFT save: I SHIFT remains editable until II SHIFT is saved; II SHIFT becomes available.
+  // - After II SHIFT save: I SHIFT is permanently locked; II SHIFT remains editable until III SHIFT is saved; III SHIFT becomes available.
+  // - After III SHIFT initial save: II SHIFT is permanently locked; exactly 1 final edit allowed for III SHIFT.
+  // - After III SHIFT final edit: all 3 shifts permanently locked for that date.
+  const isShiftDisabled = useCallback((shiftKey) => {
+    if (isViewOnly) return true;
+    if (shiftKey === 'shift1') {
+      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+    }
+    if (shiftKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return true;
+      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+    }
+    if (shiftKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift3) return true;
+      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+      return false;
+    }
+    return true;
+  }, [isViewOnly, lockedShifts]);
+
+  // Fetch existing data for current date
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/cr-202-analysis?date=${date}`);
-        if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
-          const record = response.data.data[0];
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
+        if (response.data && response.data.success && response.data.data) {
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+
           if (record) {
-            if (record.timeRows) {
-              setTimeRows(record.timeRows);
+            const fetchedTRows = record.timeRows || record.data?.timeRows;
+            const fetchedFRow = record.fnh3Row || record.data?.fnh3Row;
+            const fetchedPRow = record.pclRow || record.data?.pclRow;
+
+            if (fetchedTRows && typeof fetchedTRows === 'object') {
+              const populatedTRows = buildEmptyTimeRows();
+              TIME_SLOTS.forEach((slot) => {
+                if (fetchedTRows[slot.key]) {
+                  STREAMS.forEach((s) => {
+                    const val = fetchedTRows[slot.key][s.key];
+                    populatedTRows[slot.key][s.key] = val !== null && val !== undefined ? String(val) : '';
+                  });
+                  populatedTRows[slot.key].avgTcl = fetchedTRows[slot.key].avgTcl !== null && fetchedTRows[slot.key].avgTcl !== undefined ? String(fetchedTRows[slot.key].avgTcl) : '';
+                  populatedTRows[slot.key].avgAH = fetchedTRows[slot.key].avgAH !== null && fetchedTRows[slot.key].avgAH !== undefined ? String(fetchedTRows[slot.key].avgAH) : computeAvgAH(populatedTRows[slot.key]);
+                }
+              });
+              setTimeRows(populatedTRows);
+              setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
             } else {
               setTimeRows(buildEmptyTimeRows());
+              setOriginalTimeRows(null);
             }
-            if (record.fnh3Row) {
-              setFnh3Row(record.fnh3Row);
+
+            if (fetchedFRow && typeof fetchedFRow === 'object') {
+              const popF = buildEmptyFnh3Row();
+              STREAMS.forEach((s) => {
+                const val = fetchedFRow[s.key];
+                popF[s.key] = val !== null && val !== undefined ? String(val) : '';
+              });
+              popF.avgAH = fetchedFRow.avgAH !== null && fetchedFRow.avgAH !== undefined ? String(fetchedFRow.avgAH) : computeAvgAH(popF);
+              setFnh3Row(popF);
+              setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
             } else {
               setFnh3Row(buildEmptyFnh3Row());
+              setOriginalFnh3Row(null);
             }
-            if (record.pclRow) {
-              setPclRow(record.pclRow);
+
+            if (fetchedPRow && typeof fetchedPRow === 'object') {
+              const popP = buildEmptyPclRow();
+              STREAMS.forEach((s) => {
+                const val = fetchedPRow[s.key];
+                popP[s.key] = val !== null && val !== undefined ? String(val) : '';
+              });
+              popP.avgAH = fetchedPRow.avgAH !== null && fetchedPRow.avgAH !== undefined ? String(fetchedPRow.avgAH) : computeAvgAH(popP);
+              setPclRow(popP);
+              setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
             } else {
               setPclRow(buildEmptyPclRow());
+              setOriginalPclRow(null);
             }
+
+            setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
+            setEditedFields(record.editedFields || record.data?.editedFields || {});
           } else {
-          setTimeRows(buildEmptyTimeRows());
-          setFnh3Row(buildEmptyFnh3Row());
-          setPclRow(buildEmptyPclRow());
+            setTimeRows(buildEmptyTimeRows());
+            setFnh3Row(buildEmptyFnh3Row());
+            setPclRow(buildEmptyPclRow());
+            setOriginalTimeRows(null);
+            setOriginalFnh3Row(null);
+            setOriginalPclRow(null);
+            setLockedShifts({});
+            setEditedFields({});
           }
         } else {
           setTimeRows(buildEmptyTimeRows());
           setFnh3Row(buildEmptyFnh3Row());
           setPclRow(buildEmptyPclRow());
+          setOriginalTimeRows(null);
+          setOriginalFnh3Row(null);
+          setOriginalPclRow(null);
+          setLockedShifts({});
+          setEditedFields({});
         }
       } catch (err) {
+        if (!active) return;
         console.warn('Could not fetch existing data', err);
-          setTimeRows(buildEmptyTimeRows());
-          setFnh3Row(buildEmptyFnh3Row());
-          setPclRow(buildEmptyPclRow());
+        setTimeRows(buildEmptyTimeRows());
+        setFnh3Row(buildEmptyFnh3Row());
+        setPclRow(buildEmptyPclRow());
+        setOriginalTimeRows(null);
+        setOriginalFnh3Row(null);
+        setOriginalPclRow(null);
+        setLockedShifts({});
+        setEditedFields({});
       }
     };
     fetchExistingData();
-  }, [date]);
 
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   // ── Input Changes ──
   const handleTimeCellChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
+
+    const slotObj = TIME_SLOTS.find((s) => s.key === rowKey);
+    const shiftGroup = slotObj ? slotObj.shiftGroup : null;
+    if (shiftGroup && isShiftDisabled(shiftGroup)) return;
+
     setTimeRows((prev) => {
       const updatedRow = { ...prev[rowKey], [paramKey]: value };
-      // Auto-update AVG A-H if stream changed
       if (STREAMS.some((s) => s.key === paramKey)) {
         updatedRow.avgAH = computeAvgAH(updatedRow);
       }
@@ -388,13 +542,14 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
       return next;
     });
     setSaveSuccess(false);
-  }, []);
+  }, [isShiftDisabled]);
 
   const handleFnh3CellChange = useCallback((paramKey, value) => {
     if (!isValidDecimal(value)) return;
+    if (isViewOnly) return;
+
     setFnh3Row((prev) => {
       const updatedFnh3 = { ...prev, [paramKey]: value };
-      // Auto-update AVG A-H if stream changed
       if (STREAMS.some((s) => s.key === paramKey)) {
         updatedFnh3.avgAH = computeAvgAH(updatedFnh3);
       }
@@ -406,13 +561,14 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
       return next;
     });
     setSaveSuccess(false);
-  }, []);
+  }, [isViewOnly]);
 
   const handlePclCellChange = useCallback((paramKey, value) => {
     if (!isValidDecimal(value)) return;
+    if (isViewOnly) return;
+
     setPclRow((prev) => {
       const updatedPcl = { ...prev, [paramKey]: value };
-      // Auto-update AVG A-H if stream changed
       if (STREAMS.some((s) => s.key === paramKey)) {
         updatedPcl.avgAH = computeAvgAH(updatedPcl);
       }
@@ -424,144 +580,332 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
       return next;
     });
     setSaveSuccess(false);
-  }, []);
+  }, [isViewOnly]);
 
   // ── Reset ──
-  const handleReset = useCallback(() => {
-    setTimeRows(buildEmptyTimeRows());
-    setFnh3Row(buildEmptyFnh3Row());
-    setPclRow(buildEmptyPclRow());
+  const handleReset = () => {
+    if (originalTimeRows) {
+      setTimeRows(JSON.parse(JSON.stringify(originalTimeRows)));
+    } else {
+      setTimeRows(buildEmptyTimeRows());
+    }
+    if (originalFnh3Row) {
+      setFnh3Row(JSON.parse(JSON.stringify(originalFnh3Row)));
+    } else {
+      setFnh3Row(buildEmptyFnh3Row());
+    }
+    if (originalPclRow) {
+      setPclRow(JSON.parse(JSON.stringify(originalPclRow)));
+    } else {
+      setPclRow(buildEmptyPclRow());
+    }
     setErrors({});
-    setDateError(false);
     setSaveSuccess(false);
-    showToast('CR 202 analysis form cleared successfully.', 'info');
-  }, [showToast]);
+    showToast('CR 202 analysis form reset.', 'info');
+  };
 
   // ── Validation ──
-  const validateForm = useCallback(() => {
-    let isValid = true;
+  const validateForm = () => {
+    let hasError = false;
     const newErrors = {};
-
-    if (!date) {
-      setDateError(true);
-      isValid = false;
-    } else {
-      setDateError(false);
-    }
 
     TIME_SLOTS.forEach((slot) => {
       STREAMS.forEach((s) => {
         const val = timeRows[slot.key][s.key];
-        if (val !== '' && isNaN(Number(val))) {
+        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
           newErrors[`${slot.key}_${s.key}`] = 'Invalid';
-          isValid = false;
+          hasError = true;
         }
       });
       const avgVal = timeRows[slot.key].avgTcl;
-      if (avgVal !== '' && isNaN(Number(avgVal))) {
+      if (avgVal !== '' && avgVal !== null && avgVal !== undefined && isNaN(Number(avgVal))) {
         newErrors[`${slot.key}_avgTcl`] = 'Invalid';
-        isValid = false;
-      }
-      const avgAHVal = timeRows[slot.key].avgAH;
-      if (avgAHVal !== '' && isNaN(Number(avgAHVal))) {
-        newErrors[`${slot.key}_avgAH`] = 'Invalid';
-        isValid = false;
+        hasError = true;
       }
     });
 
-    // FNH3 row validation
     STREAMS.forEach((s) => {
       const val = fnh3Row[s.key];
-      if (val !== '' && isNaN(Number(val))) {
+      if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
         newErrors[`fnh3_${s.key}`] = 'Invalid';
-        isValid = false;
+        hasError = true;
       }
-    });
-    if (fnh3Row.avgTcl !== '' && isNaN(Number(fnh3Row.avgTcl))) {
-      newErrors['fnh3_avgTcl'] = 'Invalid';
-      isValid = false;
-    }
-    if (fnh3Row.avgAH !== '' && isNaN(Number(fnh3Row.avgAH))) {
-      newErrors['fnh3_avgAH'] = 'Invalid';
-      isValid = false;
-    }
-
-    // PCl row validation
-    STREAMS.forEach((s) => {
-      const val = pclRow[s.key];
-      if (val !== '' && isNaN(Number(val))) {
+      const pVal = pclRow[s.key];
+      if (pVal !== '' && pVal !== null && pVal !== undefined && isNaN(Number(pVal))) {
         newErrors[`pcl_${s.key}`] = 'Invalid';
-        isValid = false;
+        hasError = true;
       }
     });
-
-    if (pclRow.avgTcl !== '' && isNaN(Number(pclRow.avgTcl))) {
-      newErrors['pcl_avgTcl'] = 'Invalid';
-      isValid = false;
-    }
-    if (pclRow.avgAH !== '' && isNaN(Number(pclRow.avgAH))) {
-      newErrors['pcl_avgAH'] = 'Invalid';
-      isValid = false;
-    }
 
     setErrors(newErrors);
-    return isValid;
-  }, [date, timeRows, fnh3Row, pclRow]);
+    return !hasError;
+  };
 
-  // ── Save / Submit ──
-  const handleSave = async () => {
+  // Check if a row differs from original data
+  const isSlotDiff = (oldSlot, newSlot) => {
+    if (!oldSlot && newSlot) return true;
+    if (oldSlot && !newSlot) return false;
+    const fields = [...STREAMS.map((s) => s.key), 'avgTcl', 'avgAH'];
+    return fields.some((f) => {
+      let oVal = oldSlot?.[f] ?? null;
+      let nVal = newSlot?.[f] ?? null;
+      if (nVal === '') nVal = null;
+      if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
+        return Number(oVal) !== Number(nVal);
+      }
+      return String(oVal) !== String(nVal);
+    });
+  };
+
+  const isRowDiff = (oldR, newR) => {
+    if (!oldR && newR) return true;
+    if (oldR && !newR) return false;
+    const fields = [...STREAMS.map((s) => s.key), 'avgAH'];
+    return fields.some((f) => {
+      let oVal = oldR?.[f] ?? null;
+      let nVal = newR?.[f] ?? null;
+      if (nVal === '') nVal = null;
+      if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
+        return Number(oVal) !== Number(nVal);
+      }
+      return String(oVal) !== String(nVal);
+    });
+  };
+
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     if (!validateForm()) {
-      showToast('Please correct highlighted errors before saving.', 'error');
+      showToast('Please correct validation errors before saving.', 'error');
       return;
     }
 
-    const hasTimeData = TIME_SLOTS.some((slot) =>
-      STREAMS.some((s) => timeRows[slot.key][s.key] !== '') ||
-      timeRows[slot.key].avgTcl !== '' ||
-      timeRows[slot.key].avgAH !== ''
-    );
-    const hasFnh3Data =
-      STREAMS.some((s) => fnh3Row[s.key] !== '') ||
-      fnh3Row.avgTcl !== '' ||
-      fnh3Row.avgAH !== '';
-    const hasPclData =
-      STREAMS.some((s) => pclRow[s.key] !== '') ||
-      pclRow.avgTcl !== '' ||
-      pclRow.avgAH !== '';
+    const shiftsToSave = [];
+    let isFinalEdit = false;
 
-    if (!hasTimeData && !hasFnh3Data && !hasPclData) {
-      showToast('Please enter at least one measurement value.', 'warning');
+    SHIFT_MAPPING.forEach((shift) => {
+      if (isShiftDisabled(shift.key)) return;
+
+      const hasAnyData = shift.slotKeys.some((sKey) => {
+        const row = timeRows[sKey];
+        return row && Object.values(row).some((val) => val !== null && val !== '');
+      });
+
+      const hasDiff = shift.slotKeys.some((sKey) => {
+        const oldSlot = originalTimeRows ? originalTimeRows[sKey] : null;
+        const newSlot = timeRows[sKey];
+        return isSlotDiff(oldSlot, newSlot);
+      });
+
+      if (hasAnyData && hasDiff) {
+        shiftsToSave.push({
+          key: shift.key,
+          name: shift.name,
+          slotKeys: shift.slotKeys,
+        });
+
+        if (shift.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
+          isFinalEdit = true;
+        }
+      }
+    });
+
+    const fnh3Diff = isRowDiff(originalFnh3Row, fnh3Row);
+    const pclDiff = isRowDiff(originalPclRow, pclRow);
+
+    if (shiftsToSave.length === 0 && (fnh3Diff || pclDiff)) {
+      // Find open shift to save with
+      if (!isShiftDisabled('shift1')) {
+        shiftsToSave.push({ key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't11'] });
+      } else if (!isShiftDisabled('shift2')) {
+        shiftsToSave.push({ key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't19'] });
+      } else if (!isShiftDisabled('shift3')) {
+        shiftsToSave.push({ key: 'shift3', name: 'III SHIFT (22:00 – 06:00)', slotKeys: ['t23', 't03'] });
+        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
+          isFinalEdit = true;
+        }
+      }
+    }
+
+    if (shiftsToSave.length === 0) {
+      showToast('No new or modified shift data found to save.', 'info');
       return;
     }
 
+    if (shiftsToSave.length > 1) {
+      showToast('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+      return;
+    }
+
+    setConfirmData({
+      date,
+      shift: shiftsToSave[0],
+      isFinalEdit,
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
     setSaveSuccess(false);
 
-    try {
-      const payload = {
-        date,
-        plant: 'ACL',
-        analysisType: 'CR 202 Analysis',
-        crystallizer: 'CR 202',
-        timeRows,
-        fnh3Row,
-        pclRow,
-        submittedBy: user?.name || 'Plant Operator',
-      };
+    // Close confirmation modal immediately to prevent modal freeze
+    setShowConfirmModal(false);
 
+    const shiftBeingSaved = confirmData?.shift;
+    const payload = {
+      date,
+      plant: plantId ? plantId.toUpperCase() : 'ACL',
+      analysisType: 'CR 202 Analysis',
+      crystallizer: 'CR 202',
+      shift: shiftBeingSaved ? shiftBeingSaved.name : 'I SHIFT',
+      submittedBy: user?.name || 'Plant Operator',
+      submittedAt: new Date().toISOString(),
+      timeRows,
+      fnh3Row,
+      pclRow,
+    };
+
+    try {
       const response = await api.post('/api/cr-202-analysis', payload);
 
+      if (!response?.data?.success) {
+        showToast(response?.data?.message || 'Unable to save CR 202 data. Please try again.', 'error');
+        setSavePhase('idle');
+        return;
+      }
+
       setSaveSuccess(true);
-      showToast(response.data?.message || 'CR 202 Analysis data saved successfully!', 'success');
+      const savedDoc = response.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      if (savedDoc?.lockedShifts) {
+        setLockedShifts(savedDoc.lockedShifts);
+      }
+      if (savedDoc?.editedFields) {
+        setEditedFields(savedDoc.editedFields);
+      }
+      if (savedDoc?.timeRows) {
+        setTimeRows(savedDoc.timeRows);
+        setOriginalTimeRows(JSON.parse(JSON.stringify(savedDoc.timeRows)));
+      }
+      if (savedDoc?.fnh3Row) {
+        setFnh3Row(savedDoc.fnh3Row);
+        setOriginalFnh3Row(JSON.parse(JSON.stringify(savedDoc.fnh3Row)));
+      }
+      if (savedDoc?.pclRow) {
+        setPclRow(savedDoc.pclRow);
+        setOriginalPclRow(JSON.parse(JSON.stringify(savedDoc.pclRow)));
+      }
+
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const emailPending = response.data?.emailPending;
+      const statusFromApi = response.data?.emailStatus;
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+        showToast('Saved — Email Sent ✓', 'success');
+      } else if (emailPending || statusFromApi === 'pending') {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast('Saved — Email Dispatching 🚀', 'info');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
+        showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+      }
     } catch (err) {
-      const msg =
-        err.response?.data?.message ||
-        err.response?.data?.errors?.[0] ||
-        'Failed to save CR 202 Analysis data.';
-      showToast(msg, 'error');
+      setSavePhase('idle');
+      console.error('[CR202Analysis] Save failed:', err);
+      const serverMessage = err.response?.data?.message || err.message;
+      showToast('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast('Cannot retry email: Record ID is not available.', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await api.post(`/api/cr-202-analysis/${recordId}/retry-email`);
+      if (response.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email sent successfully on retry.');
+        showToast('Email resent successfully!', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed on retry.');
+        showToast('Email retry failed: ' + (response.data?.emailError || 'Rejected by server'), 'error');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
+      setSavePhase('email_failed');
+      setEmailStatusDetail(msg);
+      showToast('Retry Email Error: ' + msg, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Helper for Shift Status Badges
+  const getShiftBadge = (shiftId) => {
+    let status = 'NEW';
+    let bg = 'bg-indigo-100 text-indigo-700';
+
+    if (lockedShifts[shiftId]) {
+      status = 'Locked';
+      bg = 'bg-slate-200 text-slate-700';
+    } else {
+      if (shiftId === 'shift1') {
+        if (lockedShifts.shift2Saved) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift1Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      } else if (shiftId === 'shift2') {
+        if (!lockedShifts.shift1Saved) {
+          status = 'Waiting';
+          bg = 'bg-amber-100 text-amber-700';
+        } else if (lockedShifts.shift3Saved) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift2Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      } else if (shiftId === 'shift3') {
+        if (!lockedShifts.shift2Saved) {
+          status = 'Waiting';
+          bg = 'bg-amber-100 text-amber-700';
+        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
+          status = 'Locked';
+          bg = 'bg-slate-200 text-slate-700';
+        } else if (lockedShifts.shift3Saved) {
+          status = 'Editable';
+          bg = 'bg-blue-100 text-blue-700';
+        }
+      }
+    }
+
+    return (
+      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-300 shadow-2xs ${bg}`}>
+        {status.toUpperCase()}
+      </span>
+    );
   };
 
   return (
@@ -587,7 +931,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                 <span>ACL Plant</span>
                 <ChevronRight className="w-3 h-3" />
                 <Database className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">Cr 202</span>
+                <span className="text-blue-600 font-semibold">CR 202</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
@@ -596,123 +940,176 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase bg-blue-100 text-blue-800 border border-blue-200">
                   ONCE IN A SHIFT
                 </span>
+                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                  Unit: Kgm/m³
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Right: Actions */}
+          {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
+            {/* Integrated Date Section (Strictly Today Asia/Kolkata) */}
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
               <label
                 htmlFor="cr202-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+                className="text-xs font-bold text-slate-600 flex items-center gap-1 cursor-default shrink-0"
               >
+                <Calendar className="w-3.5 h-3.5 text-slate-500" />
                 <span>Date:</span>
-                <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="cr202-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    if (typeof setDateError === 'function') setDateError(false);
-                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    typeof dateError !== 'undefined' && dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
-                />
-              </div>
-              {date && (
-                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {typeof dateError !== 'undefined' && dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
+              <input
+                id="cr202-date-input"
+                type="date"
+                value={date}
+                readOnly
+                disabled
+                className="text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded px-2 py-0.5 shadow-2xs cursor-not-allowed opacity-90"
+                title="Date is strictly locked to today's date in Asia/Kolkata timezone"
+              />
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                Today
+              </span>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-cr202-reset"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-                title="Clear all fields"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              {!isViewOnly && (
+                <button
+                  type="button"
+                  id="btn-cr202-reset"
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Reset form to last saved data"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Reset</span>
+                </button>
+              )}
 
-              <button
-                id="btn-cr202-save"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
-                title="Save CR 202 data"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
+              {!isViewOnly && (
+                <button
+                  type="button"
+                  id="btn-cr202-save"
+                  onClick={handleSaveClick}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-blue-700 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  title="Save active shift data and notify assigned user"
+                >
+                  {saving ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Shift</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
+      {/* ── Status Banner (Persistence & Email Result) ────────────────────────── */}
+      {savePhase !== 'idle' && (
         <div
-          id="cr202-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
+          id="cr202-status-banner"
+          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
+            savePhase === 'completed'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+              : savePhase === 'email_pending'
+              ? 'bg-sky-50 border-sky-300 text-sky-900'
+              : savePhase === 'saving'
+              ? 'bg-blue-50 border-blue-200 text-blue-900'
+              : 'bg-amber-50 border-amber-300 text-amber-900'
+          }`}
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              CR 202 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
+          <div className="flex items-center gap-2.5">
+            {savePhase === 'completed' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : savePhase === 'email_pending' ? (
+              <Clock className="w-4 h-4 text-sky-600 animate-pulse shrink-0" />
+            ) : savePhase === 'saving' ? (
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            )}
+            <div>
+              <span className="font-extrabold text-sm">
+                {savePhase === 'completed'
+                  ? 'Saved & Emailed Successfully ✓'
+                  : savePhase === 'email_pending'
+                  ? 'Saved — Email Pending ⏳'
+                  : savePhase === 'saving'
+                  ? 'Saving to MongoDB & preparing notification...'
+                  : 'Saved to Database — Email Delivery Alert ⚠️'}
+              </span>
+              <div className="text-slate-600 mt-0.5 flex items-center gap-2 flex-wrap">
+                {recipientEmail && (
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    <Mail className="w-3 h-3 text-slate-500" />
+                    Recipient: {recipientEmail}
+                  </span>
+                )}
+                {emailStatusDetail && <span>Detail: {emailStatusDetail}</span>}
+              </div>
+            </div>
           </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
+
+          {savePhase === 'email_failed' && recordId && !isViewOnly && (
+            <button
+              onClick={handleRetryEmail}
+              disabled={saving}
+              className="inline-flex items-center gap-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded shadow-xs transition cursor-pointer self-start sm:self-auto shrink-0"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry Email</span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* ── Analysis Table Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* ── Shift Status Tracker Bar ───────────────────────────────────────── */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-slate-500" />
+          <span className="font-bold text-slate-700">Shift Workflow Status:</span>
+        </div>
+        <div className="flex items-center gap-4 flex-wrap">
+          {SHIFT_MAPPING.map((shift) => (
+            <div key={shift.key} className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-600 text-[11px]">{shift.name.split(' ')[0]}:</span>
+              {getShiftBadge(shift.key)}
+            </div>
+          ))}
+        </div>
+        {isViewOnly && (
+          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+            View Only Mode (Operator/User)
+          </span>
+        )}
+      </div>
 
-        {/* Scrollable table wrapper */}
+      {/* ── Main Data Entry Table ─────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[950px] text-sm">
             {/* Column headers with Super-Header for CNH3 */}
             <thead>
               {/* Row 1: Grouping Header */}
               <tr className="bg-slate-950 text-white text-[11px] uppercase tracking-wider font-extrabold border-b border-slate-800">
-                <th className="px-5 py-2 text-left w-28 sm:w-32 border-r border-slate-800 text-slate-300">
+                <th className="px-5 py-2 text-left w-36 border-r border-slate-800 text-slate-300">
                   CR 202
                 </th>
                 <th colSpan={8} className="px-3 py-2 text-center border-r border-slate-800 bg-blue-950/80 text-blue-200">
                   <span className="inline-flex items-center gap-2">
                     <span>←</span>
-                    <span className="font-mono tracking-widest font-black">CNH₃</span>
+                    <span className="font-mono tracking-widest font-black">CNH₃ (2.88–3.08)</span>
                     <span>→</span>
                   </span>
                 </th>
@@ -726,8 +1123,8 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
 
               {/* Row 2: Sub-columns (Time, A through H, AVG TCl, AVG A-H) */}
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-2.5 text-left text-xs font-extrabold uppercase tracking-wider w-28 sm:w-32 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
-                  Time
+                <th className="px-5 py-2.5 text-left text-xs font-extrabold uppercase tracking-wider w-36 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
+                  Time / Shift
                 </th>
                 {STREAMS.map((s, idx) => (
                   <th
@@ -740,10 +1137,10 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                   </th>
                 ))}
                 <th className="px-3 py-2.5 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 bg-slate-900 min-w-[85px] border-r border-slate-800">
-                  TCl
+                  TCl (4.55–4.75)
                 </th>
                 <th className="px-3 py-2.5 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 bg-slate-900 min-w-[85px]">
-                  A-H
+                  A-H (2.88–3.08)
                 </th>
               </tr>
             </thead>
@@ -752,28 +1149,47 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
             <tbody className="divide-y divide-slate-200">
               {TIME_SLOTS.map((slot) => {
                 const styles = getRowStyles(slot.shiftGroup);
+                const shiftLocked = isShiftDisabled(slot.shiftGroup);
+
                 return (
                   <tr
                     key={slot.key}
-                    className={`transition-colors duration-100 ${styles.row}`}
+                    className={`transition-colors duration-100 ${styles.row} ${shiftLocked ? 'opacity-85' : ''}`}
                   >
-                    {/* Time slot label */}
-                    <td className="px-5 py-2.5 align-middle">
-                      <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2.5 py-1 rounded border border-slate-200 shadow-2xs inline-block">
-                        {slot.time}
-                      </span>
+                    {/* Time slot & shift label */}
+                    <td className="px-5 py-2.5 align-top">
+                      <div className="flex flex-col gap-1 mt-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                            {slot.time}
+                          </span>
+                          <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}>
+                            {slot.shift}
+                          </span>
+                          {shiftLocked && (
+                            <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                          )}
+                        </div>
+                        {['t07', 't15', 't23'].includes(slot.key) && (
+                          <div className="mt-0.5">
+                            {getShiftBadge(slot.shiftGroup)}
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     {/* Stream CNH3 input cells (A to H) */}
                     {STREAMS.map((stream) => {
                       const fieldKey = `${slot.key}_${stream.key}`;
                       const cellVal = timeRows[slot.key][stream.key];
+                      const isEdited = Boolean(editedFields[fieldKey]);
 
                       return (
                         <td key={stream.key} className="px-1.5 py-2 text-center align-top">
                           <CR202Cell
                             id={`cr202-input-${slot.key}-${stream.key}`}
                             value={cellVal}
+                            disabled={shiftLocked}
                             onChange={(e) =>
                               handleTimeCellChange(slot.key, stream.key, e.target.value)
                             }
@@ -783,6 +1199,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                             inputFocusStyle={styles.inputFocus}
                             ariaLabel={`CNH3 Stream ${stream.label} at ${slot.time}`}
                             maxWidth="max-w-[78px]"
+                            isEdited={isEdited}
                           />
                         </td>
                       );
@@ -793,6 +1210,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                       <CR202Cell
                         id={`cr202-input-${slot.key}-avgtcl`}
                         value={timeRows[slot.key].avgTcl}
+                        disabled={shiftLocked}
                         onChange={(e) =>
                           handleTimeCellChange(slot.key, 'avgTcl', e.target.value)
                         }
@@ -802,6 +1220,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                         inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 text-slate-900"
                         ariaLabel={`AVG TCl at ${slot.time}`}
                         maxWidth="max-w-[82px]"
+                        isEdited={Boolean(editedFields[`${slot.key}_avgTcl`])}
                       />
                     </td>
 
@@ -810,6 +1229,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                       <CR202Cell
                         id={`cr202-input-${slot.key}-avgah`}
                         value={timeRows[slot.key].avgAH}
+                        disabled={shiftLocked}
                         onChange={(e) =>
                           handleTimeCellChange(slot.key, 'avgAH', e.target.value)
                         }
@@ -819,6 +1239,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                         inputFocusStyle="border-2 border-slate-200 bg-slate-50 hover:border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-slate-800"
                         ariaLabel={`AVG A-H at ${slot.time}`}
                         maxWidth="max-w-[82px]"
+                        isEdited={Boolean(editedFields[`${slot.key}_avgAH`])}
                       />
                     </td>
                   </tr>
@@ -835,12 +1256,14 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                 {STREAMS.map((stream) => {
                   const fieldKey = `fnh3_${stream.key}`;
                   const cellVal = fnh3Row[stream.key];
+                  const isEdited = Boolean(editedFields[fieldKey]);
 
                   return (
                     <td key={stream.key} className="px-1.5 py-2 text-center align-top">
                       <CR202Cell
                         id={`cr202-input-fnh3-${stream.key}`}
                         value={cellVal}
+                        disabled={isViewOnly}
                         onChange={(e) =>
                           handleFnh3CellChange(stream.key, e.target.value)
                         }
@@ -850,107 +1273,91 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                         inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-slate-900"
                         ariaLabel={`FNH3 Stream ${stream.label}`}
                         maxWidth="max-w-[78px]"
+                        isEdited={isEdited}
                       />
                     </td>
                   );
                 })}
 
-                {/* AVG TCl for FNH3 row */}
-                <td className="px-2 py-2 text-center align-top bg-slate-100/60 border-r border-slate-200">
-                  <CR202Cell
-                    id="cr202-input-fnh3-avgtcl"
-                    value={fnh3Row.avgTcl}
-                    onChange={(e) =>
-                      handleFnh3CellChange('avgTcl', e.target.value)
-                    }
-                    limit={limitTCL}
-                    isInvalidFormat={!!errors['fnh3_avgTcl']}
-                    formatErrorMessage={errors['fnh3_avgTcl']}
-                    inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-slate-900"
-                    ariaLabel="FNH3 AVG TCl"
-                    maxWidth="max-w-[82px]"
-                  />
+                {/* Empty spacer for AVG TCl */}
+                <td className="px-2 py-2 text-center align-middle bg-slate-100/40 border-r border-slate-200">
+                  <span className="text-slate-400 font-mono text-xs font-semibold">—</span>
                 </td>
 
-                {/* AVG A-H for FNH3 row */}
-                <td className="px-2 py-2 text-center align-top bg-slate-100/80">
+                {/* FNH3 AVG A-H */}
+                <td className="px-2 py-2 text-center align-top bg-emerald-100/50">
                   <CR202Cell
                     id="cr202-input-fnh3-avgah"
                     value={fnh3Row.avgAH}
+                    disabled={isViewOnly}
                     onChange={(e) =>
                       handleFnh3CellChange('avgAH', e.target.value)
                     }
                     limit={limitFNH3}
                     isInvalidFormat={!!errors['fnh3_avgAH']}
                     formatErrorMessage={errors['fnh3_avgAH']}
-                    inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-slate-900"
+                    inputFocusStyle="border-2 border-emerald-300 bg-white hover:border-emerald-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-emerald-950 font-black"
                     ariaLabel="FNH3 AVG A-H"
                     maxWidth="max-w-[82px]"
+                    isEdited={Boolean(editedFields['fnh3_avgAH'])}
                   />
                 </td>
               </tr>
 
-              {/* ── Special Bottom Row: PCl ── */}
-              <tr className="bg-sky-50/50 hover:bg-sky-100/60 border-t-2 border-sky-300 border-l-4 border-l-blue-600 transition-colors">
+              {/* ── Special Row: PCl ── */}
+              <tr className="bg-purple-50/40 hover:bg-purple-100/50 border-t border-purple-200 border-l-4 border-l-purple-600 transition-colors">
                 <td className="px-5 py-3 align-middle">
-                  <span className="text-xs font-extrabold text-blue-900 bg-blue-100 border border-blue-300 px-3 py-1 rounded shadow-2xs inline-block whitespace-nowrap">
+                  <span className="text-xs font-extrabold text-purple-900 bg-purple-100 border border-purple-300 px-3 py-1 rounded shadow-2xs inline-block whitespace-nowrap">
                     PCl
                   </span>
                 </td>
                 {STREAMS.map((stream) => {
                   const fieldKey = `pcl_${stream.key}`;
                   const cellVal = pclRow[stream.key];
+                  const isEdited = Boolean(editedFields[fieldKey]);
 
                   return (
                     <td key={stream.key} className="px-1.5 py-2 text-center align-top">
                       <CR202Cell
                         id={`cr202-input-pcl-${stream.key}`}
                         value={cellVal}
+                        disabled={isViewOnly}
                         onChange={(e) =>
                           handlePclCellChange(stream.key, e.target.value)
                         }
                         limit={limitPCL}
                         isInvalidFormat={!!errors[fieldKey]}
                         formatErrorMessage={errors[fieldKey]}
-                        inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900"
+                        inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-purple-600 focus:ring-2 focus:ring-purple-100 text-slate-900"
                         ariaLabel={`PCl Stream ${stream.label}`}
                         maxWidth="max-w-[78px]"
+                        isEdited={isEdited}
                       />
                     </td>
                   );
                 })}
 
-                {/* AVG TCl for PCl row */}
-                <td className="px-2 py-2 text-center align-top bg-slate-100/60 border-r border-slate-200">
-                  <CR202Cell
-                    id="cr202-input-pcl-avgtcl"
-                    value={pclRow.avgTcl}
-                    onChange={(e) =>
-                      handlePclCellChange('avgTcl', e.target.value)
-                    }
-                    limit={limitTCL}
-                    isInvalidFormat={!!errors['pcl_avgTcl']}
-                    formatErrorMessage={errors['pcl_avgTcl']}
-                    inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900"
-                    ariaLabel="PCl AVG TCl"
-                    maxWidth="max-w-[82px]"
-                  />
+                {/* Empty spacer for AVG TCl */}
+                <td className="px-2 py-2 text-center align-middle bg-slate-100/40 border-r border-slate-200">
+                  <span className="text-slate-400 font-mono text-xs font-semibold">—</span>
                 </td>
 
-                {/* AVG A-H for PCl row */}
-                <td className="px-2 py-2 text-center align-top bg-slate-100/80">
+                {/* PCl AVG A-H */}
+                <td className="px-2 py-2 text-center align-top bg-purple-100/50">
                   <CR202Cell
                     id="cr202-input-pcl-avgah"
                     value={pclRow.avgAH}
+                    disabled={isViewOnly}
                     onChange={(e) =>
                       handlePclCellChange('avgAH', e.target.value)
                     }
                     limit={limitPCL}
                     isInvalidFormat={!!errors['pcl_avgAH']}
                     formatErrorMessage={errors['pcl_avgAH']}
-                    inputFocusStyle="border-2 border-slate-300 bg-white hover:border-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 text-slate-900"
+                    inputFocusStyle="border-2 border-purple-300 bg-white hover:border-purple-400 focus:border-purple-600 focus:ring-2 focus:ring-purple-100 text-purple-950 font-black"
                     ariaLabel="PCl AVG A-H"
                     maxWidth="max-w-[82px]"
+                    isEdited={Boolean(editedFields['pcl_avgAH'])}
                   />
                 </td>
               </tr>
@@ -963,14 +1370,84 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>CR 202 (CNH₃ Streams A - H)</strong>, <strong>FNH₃</strong>, <strong>AVG TCl</strong>, <strong>AVG A-H</strong> and <strong>PCl</strong>. Numeric values only.
+              Values for <strong>CR 202</strong> (CNH₃ A–H, AVG TCl, AVG A–H, FNH₃, PCl). Frequency: <strong>ONCE IN A SHIFT</strong>. Unit: <strong>Kgm/m³</strong>.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">
-            Total Slots: 6 + 1 (FNH₃) + 1 (PCl) · Live AVG A-H Calculation · Limits: Kgm/m³
+            Total Slots: {TIME_SLOTS.length} + FNH₃ & PCl Streams
           </div>
         </div>
       </div>
+
+      {/* ── Save Confirmation Modal ────────────────────────────────────────── */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                <Send className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Confirm Shift Submission
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Please review the shift details before saving.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Plant / Crystallizer:</span>
+                <span className="font-bold text-slate-900">ACL Plant → CR 202</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Selected Date:</span>
+                <span className="font-bold text-slate-900">{formatDateDisplay(confirmData.date)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Shift to Save:</span>
+                <span className="font-extrabold text-blue-600">{confirmData.shift.name}</span>
+              </div>
+              {confirmData.isFinalEdit && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px] font-bold">
+                  ⚠️ Notice: This is the final allowed edit for III SHIFT. After this save, all shifts for today will lock permanently.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Review / Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
