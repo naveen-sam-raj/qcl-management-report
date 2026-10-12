@@ -352,26 +352,50 @@ const sendPlantAnalysisEmail = async ({
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
   if (isSieveAnalysis) {
-    // Map shift name if available
+    // Reload freshly persisted record from database to guarantee exact persisted values
+    let freshSieveDoc = null;
+    if (savedRecord?._id) {
+      try {
+        const PureSaltSieveAnalysis = require('../models/PureSaltSieveAnalysis');
+        freshSieveDoc = await PureSaltSieveAnalysis.findById(savedRecord._id).lean();
+      } catch (e) {}
+    }
+    const sieveSource = freshSieveDoc || (savedRecord.toObject ? savedRecord.toObject() : savedRecord);
+    const sieveRows = sieveSource?.rows || sieveSource?.data?.rows || sieveSource?.data || {};
+
+    // Exact shift resolution: Check III before II, and I last
     let sKey = 'shift1';
-    if (/II|2/i.test(shiftLabel)) sKey = 'shift2';
-    else if (/III|3/i.test(shiftLabel)) sKey = 'shift3';
+    const cleanShift = String(shift || sieveSource?.shift || '').trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else if (cleanShift === 'shift1' || /I|\b1\b|shift\s*1/i.test(cleanShift)) {
+      sKey = 'shift1';
+    } else {
+      if (sieveRows.shift3 && Object.values(sieveRows.shift3).some((v) => v !== null && v !== '')) sKey = 'shift3';
+      else if (sieveRows.shift2 && Object.values(sieveRows.shift2).some((v) => v !== null && v !== '')) sKey = 'shift2';
+      else sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT' : sKey === 'shift2' ? 'II SHIFT' : 'III SHIFT';
+    const sValues = sieveRows[sKey] || {};
 
-    const sieveRows = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
-    const sValues = sieveRows[sKey] || sieveRows[shiftLabel] || {};
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return 'N/A';
+      const num = Number(v);
+      return isNaN(num) ? String(v) : `${num}%`;
+    };
 
-    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? `${v}%` : 'N/A');
-
-    const p18Val = formatVal(sValues.p18 ?? sValues['p18']);
-    const p44Val = formatVal(sValues.p44 ?? sValues['p44']);
-    const p60Val = formatVal(sValues.p60 ?? sValues['p60']);
-    const p100Val = formatVal(sValues.p100 ?? sValues['p100']);
-    const m100Val = formatVal(sValues.m100 ?? sValues['m100']);
+    const p18Val = formatVal(sValues.p18);
+    const p44Val = formatVal(sValues.p44);
+    const p60Val = formatVal(sValues.p60);
+    const p100Val = formatVal(sValues.p100);
+    const m100Val = formatVal(sValues.m100);
 
     sieveTextSummary = `Shift:
-${shiftLabel || 'All Shifts'}
+${shiftDisplay}
 
-Pure Salt Sieve Analysis Fractions:
+Pure Salt Sieve Analysis Fractions (${shiftDisplay}):
 - BSS 18: ${p18Val}
 - BSS 44: ${p44Val}
 - BSS 60: ${p60Val}
@@ -421,17 +445,47 @@ Attachment: ${excelFileName}
   // Extract data values
   let dataHtml = '';
   if (isSieveAnalysis) {
-    let sKey = 'shift1';
-    if (/II|2/i.test(shiftLabel)) sKey = 'shift2';
-    else if (/III|3/i.test(shiftLabel)) sKey = 'shift3';
+    let freshSieveDoc = null;
+    if (savedRecord?._id) {
+      try {
+        const PureSaltSieveAnalysis = require('../models/PureSaltSieveAnalysis');
+        freshSieveDoc = await PureSaltSieveAnalysis.findById(savedRecord._id).lean();
+      } catch (e) {}
+    }
+    const sieveSource = freshSieveDoc || (savedRecord.toObject ? savedRecord.toObject() : savedRecord);
+    const sieveRows = sieveSource?.rows || sieveSource?.data?.rows || sieveSource?.data || {};
 
-    const sieveRows = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
-    const sValues = sieveRows[sKey] || sieveRows[shiftLabel] || {};
-    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? `${v}%` : 'N/A');
+    let sKey = 'shift1';
+    const cleanShift = String(shift || sieveSource?.shift || '').trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else if (cleanShift === 'shift1' || /I|\b1\b|shift\s*1/i.test(cleanShift)) {
+      sKey = 'shift1';
+    } else {
+      if (sieveRows.shift3 && Object.values(sieveRows.shift3).some((v) => v !== null && v !== '')) sKey = 'shift3';
+      else if (sieveRows.shift2 && Object.values(sieveRows.shift2).some((v) => v !== null && v !== '')) sKey = 'shift2';
+      else sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT' : sKey === 'shift2' ? 'II SHIFT' : 'III SHIFT';
+    const sValues = sieveRows[sKey] || {};
+
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return 'N/A';
+      const num = Number(v);
+      return isNaN(num) ? String(v) : `${num}%`;
+    };
+
+    const p18Val = formatVal(sValues.p18);
+    const p44Val = formatVal(sValues.p44);
+    const p60Val = formatVal(sValues.p60);
+    const p100Val = formatVal(sValues.p100);
+    const m100Val = formatVal(sValues.m100);
 
     dataHtml = `
       <div class="field-group">
-        <div class="field-label">Sieve Analysis Results (${shiftLabel || 'Shift'})</div>
+        <div class="field-label">Sieve Analysis Results (${shiftDisplay})</div>
         <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px;">
           <thead>
             <tr style="background-color: #0f2e5a; color: #ffffff;">
@@ -442,23 +496,23 @@ Attachment: ${excelFileName}
           <tbody>
             <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 18</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p18)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${p18Val}</td>
             </tr>
             <tr style="background-color: #f8fafc;">
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 44</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p44)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${p44Val}</td>
             </tr>
             <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 60</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p60)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${p60Val}</td>
             </tr>
             <tr style="background-color: #f8fafc;">
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">BSS 100</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.p100)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${p100Val}</td>
             </tr>
             <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">-100</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(sValues.m100)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${m100Val}</td>
             </tr>
           </tbody>
         </table>
@@ -761,8 +815,16 @@ const executeSaveAndEmailWorkflow = async ({
   try {
     if (analysisType === 'Pure Salt Sieve Analysis' || cleanType.toLowerCase().includes('pure_salt_sieve')) {
       const { generatePureSaltSieveAnalysisExcel } = require('./excelService');
+      let excelData = savedRecord.toObject ? savedRecord.toObject() : savedRecord;
+      if (savedRecord?._id) {
+        try {
+          const PureSaltSieveAnalysis = require('../models/PureSaltSieveAnalysis');
+          const freshDoc = await PureSaltSieveAnalysis.findById(savedRecord._id).lean();
+          if (freshDoc) excelData = freshDoc;
+        } catch (fErr) {}
+      }
       excelResult = await generatePureSaltSieveAnalysisExcel({
-        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        ...excelData,
         plant: plantName,
         date: savedRecord.date,
         submittedBy,

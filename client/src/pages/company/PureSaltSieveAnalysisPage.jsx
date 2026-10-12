@@ -359,9 +359,13 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
   };
 
   const handleConfirmSave = async () => {
+    if (saving) return; // Prevent duplicate submission
     setSaving(true);
     setSavePhase('saving');
     setSaveSuccess(false);
+
+    // Close confirmation modal immediately to prevent modal freeze
+    setShowConfirmModal(false);
 
     const shiftBeingSaved = confirmData?.shifts?.[0];
     const payload = {
@@ -392,7 +396,6 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
 
       if (!response?.data?.success) {
         showToast(response?.data?.message || 'Unable to save the data. Please try again.', 'error');
-        setShowConfirmModal(false);
         setSavePhase('idle');
         return;
       }
@@ -408,13 +411,6 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
       }
-      setShowConfirmModal(false);
-
-      setSavePhase('generating');
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      setSavePhase('emailing');
-      await new Promise((resolve) => setTimeout(resolve, 300));
 
       // Check email status from server
       if (response.data?.emailRecipient) {
@@ -427,32 +423,45 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       if (response.data?.emailSent || statusFromApi === 'sent') {
         setSavePhase('completed');
         setEmailStatusDetail('Email accepted by SMTP server ✓');
-        showToast('Saved & Emailed Successfully ✓', 'success');
+        showToast('Saved — Email Sent ✓', 'success');
+      } else if (response.data?.emailPending || statusFromApi === 'pending') {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email Pending (Delivery in progress)');
+        showToast('Saved — Email Pending', 'info');
+
+        // Poll once after 2.5s to see if SMTP finalized
+        setTimeout(async () => {
+          try {
+            const checkRes = await api.get('/pure-salt-sieve-analysis?date=' + date);
+            const latestDoc = checkRes.data?.data?.[0];
+            if (latestDoc?.emailStatus === 'sent') {
+              setSavePhase('completed');
+              setEmailStatusDetail('Email accepted by SMTP server ✓');
+              showToast('Saved — Email Sent ✓', 'success');
+            } else if (latestDoc?.emailStatus === 'failed') {
+              setSavePhase('email_failed');
+              setEmailStatusDetail('Saved — Email Failed');
+            }
+          } catch (cErr) {}
+        }, 2500);
       } else if (statusFromApi === 'failed' || (emailNotification && !emailNotification.success)) {
         setSavePhase('email_failed');
         const errDetail = emailNotification?.error || emailNotification?.message || 'Email delivery failed to mail server';
-        setEmailStatusDetail(errDetail);
-        showToast('Data saved to database. Email delivery failed: ' + errDetail, 'warning');
+        setEmailStatusDetail('Saved — Email Failed: ' + errDetail);
+        showToast('Saved — Email Failed: ' + errDetail, 'warning');
       } else {
         setSavePhase('completed');
         setEmailStatusDetail('Saved successfully');
         showToast(response.data.message || 'Saved successfully', 'success');
       }
       setSaveSuccess(true);
-
-      setTimeout(() => {
-        setSaving(false);
-      }, 3000);
     } catch (err) {
       setSavePhase('idle');
-      setSaving(false);
       console.error('[PureSaltSieveAnalysis] Database save failed:', err);
       showToast(err.response?.data?.message || 'Unable to save the data. Please try again.', 'error');
-      setShowConfirmModal(false);
     } finally {
-      if (!response?.data?.success) {
-        setSaving(false);
-      }
+      // Loading ALWAYS resets promptly on success, failure, or timeout
+      setSaving(false);
     }
   };
 

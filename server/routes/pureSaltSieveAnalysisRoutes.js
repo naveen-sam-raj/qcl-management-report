@@ -325,39 +325,69 @@ router.post('/', protect, async (req, res) => {
     // ── Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
 
-    let lastEmailResult = null;
-    for (const shiftKey of newlySavedShifts) {
-      try {
-        lastEmailResult = await executeSaveAndEmailWorkflow({
-          plantIdentifier: plantTarget,
-          analysisType: 'Pure Salt Sieve Analysis',
-          unit: '',
-          shift: shiftDisplayNames[shiftKey],
-          date: payload.date,
-          data: payload.rows,
-          submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-          submittedById: req.user?._id || null,
-          company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
-          explicitRecord: savedRecord,
-          rawBody: payload,
-        });
-      } catch (err) {
-        console.warn(`[AutoPlantEmail] Exception in workflow for sieve ${shiftKey}:`, err.message);
-        lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+    const runEmailNotification = async () => {
+      let emailResult = null;
+      for (const shiftKey of newlySavedShifts) {
+        try {
+          emailResult = await executeSaveAndEmailWorkflow({
+            plantIdentifier: plantTarget,
+            analysisType: 'Pure Salt Sieve Analysis',
+            unit: '',
+            shift: shiftDisplayNames[shiftKey],
+            date: payload.date,
+            data: payload.rows,
+            submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+            submittedById: req.user?._id || null,
+            company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
+            explicitRecord: savedRecord,
+            rawBody: payload,
+          });
+        } catch (err) {
+          console.warn(`[AutoPlantEmail] Exception in workflow for sieve ${shiftKey}:`, err.message);
+          emailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+        }
       }
+      return emailResult;
+    };
+
+    let lastEmailResult = null;
+    let emailTimedOut = false;
+
+    // Race email dispatch with a fast timeout (1200ms) so DB save response is never delayed or stuck
+    const emailPromise = runEmailNotification();
+    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 1200));
+
+    const raceResult = await Promise.race([emailPromise, timeoutPromise]);
+    if (raceResult === 'TIMEOUT') {
+      emailTimedOut = true;
+      // Allow background dispatch to complete safely and update DB record
+      emailPromise.catch((err) => {
+        console.warn('[AutoPlantEmail] Background email execution note:', err.message);
+      });
+    } else {
+      lastEmailResult = raceResult;
     }
 
     const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
-    const finalEmailStatus = lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
-    const emailRecipient = lastEmailResult?.data?.emailRecipient || savedRecord?.emailRecipient || '';
+    const finalEmailStatus = emailTimedOut
+      ? 'pending'
+      : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const emailRecipient =
+      lastEmailResult?.recipient ||
+      lastEmailResult?.data?.emailRecipient ||
+      savedRecord?.emailRecipient ||
+      '';
 
     return res.status(201).json({
       success: true,
       message: emailSent
         ? `Successfully saved ${newlySavedShifts.length} shift(s) & email sent ✓`
-        : `Successfully saved ${newlySavedShifts.length} shift(s), but email delivery failed: ${lastEmailResult?.emailError || lastEmailResult?.message || 'Mail server rejected recipient'}`,
+        : emailTimedOut
+        ? `Successfully saved ${newlySavedShifts.length} shift(s) — Email delivery in progress ⏳`
+        : `Successfully saved ${newlySavedShifts.length} shift(s), email status: ${finalEmailStatus}`,
       data: savedRecord,
       emailSent,
+      emailPending: emailTimedOut,
       emailStatus: finalEmailStatus,
       emailRecipient,
       emailNotification: lastEmailResult,
