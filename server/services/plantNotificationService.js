@@ -442,11 +442,27 @@ Attachment: ${excelFileName}
           </tbody>
         </table>
       </div>`;
-  } else if (savedRecord?.data) {
+  } else if (savedRecord?.data || savedRecord?.rows) {
+    const rawDataToExtract = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows;
     let dataEntries = [];
     const extractEntries = (obj, prefix = '') => {
       for (const [key, val] of Object.entries(obj)) {
-        if (key === 'id' || key === 'plant' || key === 'date' || key === 'analysisType' || key === 'company' || key === '_id' || key === 'submittedBy' || key === 'submittedById') continue;
+        if (
+          key === 'id' ||
+          key === 'plant' ||
+          key === 'date' ||
+          key === 'analysisType' ||
+          key === 'company' ||
+          key === '_id' ||
+          key === 'submittedBy' ||
+          key === 'submittedById' ||
+          key === 'lockedShifts' ||
+          key === 'editedFields' ||
+          key === 'editAuditHistory' ||
+          key === 'createdAt' ||
+          key === 'updatedAt'
+        )
+          continue;
         if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
           extractEntries(val, prefix + key + '.');
         } else if (Array.isArray(val)) {
@@ -456,7 +472,7 @@ Attachment: ${excelFileName}
         }
       }
     };
-    extractEntries(savedRecord.data);
+    extractEntries(rawDataToExtract);
 
     if (dataEntries.length > 0) {
       dataHtml = `
@@ -589,10 +605,12 @@ Attachment: ${excelFileName}
       recipient: assignedUser.email,
     };
   } catch (mailErr) {
-    const is550Rejected = mailErr.responseCode === 550 || /550|5\.1\.1|Recipient address rejected/i.test(mailErr.message);
+    const is550Rejected =
+      mailErr.responseCode === 550 ||
+      /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(mailErr.message);
     if (is550Rejected) {
       console.error(
-        `[PlantNotification] ❌ SMTP 550 Recipient Rejected for "${assignedUser.email}": Mailbox does not exist, is deactivated, or external organization policy rejected the address. Administrator verification of the recipient mailbox or Microsoft 365 configuration is required.`
+        `[PlantNotification] ❌ SMTP Recipient Rejection (550 / 5.1.1 / 5.4.1) for "${assignedUser.email}": Mailbox is undeliverable, does not exist, access is denied, or organization policy rejected the address. Microsoft 365 / mail server administrator verification of the recipient mailbox is required.`
       );
     } else {
       console.error(`[PlantNotification] ❌ Nodemailer delivery failed for "${assignedUser.email}": ${mailErr.message}`);
@@ -601,7 +619,7 @@ Attachment: ${excelFileName}
       success: false,
       emailStatus: 'failed',
       error: is550Rejected
-        ? `Recipient address rejected by mail server (550 5.1.1): The mailbox "${assignedUser.email}" does not exist or requires administrator verification.`
+        ? `Recipient address rejected by mail server (550: undeliverable / access denied): The registered mailbox "${assignedUser.email}" requires Microsoft 365 administrator or mail server verification.`
         : mailErr.message,
       recipient: assignedUser.email,
     };

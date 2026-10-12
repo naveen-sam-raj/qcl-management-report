@@ -104,12 +104,16 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   // ── State ──
-  const [date, setDate]               = useState('');
-  const [data, setData]               = useState(buildEmptyData());
-  const [errors, setErrors]           = useState({});
-  const [saving, setSaving]           = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError]     = useState(false);
+  const [date, setDate]                             = useState('');
+  const [data, setData]                             = useState(buildEmptyData());
+  const [errors, setErrors]                         = useState({});
+  const [saving, setSaving]                         = useState(false);
+  const [saveSuccess, setSaveSuccess]               = useState(false);
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                     = useState(null);
+  const [dateError, setDateError]                   = useState(false);
+  const [recipientEmail, setRecipientEmail]         = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -117,9 +121,20 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/tk-203-analysis?date=${date}`);
+        if (response.data?.assignedOperatorEmail) {
+          setRecipientEmail(response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
           
           if (!record) {
              setData(buildEmptyData());
@@ -175,6 +190,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
     setDate('');
     setErrors({});
     setSaveSuccess(false);
+    setSavePhase('idle');
     setDateError(false);
     showToast('TK 203 analysis form cleared successfully.', 'info');
   };
@@ -213,6 +229,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
     }
 
     setSaving(true);
+    setSavePhase('saving');
 
     const payload = {
       date,
@@ -238,13 +255,60 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
       const response = await api.post('/api/tk-203-analysis', payload);
       setSaving(false);
       setSaveSuccess(true);
-      showToast(response.data?.message || 'TK 203 Analysis data saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 6000);
+      const savedDoc = response.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      
+      const emailRes = response.data?.emailNotification;
+      if (emailRes) {
+        if (emailRes.recipient) setRecipientEmail(emailRes.recipient);
+        if (emailRes.success) {
+          setSavePhase('completed');
+          setEmailStatusDetail(emailRes.response || 'Delivered to SMTP server');
+          showToast('Saved — Email Sent ✓', 'success');
+        } else {
+          setSavePhase('email_failed');
+          setEmailStatusDetail(emailRes.error || emailRes.status || 'Email delivery failed');
+          showToast('Data saved to database. Email delivery failed: ' + (emailRes.error || 'Server error'), 'warning');
+        }
+      } else {
+        setSavePhase('completed');
+        showToast(response.data?.message || 'TK 203 Analysis data saved successfully!', 'success');
+      }
     } catch (err) {
       setSaving(false);
+      setSavePhase('idle');
       console.error('[TK203Analysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast('Save Error: ' + serverMessage, 'error');
+    }
+  };
+
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast('Cannot retry email: Record ID is not available.', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await api.post(`/api/tk-203-analysis/${recordId}/retry-email`);
+      setSaving(false);
+      if (response.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email sent successfully on retry.');
+        showToast('Email resent successfully!', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed on retry.');
+        showToast('Email retry failed: ' + (response.data?.emailError || 'Rejected by server'), 'error');
+      }
+    } catch (err) {
+      setSaving(false);
+      const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
+      setSavePhase('email_failed');
+      setEmailStatusDetail(msg);
+      showToast('Retry Email Error: ' + msg, 'error');
     }
   };
 
@@ -345,39 +409,92 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
               id="btn-tk203-save"
               onClick={handleSave}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer ${
+                savePhase === 'completed'
+                  ? 'bg-emerald-600 hover:bg-emerald-700'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
               title="Save TK 203 data"
             >
               {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+              ) : savePhase === 'completed' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
               ) : (
-                <Save className="w-3.5 h-3.5" />
+                <Save className="w-3.5 h-3.5 shrink-0" />
               )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
+              <span>
+                {savePhase === 'saving'
+                  ? 'Saving...'
+                  : savePhase === 'completed'
+                  ? 'Saved & Emailed ✓'
+                  : savePhase === 'email_failed'
+                  ? 'Saved — Email Failed'
+                  : savePhase === 'email_pending'
+                  ? 'Saved — Email Pending'
+                  : 'Save / Submit'}
+              </span>
             </button>
           </div>
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
+      {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       {saveSuccess && (
         <div
           id="tk203-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
+          className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
+            savePhase === 'email_failed'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : savePhase === 'email_pending'
+              ? 'bg-sky-50 border-sky-200 text-sky-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              TK 203 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
+          {savePhase === 'email_failed' ? (
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          )}
+          <div className="text-xs flex-1 space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold">
+                {savePhase === 'email_failed'
+                  ? 'Saved — Email Failed ⚠️'
+                  : savePhase === 'email_pending'
+                  ? 'Saved — Email Pending ⏳'
+                  : 'Saved — Email Sent ✓'}
+              </span>
+              <span className="text-slate-600">
+                TK 203 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
+              </span>
+            </div>
+            {recipientEmail && (
+              <div className="text-[11.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-semibold">Notification Recipient:</span>
+                <span className="font-mono bg-white/70 border px-1.5 py-0.2 rounded font-bold">
+                  {recipientEmail}
+                </span>
+                <span className="text-slate-500">(Registered ACL Plant Operator)</span>
+                {emailStatusDetail && (
+                  <span className="italic text-slate-600">— {emailStatusDetail}</span>
+                )}
+              </div>
+            )}
           </div>
+          {savePhase === 'email_failed' && (
+            <button
+              onClick={handleRetryEmail}
+              disabled={saving}
+              className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/90 hover:bg-amber-300 rounded border border-amber-400/50 transition cursor-pointer shrink-0 shadow-2xs"
+            >
+              Retry Email
+            </button>
+          )}
           <button
             onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
+            className="ml-auto text-slate-400 hover:text-slate-600 transition text-base leading-none shrink-0 cursor-pointer"
             aria-label="Dismiss"
           >
             ×

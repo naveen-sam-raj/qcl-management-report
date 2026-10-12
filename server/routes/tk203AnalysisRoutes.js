@@ -52,9 +52,10 @@ router.post('/', async (req, res) => {
     tk203Records.unshift(record);
 
     // Persist to MongoDB PlantAnalysisRecord
+    let savedDoc = null;
     try {
       if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
+        savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
           {
             plantCode: record.plant || 'Unknown',
             analysisType: record.analysisType || 'Unknown',
@@ -78,7 +79,6 @@ router.post('/', async (req, res) => {
       console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
     }
 
-
     // Activity log entry
     try {
       if (ActivityLog && typeof ActivityLog.create === 'function') {
@@ -97,7 +97,7 @@ router.post('/', async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'TK 203 Analysis data saved successfully.',
-      data: record,
+      data: savedDoc || record,
     });
   } catch (error) {
     console.error('[TK203Analysis API] Error saving data:', error);
@@ -117,6 +117,13 @@ router.get('/', async (req, res) => {
   try {
     const { date } = req.query;
     const { PlantAnalysisRecord } = require('../models');
+    const { getPlantAssignedUser } = require('../services/plantNotificationService');
+
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('ACL');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+    } catch (uErr) {}
 
     if (date) {
       const query = { date, plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'TK 203 Analysis' };
@@ -129,14 +136,18 @@ router.get('/', async (req, res) => {
       if (doc && doc.data) {
         return res.status(200).json({
           success: true,
-          data: [doc.data]
+          data: [doc.data],
+          assignedOperatorEmail,
+          emailStatus: doc.emailStatus || 'pending',
+          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
         });
       }
     }
 
     return res.status(200).json({
       success: true,
-      data: []
+      data: [],
+      assignedOperatorEmail,
     });
   } catch (error) {
     console.error('[ACL GET] Error:', error);
@@ -147,4 +158,48 @@ router.get('/', async (req, res) => {
   }
 });
 
+/**
+ * @desc    Retry sending email for an existing saved TK 203 analysis record
+ * @route   POST /api/tk-203-analysis/:id/retry-email
+ * @access  Private
+ */
+router.post('/:id/retry-email', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { PlantAnalysisRecord } = require('../models');
+
+    let record = null;
+    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
+      record = await PlantAnalysisRecord.findById(id);
+    }
+    if (!record) {
+      record = analysisRecords.find((r) => (r._id || r.id).toString() === id.toString());
+    }
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'TK 203 analysis record not found.' });
+    }
+
+    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
+    const result = await executeSaveAndEmailWorkflow({
+      plantIdentifier: record.plantCode || 'ACL Plant',
+      analysisType: record.analysisType || 'TK 203 Analysis',
+      unit: '',
+      shift: 'All Shifts / Time Slots',
+      date: record.date,
+      data: record.data,
+      submittedBy: record.submittedBy || req.user?.name || 'Plant Operator',
+      submittedById: req.user?._id || record.submittedById,
+      company: req.user?.company?._id || req.user?.company || record.company,
+      explicitRecord: record,
+    });
+
+    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
+  } catch (error) {
+    console.error('[TK203 Retry Email] Error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
+
