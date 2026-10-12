@@ -394,64 +394,66 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     try {
       // Step: Send data to backend API (handles DB Save + ExcelJS Generate + Nodemailer Email with .xlsx attachment)
       response = await api.post('/pure-salt-analysis', payload);
+
+      // Step: Confirm MongoDB save successful
+      if (!response?.data?.success) {
+        showToast(response?.data?.message || 'Unable to save the data. Please try again.', 'error');
+        setShowConfirmModal(false);
+        setSavePhase('idle');
+        return;
+      }
+
+      const savedRecord = response.data.data;
+      const excelInfo = response.data.excel;
+      setLastSavedRecord(savedRecord);
+      setLastExcelData(excelInfo);
+      if (savedRecord?.lockedShifts) {
+        setLockedShifts(savedRecord.lockedShifts);
+      }
+      if (savedRecord?.rows) {
+        setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
+      }
+      setShowConfirmModal(false);
+
+      // Stage 2: "Generating Report..."
+      setSavePhase('generating');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Stage 3: "Sending Email..."
+      setSavePhase('emailing');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Stage 4: Final Status Messaging (Section 3, 9 & 12)
+      if (response.data.emailSent || response.data.emailStatus === 'processing' || response.data.success) {
+        setSavePhase('completed');
+        setSaveSuccess(true);
+        showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
+
+        // Reset button state to idle after feedback display
+        setTimeout(() => {
+          setSaving(false);
+          setSavePhase('idle');
+        }, 4000);
+      } else {
+        // MongoDB save succeeded, but email sending failed
+        setSaving(false);
+        setSavePhase('email_failed');
+        setSaveSuccess(true);
+        const warnMsg = response.data.message || 'Data saved and Excel generated, but email sending failed.';
+        showToast(warnMsg, 'warning');
+      }
     } catch (err) {
       setSavePhase('idle');
+      setSaving(false);
       console.error('[PureSaltAnalysis] Database save failed:', err);
-
-      // Section 12: If MongoDB save fails: "Unable to save the data. Please try again."
+      // If MongoDB save fails: "Unable to save the data. Please try again."
       showToast(err.response?.data?.message || 'Unable to save the data. Please try again.', 'error');
-      // DO NOT close modal if there's a backend validation error, just let them see the error and retry or close it themselves. Or close it and let them fix it.
       setShowConfirmModal(false);
-      return;
-    }
-
-    // Step: Confirm MongoDB save successful
-    if (!response?.data?.success) {
-      setSaving(false);
-      setSavePhase('idle');
-      showToast('Unable to save the data. Please try again.', 'error');
-      setShowConfirmModal(false);
-      return;
-    }
-
-    const savedRecord = response.data.data;
-    const excelInfo = response.data.excel;
-    setLastSavedRecord(savedRecord);
-    setLastExcelData(excelInfo);
-    if (savedRecord?.lockedShifts) {
-      setLockedShifts(savedRecord.lockedShifts);
-    }
-    if (savedRecord?.rows) {
-      setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
-    }
-    setShowConfirmModal(false);
-
-    // Stage 2: "Generating Report..."
-    setSavePhase('generating');
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    // Stage 3: "Sending Email..."
-    setSavePhase('emailing');
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    // Stage 4: Final Status Messaging (Section 3, 9 & 12)
-    if (response.data.emailSent || response.data.emailStatus === 'processing' || response.data.success) {
-      setSavePhase('completed');
-      setSaveSuccess(true);
-      showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
-
-      // Reset button state to idle after feedback display
-      setTimeout(() => {
+    } finally {
+      // If error occurred or early return, ensure saving is reset
+      if (!response?.data?.success) {
         setSaving(false);
-        setSavePhase('idle');
-      }, 5000);
-    } else {
-      // MongoDB save succeeded, but email sending failed
-      setSaving(false);
-      setSavePhase('email_failed');
-      setSaveSuccess(true);
-      const warnMsg = response.data.message || 'Data saved and Excel generated, but email sending failed.';
-      showToast(warnMsg, 'warning');
+      }
     }
   };
 

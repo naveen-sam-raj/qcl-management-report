@@ -31,6 +31,13 @@ router.post('/', protect, async (req, res) => {
 
     const plantTarget = payload.plant || 'ACL Plant';
     const targetRows = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
+    const shiftDisplayNames = {
+      rawSalt: 'RAW SALT',
+      shift1: 'I SHIFT',
+      shift2: 'II SHIFT',
+      shift3: 'III SHIFT',
+      composition: 'COMPOSITION',
+    };
     const newlySavedShifts = [];
     let savedRecord;
 
@@ -194,7 +201,7 @@ router.post('/', protect, async (req, res) => {
         data: payload.rows,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
         submittedById: req.user?._id || null,
-        company: savedRecord.company || req.user?.company?._id || req.user?.company || null,
+        company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
         explicitRecord: savedRecord,
         rawBody: payload,
       }).catch(err => console.warn(`[AutoPlantEmail] Exception in background workflow for ${shiftKey}:`, err.message));

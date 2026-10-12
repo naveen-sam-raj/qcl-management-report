@@ -31,8 +31,39 @@ const seedDatabase = async () => {
       }
     }
 
+    const ensurePlantOperators = async () => {
+      const plantCodes = ['ACL', 'SA', 'OFFSITE', 'CO2'];
+      const plants = await Plant.find({ code: { $in: plantCodes } });
+      for (const p of plants) {
+        let assigned = await User.findOne({ plant: p._id });
+        if (!assigned) {
+          const codeLower = p.code.toLowerCase();
+          const email = `${codeLower}_operator@tfl.com`;
+          const existingUser = await User.findOne({ email });
+          if (existingUser) {
+            existingUser.plant = p._id;
+            await existingUser.save();
+          } else {
+            const bcrypt = require('bcryptjs');
+            const hashedPassword = await bcrypt.hash('Operator@2026', 10);
+            await User.create({
+              name: `${p.name} Operator`,
+              email: email,
+              username: `${codeLower}_operator`,
+              password: hashedPassword,
+              role: 'user',
+              plant: p._id,
+              company: p.company,
+              status: 'active',
+            });
+          }
+        }
+      }
+    };
+
     const existingCompanies = await Company.countDocuments();
     if (existingCompanies > 0) {
+      await ensurePlantOperators();
       return;
     }
 
