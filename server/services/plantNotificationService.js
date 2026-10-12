@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Plant, User, ActivityLog, PlantAnalysisRecord } = require('../models');
+const { Plant, User, ActivityLog, PlantAnalysisRecord, Company } = require('../models');
 const { createNodemailerTransporter } = require('./emailService');
 
 // Map of analysis types / keywords to plant codes for intelligent inference
@@ -246,10 +246,19 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
     };
   }
 
-  // Find users assigned to this plant in MongoDB
-  const users = await User.find({
+  // Find users assigned to this plant in MongoDB, enforcing company isolation if company is provided
+  const query = {
     plant: plant._id,
-  }).sort({ createdAt: 1 });
+    role: 'user',
+    status: 'active',
+  };
+
+  const companyFilter = options.company || plant.company;
+  if (companyFilter) {
+    query.company = companyFilter;
+  }
+
+  const users = await User.find(query).sort({ createdAt: 1 });
 
   const recipientEmails = users.map((u) => u.email).filter(Boolean);
 
@@ -260,7 +269,7 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
       primaryEmail: null,
       recipientEmails: [],
       assignedUser: null,
-      error: 'No user is assigned to this plant.',
+      error: `No active user assigned to ${plant.name || 'this plant'} for company isolation.`,
     };
   }
 
@@ -371,9 +380,21 @@ Pure Salt Sieve Analysis Fractions:
 `;
   }
 
+  // Resolve company name dynamically
+  let companyName = 'TFL';
+  try {
+    const compId = plantDoc.company || assignedUser?.company || savedRecord?.company;
+    if (compId) {
+      const compDoc = await Company.findById(compId);
+      if (compDoc && compDoc.name) {
+        companyName = compDoc.name;
+      }
+    }
+  } catch (cErr) {}
+
   // Exact Body format
   const textBody = `Company:
-TFL
+${companyName}
 
 Plant:
 ${plantName}
@@ -516,12 +537,12 @@ Attachment: ${excelFileName}
   <div class="card">
     <div class="header">
       <h2>${plantName} Analysis Saved</h2>
-      <p>SPIC / TFL Plant Management System</p>
+      <p>${companyName} Plant Management System</p>
     </div>
     <div class="body-content">
       <div class="field-group">
         <div class="field-label">Company</div>
-        <div class="field-value">TFL</div>
+        <div class="field-value">${companyName}</div>
       </div>
       <div class="field-group">
         <div class="field-label">Plant</div>
@@ -666,7 +687,7 @@ const executeSaveAndEmailWorkflow = async ({
   const plantCode = plantDoc.code;
 
   // 2. Resolve Assigned User from MongoDB
-  const { assignedUser, primaryEmail, error: userError } = await getPlantAssignedUser(plantDoc._id);
+  const { assignedUser, primaryEmail, error: userError } = await getPlantAssignedUser(plantDoc._id, { company });
 
   // 3. Save to MongoDB Atlas (if not already saved explicitly)
   let savedRecord = explicitRecord;
