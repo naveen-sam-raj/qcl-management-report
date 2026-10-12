@@ -176,14 +176,36 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         const response = await api.get(`/pure-salt-sieve-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data && response.data.assignedOperatorEmail) {
-          setRecipientEmail(response.data.assignedOperatorEmail);
+        if (response.data && (response.data.assignedOperatorEmail || response.data.emailRecipient)) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+
+        if (response.data && response.data.emailStatus) {
+          if (response.data.emailStatus === 'sent') {
+            setSavePhase('completed');
+            setEmailStatusDetail('Email accepted by SMTP server');
+          } else if (response.data.emailStatus === 'failed') {
+            setSavePhase('email_failed');
+            setEmailStatusDetail('Email delivery failed to mail server');
+          }
         }
 
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const records = Array.isArray(payloadData) ? payloadData : [payloadData];
           const record = records.find((r) => r.date === date) || records[0];
+
+          if (record) {
+            setLastSavedRecord(record);
+            if (record.emailRecipient) setRecipientEmail(record.emailRecipient);
+            if (record.emailStatus === 'sent') {
+              setSavePhase('completed');
+              setEmailStatusDetail('Email accepted by SMTP server');
+            } else if (record.emailStatus === 'failed') {
+              setSavePhase('email_failed');
+              setEmailStatusDetail('Email delivery failed to mail server');
+            }
+          }
 
           if (record && record.rows) {
             setData(record.rows);
@@ -395,19 +417,26 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
       await new Promise((resolve) => setTimeout(resolve, 300));
 
       // Check email status from server
-      const statusFromApi = response.data.emailStatus || savedRecord?.emailStatus || 'sent';
-      if (statusFromApi === 'failed') {
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+
+      const emailNotification = response.data?.emailNotification;
+      const statusFromApi = response.data?.emailStatus || savedRecord?.emailStatus;
+
+      if (response.data?.emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email accepted by SMTP server ✓');
+        showToast('Saved & Emailed Successfully ✓', 'success');
+      } else if (statusFromApi === 'failed' || (emailNotification && !emailNotification.success)) {
         setSavePhase('email_failed');
-        setEmailStatusDetail('Email delivery failed to mail server');
-        showToast('Data saved successfully, but notification email delivery failed.', 'warning');
-      } else if (statusFromApi === 'processing' || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Email is queued for delivery');
-        showToast('Saved successfully — Email queued for delivery', 'info');
+        const errDetail = emailNotification?.error || emailNotification?.message || 'Email delivery failed to mail server';
+        setEmailStatusDetail(errDetail);
+        showToast('Data saved to database. Email delivery failed: ' + errDetail, 'warning');
       } else {
         setSavePhase('completed');
-        setEmailStatusDetail('Email accepted by SMTP server');
-        showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
+        setEmailStatusDetail('Saved successfully');
+        showToast(response.data.message || 'Saved successfully', 'success');
       }
       setSaveSuccess(true);
 

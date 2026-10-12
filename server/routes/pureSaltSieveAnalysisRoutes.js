@@ -325,28 +325,42 @@ router.post('/', protect, async (req, res) => {
     // ── Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
 
-    // Fire and forget - do not await! Dispatch notification asynchronously.
-    newlySavedShifts.forEach((shiftKey) => {
-      executeSaveAndEmailWorkflow({
-        plantIdentifier: plantTarget,
-        analysisType: 'Pure Salt Sieve Analysis',
-        unit: '',
-        shift: shiftDisplayNames[shiftKey],
-        date: payload.date,
-        data: payload.rows,
-        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-        submittedById: req.user?._id || null,
-        company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
-        explicitRecord: savedRecord,
-        rawBody: payload,
-      }).catch((err) => console.warn(`[AutoPlantEmail] Exception in background workflow for sieve ${shiftKey}:`, err.message));
-    });
+    let lastEmailResult = null;
+    for (const shiftKey of newlySavedShifts) {
+      try {
+        lastEmailResult = await executeSaveAndEmailWorkflow({
+          plantIdentifier: plantTarget,
+          analysisType: 'Pure Salt Sieve Analysis',
+          unit: '',
+          shift: shiftDisplayNames[shiftKey],
+          date: payload.date,
+          data: payload.rows,
+          submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+          submittedById: req.user?._id || null,
+          company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
+          explicitRecord: savedRecord,
+          rawBody: payload,
+        });
+      } catch (err) {
+        console.warn(`[AutoPlantEmail] Exception in workflow for sieve ${shiftKey}:`, err.message);
+        lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+      }
+    }
+
+    const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
+    const finalEmailStatus = lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const emailRecipient = lastEmailResult?.data?.emailRecipient || savedRecord?.emailRecipient || '';
 
     return res.status(201).json({
       success: true,
-      message: `Successfully saved ${newlySavedShifts.length} shift(s)`,
+      message: emailSent
+        ? `Successfully saved ${newlySavedShifts.length} shift(s) & email sent ✓`
+        : `Successfully saved ${newlySavedShifts.length} shift(s), but email delivery failed: ${lastEmailResult?.emailError || lastEmailResult?.message || 'Mail server rejected recipient'}`,
       data: savedRecord,
-      emailStatus: 'processing',
+      emailSent,
+      emailStatus: finalEmailStatus,
+      emailRecipient,
+      emailNotification: lastEmailResult,
       newlySavedShifts,
     });
   } catch (error) {
@@ -463,6 +477,8 @@ router.get('/', protect, async (req, res) => {
           success: true,
           data: [doc],
           assignedOperatorEmail,
+          emailStatus: doc.emailStatus || 'pending',
+          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
         });
       }
     }
@@ -471,6 +487,8 @@ router.get('/', protect, async (req, res) => {
       success: true,
       data: [],
       assignedOperatorEmail,
+      emailStatus: 'pending',
+      emailRecipient: assignedOperatorEmail,
     });
   } catch (error) {
     console.error('[PureSaltSieve GET] Error:', error);
