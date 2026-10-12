@@ -101,18 +101,18 @@ const PARAMETERS = [
 ];
 
 const TIME_SLOTS = [
-  { key: 't07', time: '07:00', shiftId: 'shift1' },
-  { key: 't09', time: '09:00', shiftId: 'shift1' },
-  { key: 't11', time: '11:00', shiftId: 'shift1' },
-  { key: 't13', time: '13:00', shiftId: 'shift1' },
-  { key: 't15', time: '15:00', shiftId: 'shift2' },
-  { key: 't17', time: '17:00', shiftId: 'shift2' },
-  { key: 't19', time: '19:00', shiftId: 'shift2' },
-  { key: 't21', time: '21:00', shiftId: 'shift2' },
-  { key: 't23', time: '23:00', shiftId: 'shift3' },
-  { key: 't01', time: '01:00', shiftId: 'shift3' },
-  { key: 't03', time: '03:00', shiftId: 'shift3' },
-  { key: 't05', time: '05:00', shiftId: 'shift3' },
+  { key: 't07', time: '07:00', shift: 'I Shift',   shiftId: 'shift1' },
+  { key: 't09', time: '09:00', shift: 'I Shift',   shiftId: 'shift1' },
+  { key: 't11', time: '11:00', shift: 'I Shift',   shiftId: 'shift1' },
+  { key: 't13', time: '13:00', shift: 'I Shift',   shiftId: 'shift1' },
+  { key: 't15', time: '15:00', shift: 'II Shift',  shiftId: 'shift2' },
+  { key: 't17', time: '17:00', shift: 'II Shift',  shiftId: 'shift2' },
+  { key: 't19', time: '19:00', shift: 'II Shift',  shiftId: 'shift2' },
+  { key: 't21', time: '21:00', shift: 'II Shift',  shiftId: 'shift2' },
+  { key: 't23', time: '23:00', shift: 'III Shift', shiftId: 'shift3' },
+  { key: 't01', time: '01:00', shift: 'III Shift', shiftId: 'shift3' },
+  { key: 't03', time: '03:00', shift: 'III Shift', shiftId: 'shift3' },
+  { key: 't05', time: '05:00', shift: 'III Shift', shiftId: 'shift3' },
 ];
 
 const SHIFT_MAPPING = [
@@ -834,14 +834,24 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                     key={row.key}
                     className={`transition-colors duration-100 ${styles.row} ${shiftLocked ? 'opacity-85' : ''}`}
                   >
-                    {/* Time slot label & Shift indicator */}
-                    <td className="px-5 py-2.5 align-middle">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2.5 py-1 rounded border border-slate-200 shadow-2xs inline-block">
-                          {row.time}
-                        </span>
-                        {shiftLocked && (
-                          <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                    {/* Time slot & shift label */}
+                    <td className="px-5 py-2.5 align-top">
+                      <div className="flex flex-col gap-1 mt-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                            {row.time}
+                          </span>
+                          <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}>
+                            {row.shift}
+                          </span>
+                          {shiftLocked && (
+                            <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                          )}
+                        </div>
+                        {['t07', 't15', 't23'].includes(row.key) && (
+                          <div className="mt-0.5">
+                            {getShiftBadge(row.shiftId)}
+                          </div>
                         )}
                       </div>
                     </td>
