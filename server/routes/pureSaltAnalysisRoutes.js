@@ -29,6 +29,28 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Analysis date is required.' });
     }
 
+    // ── Enforce Today's Date Restriction (Asia/Kolkata) for Pure Salt Analysis ──
+    const getTodayKolkata = () => {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date());
+      const y = parts.find(p => p.type === 'year')?.value;
+      const m = parts.find(p => p.type === 'month')?.value;
+      const d = parts.find(p => p.type === 'day')?.value;
+      return `${y}-${m}-${d}`;
+    };
+
+    const todayKolkata = getTodayKolkata();
+    if (payload.date !== todayKolkata) {
+      return res.status(400).json({
+        success: false,
+        message: `Date restriction enforced: Pure Salt Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+      });
+    }
+
     const plantTarget = payload.plant || 'ACL Plant';
     const targetRows = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
     const shiftDisplayNames = {

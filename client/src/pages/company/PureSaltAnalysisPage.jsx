@@ -53,6 +53,19 @@ const buildEmptyData = () =>
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
+const getTodayAsiaKolkata = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
+};
+
 const formatDateDisplay = (isoDate) => {
   if (!isoDate) return '—';
   try {
@@ -128,8 +141,8 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── State ──
-  const [date, setDate] = useState('');
+  // ── State (Date is locked strictly to Today's date in Asia/Kolkata) ──
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [data, setData] = useState(buildEmptyData());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -228,7 +241,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
   const handleReset = () => {
     setData(buildEmptyData());
-    setDate('');
+    setDate(getTodayAsiaKolkata());
     setErrors({});
     setSaveSuccess(false);
     setDateError(false);
@@ -504,43 +517,38 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section, Recipient Email, Test & Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+            {/* Integrated Date Section - Read-Only Restricted Strictly to Today (Asia/Kolkata) */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs select-none">
               <label
                 htmlFor="psa-date-input"
                 className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
               >
                 <span>Date:</span>
-                <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <div className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-xs font-extrabold text-slate-800 tracking-tight font-mono">
+                  {date}
+                </span>
+                <span className="text-[11px] font-bold text-blue-800 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
+                  {formatDateDisplay(date)}
+                </span>
+                <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded uppercase tracking-wider border border-emerald-200 shadow-2xs">
+                  TODAY
+                </span>
+                {/* Hidden accessible locked input to prevent any manual date change or future/past navigation */}
                 <input
                   id="psa-date-input"
                   type="date"
                   value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setDateError(false);
-                    setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
+                  readOnly
+                  disabled
+                  min={date}
+                  max={date}
+                  className="sr-only"
+                  aria-label="Analysis Date (Restricted to Today)"
                 />
               </div>
-              {date && (
-                <span className="text-[11px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded border border-blue-200 hidden md:inline-block">
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
             </div>
 
             {/* Actions */}
