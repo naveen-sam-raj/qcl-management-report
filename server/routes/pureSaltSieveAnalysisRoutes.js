@@ -97,9 +97,18 @@ router.post('/', protect, async (req, res) => {
     if (existingRecord) {
       const willSave = {};
 
+      // Helper to check if a shift is locked according to workflow rules
+      const isShiftLocked = (key, rec) => {
+        if (rec.lockedShifts[key]) return true;
+        if (key === 'shift1' && rec.lockedShifts.shift2Saved) return true;
+        if (key === 'shift2' && rec.lockedShifts.shift3Saved) return true;
+        if (key === 'shift3' && rec.lockedShifts.shift3Saved && (rec.lockedShifts.shift3Edits || 0) >= 1) return true;
+        return false;
+      };
+
       // Check if user is trying to edit locked shifts
       for (const key of targetRows) {
-        if (hasData(payload.rows[key]) && existingRecord.lockedShifts[key]) {
+        if (hasData(payload.rows[key]) && isShiftLocked(key, existingRecord)) {
           if (isDiff(existingRecord.rows[key], payload.rows[key])) {
             return res.status(400).json({ success: false, message: `Cannot edit ${shiftDisplayNames[key] || key} because it is locked.` });
           }
@@ -107,7 +116,7 @@ router.post('/', protect, async (req, res) => {
       }
 
       for (const key of targetRows) {
-        if (hasData(payload.rows[key]) && isDiff(existingRecord.rows[key], payload.rows[key]) && !existingRecord.lockedShifts[key]) {
+        if (hasData(payload.rows[key]) && isDiff(existingRecord.rows[key], payload.rows[key]) && !isShiftLocked(key, existingRecord)) {
           willSave[key] = true;
         }
       }
