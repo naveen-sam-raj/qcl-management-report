@@ -497,11 +497,20 @@ Attachment: ${excelFileName}
       recipient: assignedUser.email,
     };
   } catch (mailErr) {
-    console.error(`[PlantNotification] ❌ Nodemailer delivery failed: ${mailErr.message}`);
+    const is550Rejected = mailErr.responseCode === 550 || /550|5\.1\.1|Recipient address rejected/i.test(mailErr.message);
+    if (is550Rejected) {
+      console.error(
+        `[PlantNotification] ❌ SMTP 550 Recipient Rejected for "${assignedUser.email}": Mailbox does not exist, is deactivated, or external organization policy rejected the address. Administrator verification of the recipient mailbox or Microsoft 365 configuration is required.`
+      );
+    } else {
+      console.error(`[PlantNotification] ❌ Nodemailer delivery failed for "${assignedUser.email}": ${mailErr.message}`);
+    }
     return {
       success: false,
       emailStatus: 'failed',
-      error: mailErr.message,
+      error: is550Rejected
+        ? `Recipient address rejected by mail server (550 5.1.1): The mailbox "${assignedUser.email}" does not exist or requires administrator verification.`
+        : mailErr.message,
       recipient: assignedUser.email,
     };
   }
