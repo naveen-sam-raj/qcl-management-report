@@ -109,6 +109,7 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/brine') ||
     url.includes('/sa-tk-401') ||
     url.includes('/sa-tk-405') ||
+    url.includes('/sa-tk-414') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {
