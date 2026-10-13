@@ -365,12 +365,19 @@ router.post('/', async (req, res) => {
       savedDoc?.emailRecipient ||
       '';
 
+    // Attach saved MongoDB doc _id to returned updatedRecordData
+    if (savedDoc && savedDoc._id) {
+      updatedRecordData._id = savedDoc._id;
+      updatedRecordData.recordId = savedDoc._id;
+    }
+
     return res.status(201).json({
       success: true,
       message: emailSent
         ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} & email sent ✓`
         : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email dispatching immediately 🚀`,
       data: updatedRecordData,
+      recordId: savedDoc?._id || updatedRecordData.id,
       emailSent,
       emailPending: emailTimedOut,
       emailStatus: finalEmailStatus,
@@ -412,9 +419,15 @@ router.get('/', async (req, res) => {
       const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
 
       if (doc && doc.data) {
+        const enrichedData = {
+          ...doc.data,
+          _id: doc._id,
+          recordId: doc._id,
+        };
         return res.status(200).json({
           success: true,
-          data: [doc.data],
+          data: [enrichedData],
+          recordId: doc._id,
           assignedOperatorEmail,
           emailStatus: doc.emailStatus || 'pending',
           emailRecipient: doc.emailRecipient || assignedOperatorEmail,
