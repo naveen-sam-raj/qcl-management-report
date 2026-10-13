@@ -25,6 +25,7 @@ import TK405SAAnalysisPage from './TK405SAAnalysisPage';
 import TK414TSCTankAnalysisPage from './TK414TSCTankAnalysisPage';
 import P413WSCTankAnalysisPage from './P413WSCTankAnalysisPage';
 import TK419SCTankAnalysisPage from './TK419SCTankAnalysisPage';
+import P417AnalysisPage from './P417AnalysisPage';
 import P4171AnalysisPage from './P4171AnalysisPage';
 import P4172AnalysisPage from './P4172AnalysisPage';
 import P4173AnalysisPage from './P4173AnalysisPage';
@@ -82,17 +83,14 @@ const ACL_ANALYSIS_OPTIONS = [
   'Raw salt',
 ];
 
-// 18 SA Plant analysis options
+// 15 SA Plant analysis options
 const SA_ANALYSIS_OPTIONS = [
   'TK 401',
   'TK 405',
   'TK 414 TSC TANK',
   'P413 WSC TANK',
   'TK 419 SC TANK',
-  'P417-1',
-  'P417-2',
-  'P417-3',
-  'T 407',
+  'P417',
   'T 401',
   'Bi carbonate',
   'Bicarbonate Moisture',
@@ -156,14 +154,14 @@ const PLANT_CONFIG = {
     title: 'SA Plant',
     subtitle: 'Soda Ash Production Unit',
     options: SA_ANALYSIS_OPTIONS,
-    badge: '19 Analysis Options',
+    badge: '15 Analysis Options',
     icon: Flame,
   },
   plant_sa: {
     title: 'SA Plant',
     subtitle: 'Soda Ash Production Unit',
     options: SA_ANALYSIS_OPTIONS,
-    badge: '19 Analysis Options',
+    badge: '15 Analysis Options',
     icon: Flame,
   },
   offset: {
@@ -494,34 +492,41 @@ const PlantAnalysisPage = () => {
       return <TK419SCTankAnalysisPage plantId={id || 'sa'} />;
     }
 
-    // ── P417 / P417-1 (SA Plant) ──
+    // ── Unified P417 Analysis (SA Plant) ──
+    if (
+      decodedOptionName.toLowerCase() === 'p417' ||
+      decodedOptionName.toLowerCase() === 'p 417' ||
+      decodedOptionName.toLowerCase() === 'p-417' ||
+      decodedOptionName.toLowerCase() === 'p417 analysis'
+    ) {
+      return <P417AnalysisPage plantId={id || 'sa'} defaultTab="p417-1" />;
+    }
+
+    // ── P417-1 direct deep-link (SA Plant) ──
     if (
       decodedOptionName.toLowerCase() === 'p417-1' ||
       decodedOptionName.toLowerCase() === 'p417 1' ||
-      decodedOptionName.toLowerCase() === 'p4171' ||
-      decodedOptionName.toLowerCase() === 'p417' ||
-      decodedOptionName.toLowerCase() === 'p 417' ||
-      decodedOptionName.toLowerCase() === 'p-417'
+      decodedOptionName.toLowerCase() === 'p4171'
     ) {
-      return <P4171AnalysisPage plantId={id || 'sa'} />;
+      return <P417AnalysisPage plantId={id || 'sa'} defaultTab="p417-1" />;
     }
 
-    // ── P417-2 (SA Plant) ──
+    // ── P417-2 direct deep-link (SA Plant) ──
     if (
       decodedOptionName.toLowerCase() === 'p417-2' ||
       decodedOptionName.toLowerCase() === 'p417 2' ||
       decodedOptionName.toLowerCase() === 'p4172'
     ) {
-      return <P4172AnalysisPage plantId={id || 'sa'} />;
+      return <P417AnalysisPage plantId={id || 'sa'} defaultTab="p417-2" />;
     }
 
-    // ── P417-3 (SA Plant) ──
+    // ── P417-3 direct deep-link (SA Plant) ──
     if (
       decodedOptionName.toLowerCase() === 'p417-3' ||
       decodedOptionName.toLowerCase() === 'p417 3' ||
       decodedOptionName.toLowerCase() === 'p4173'
     ) {
-      return <P4173AnalysisPage plantId={id || 'sa'} />;
+      return <P417AnalysisPage plantId={id || 'sa'} defaultTab="p417-3" />;
     }
 
     // ── T 401 (SA Plant) → dedicated full-featured module ──
