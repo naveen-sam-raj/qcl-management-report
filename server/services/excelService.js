@@ -3680,6 +3680,232 @@ const generateSABicarbonateMoistureExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant LSA at 500# Analysis
+ * Columns: Row #, Time, NaCl %, BD, Turbidity
+ */
+const generateSALSA500AnalysisExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_LSA_at_500_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('LSA at 500# Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  // Column widths
+  worksheet.columns = [
+    { key: 'col1', width: 8 },  // #
+    { key: 'col2', width: 16 }, // Time
+    { key: 'col3', width: 22 }, // NaCl %
+    { key: 'col4', width: 22 }, // BD (g/L)
+    { key: 'col5', width: 22 }, // Turbidity (NTU)
+  ];
+
+  // Header Title
+  worksheet.mergeCells('A1:E1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED - SA PLANT';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  worksheet.getRow(1).height = 28;
+
+  // Subtitle
+  worksheet.mergeCells('A2:E2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = 'LSA AT 500# ANALYSIS REPORT — SODA ASH PLANT';
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } };
+  worksheet.getRow(2).height = 22;
+
+  // Metadata block (Row 3 & 4)
+  const metaFields = [
+    { r: 3, c1: 'A', c2: 'B', l: 'Plant / Section:', v: 'Soda Ash Plant — LSA at 500#' },
+    { r: 3, c1: 'C', c2: 'C', l: 'Frequency:', v: 'Once in 2 Hrs' },
+    { r: 3, c1: 'D', c2: 'E', l: 'Analysis Date:', v: data.date || '—' },
+    { r: 4, c1: 'A', c2: 'B', l: 'Report Generated:', v: data.savedDateFormatted || new Date().toLocaleDateString('en-IN') },
+    { r: 4, c1: 'C', c2: 'C', l: 'Submitted By:', v: data.submittedBy || 'Plant Operator' },
+    { r: 4, c1: 'D', c2: 'E', l: 'Save Event ID:', v: (data.saveEventId || '—').slice(-12) },
+  ];
+
+  metaFields.forEach((mf) => {
+    worksheet.mergeCells(`${mf.c1}${mf.r}:${mf.c2}${mf.r}`);
+    const c = worksheet.getCell(`${mf.c1}${mf.r}`);
+    c.value = `${mf.l} ${mf.v}`;
+    c.font = { name: 'Calibri', size: 9.5, bold: false, color: { argb: 'FF1E293B' } };
+    c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    c.border = metaBorder;
+  });
+  worksheet.getRow(3).height = 20;
+  worksheet.getRow(4).height = 20;
+
+  // Empty separator row
+  worksheet.getRow(5).height = 8;
+
+  // Header Row 6
+  worksheet.getRow(6).height = 24;
+  const headers = [
+    { c: 1, text: '#' },
+    { c: 2, text: 'TIME' },
+    { c: 3, text: 'NaCl % [0.5 – 2.0 %]' },
+    { c: 4, text: 'BD [500 – 750 g/L]' },
+    { c: 5, text: 'TURBIDITY [75 – 85 NTU]' },
+  ];
+
+  headers.forEach((h) => {
+    const cell = worksheet.getRow(6).getCell(h.c);
+    cell.value = h.text;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = thinBorder;
+  });
+
+  // Populate data rows
+  const rawData = data.data || data;
+  const rows = Array.isArray(rawData.rows)
+    ? rawData.rows
+    : Array.isArray(data.rows)
+    ? data.rows
+    : [];
+
+  let curRowNum = 7;
+  const parseVal = (v) => {
+    if (v === '' || v === null || v === undefined) return '';
+    const num = Number(v);
+    return isNaN(num) ? String(v) : num;
+  };
+
+  rows.forEach((rowObj, index) => {
+    const row = worksheet.getRow(curRowNum);
+    row.height = 20;
+
+    row.getCell(1).value = index + 1;
+    row.getCell(2).value = rowObj.time || '—';
+    row.getCell(3).value = parseVal(rowObj.nacl);
+    row.getCell(4).value = parseVal(rowObj.bd);
+    row.getCell(5).value = parseVal(rowObj.turbidity);
+
+    const isEven = index % 2 === 1;
+    for (let c = 1; c <= 5; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      if (isEven) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      }
+
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (c === 2) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (c === 3) {
+        const isOutOfLimit = typeof cell.value === 'number' && (cell.value < 0.5 || cell.value > 2.0);
+        cell.font = {
+          name: 'Calibri',
+          size: 10.5,
+          bold: true,
+          color: { argb: isOutOfLimit ? 'FFE11D48' : 'FF059669' },
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      } else if (c === 4) {
+        const isOutOfLimit = typeof cell.value === 'number' && (cell.value < 500 || cell.value > 750);
+        cell.font = {
+          name: 'Calibri',
+          size: 10,
+          bold: true,
+          color: { argb: isOutOfLimit ? 'FFE11D48' : 'FF334155' },
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      } else if (c === 5) {
+        const isOutOfLimit = typeof cell.value === 'number' && (cell.value < 75 || cell.value > 85);
+        cell.font = {
+          name: 'Calibri',
+          size: 10,
+          bold: true,
+          color: { argb: isOutOfLimit ? 'FFE11D48' : 'FF334155' },
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+    curRowNum++;
+  });
+
+  // Calculate Average NaCl %
+  const naclVals = [];
+  rows.forEach((r) => {
+    const val = parseFloat(r.nacl);
+    if (!isNaN(val)) naclVals.push(val);
+  });
+  const avgNaCl = naclVals.length > 0 ? (naclVals.reduce((a, b) => a + b, 0) / naclVals.length).toFixed(2) : '—';
+
+  // Summary Row
+  worksheet.mergeCells(`A${curRowNum}:B${curRowNum}`);
+  const summaryLabel = worksheet.getCell(`A${curRowNum}`);
+  summaryLabel.value = 'AVERAGE NaCl %:';
+  summaryLabel.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  summaryLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  const avgCell = worksheet.getCell(`C${curRowNum}`);
+  avgCell.value = avgNaCl !== '—' ? `${avgNaCl}%` : '—';
+  avgCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF059669' } };
+  avgCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.mergeCells(`D${curRowNum}:E${curRowNum}`);
+  const extraCell = worksheet.getCell(`D${curRowNum}`);
+  extraCell.value = `(${rows.length} Total Time Slots)`;
+  extraCell.font = { name: 'Calibri', size: 9.5, italic: true, color: { argb: 'FF64748B' } };
+  extraCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.getRow(curRowNum).height = 22;
+  for (let c = 1; c <= 5; c++) {
+    const cell = worksheet.getRow(curRowNum).getCell(c);
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    cell.border = thinBorder;
+  }
+  curRowNum++;
+
+  // Footer note
+  worksheet.mergeCells(`A${curRowNum}:E${curRowNum}`);
+  const footerCell = worksheet.getCell(`A${curRowNum}`);
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (Soda Ash Plant LSA at 500# Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(curRowNum).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -3694,9 +3920,11 @@ module.exports = {
   generateSAT401AnalysisExcel,
   generateSABicarbonateAnalysisExcel,
   generateSABicarbonateMoistureExcel,
+  generateSALSA500AnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,
   generateGasConcExcel,
 };
+
 

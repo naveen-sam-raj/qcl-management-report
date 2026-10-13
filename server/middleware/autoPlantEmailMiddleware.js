@@ -120,6 +120,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/bi-carbonate-analysis') ||
     url.includes('/bicarbonate-moisture') ||
     url.includes('/bi-carbonate-moisture') ||
+    url.includes('/lsa-500-analysis') ||
+    url.includes('/lsa500') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {

@@ -469,6 +469,13 @@ const sendPlantAnalysisEmail = async ({
     (String(analysisType || '').toLowerCase().includes('bicarbonate') && String(analysisType || '').toLowerCase().includes('moisture')) ||
     (String(analysisType || '').toLowerCase().includes('bi carbonate') && String(analysisType || '').toLowerCase().includes('moisture'));
 
+  const isSALSA500Analysis =
+    analysisType === 'LSA AT 500# Analysis' ||
+    analysisType === 'LSA AT 500#' ||
+    analysisType === 'LSA 500# Analysis' ||
+    analysisType === 'LSA 500#' ||
+    (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('500'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -971,6 +978,27 @@ TK 110 (Feed Tank):
         `#${i + 1} | Shift: ${r.shift || '—'} | Time: ${r.time || '—'} | M 404 (A: ${formatVal(r.m404_a)}%, B: ${formatVal(r.m404_b)}%, C: ${formatVal(r.m404_c)}%) | M 405 Outlet: ${formatVal(r.m405_outlet)} | SB Turbidity: (1: ${formatVal(r.sb_turb1)}, 2: ${formatVal(r.sb_turb2)})`
       ).join('\n') +
       `\nCalculated Averages:\nM 404 Avg Moisture: ${m404Avg !== '—' ? `${m404Avg}%` : '—'} | SB Avg Turbidity: ${sbTurbAvg}\n\n`;
+  } else if (isSALSA500Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const naclVals = [];
+    rows.forEach((r) => {
+      const val = parseFloat(r.nacl);
+      if (!isNaN(val)) naclVals.push(val);
+    });
+    const avgNaCl = naclVals.length > 0 ? (naclVals.reduce((a, b) => a + b, 0) / naclVals.length).toFixed(2) : '—';
+
+    sieveTextSummary = `Soda Ash Plant LSA at 500# Analysis Readings:\n` +
+      rows.map((r, i) =>
+        `#${i + 1} | Time: ${r.time || '—'} | NaCl: ${formatVal(r.nacl)}% | BD: ${formatVal(r.bd)} g/L | Turbidity: ${formatVal(r.turbidity)} NTU`
+      ).join('\n') +
+      `\nAverage NaCl: ${avgNaCl !== '—' ? `${avgNaCl}%` : '—'} (${rows.length} Total Time Slots)\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2281,6 +2309,75 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Analysis: <strong>Bicarbonate Moisture Analysis</strong> | Frequency: <strong>Once in 4 Hours</strong>
         </div>
       </div>`;
+  } else if (isSALSA500Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const naclVals = [];
+    rows.forEach((r) => {
+      const val = parseFloat(r.nacl);
+      if (!isNaN(val)) naclVals.push(val);
+    });
+    const avgNaCl = naclVals.length > 0 ? (naclVals.reduce((a, b) => a + b, 0) / naclVals.length).toFixed(2) : '—';
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Soda Ash Plant — <strong>LSA at 500# Analysis Readings</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 90px;">Time</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">NaCl % [0.5–2.0%]</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">BD [500–750 g/L]</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Turbidity [75–85 NTU]</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r, i) => {
+              const rowBg = i % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              const isNaclOut = (val) => {
+                const num = parseFloat(val);
+                return !isNaN(num) && (num < 0.5 || num > 2.0);
+              };
+              const isBdOut = (val) => {
+                const num = parseFloat(val);
+                return !isNaN(num) && (num < 500 || num > 750);
+              };
+              const isTurbOut = (val) => {
+                const num = parseFloat(val);
+                return !isNaN(num) && (num < 75 || num > 85);
+              };
+
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #64748b;">${i + 1}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${r.time || '—'}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isNaclOut(r.nacl) ? '#e11d48' : '#059669'};">${formatVal(r.nacl)}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: ${isBdOut(r.bd) ? '#e11d48' : '#334155'};">${formatVal(r.bd)}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: ${isTurbOut(r.turbidity) ? '#e11d48' : '#334155'};">${formatVal(r.turbidity)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f1f5f9; font-weight: 700;">
+              <td colspan="2" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #0f172a;">AVERAGE NaCl %:</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #059669; font-family: monospace; font-size: 12px;">${avgNaCl !== '—' ? `${avgNaCl}%` : '—'}</td>
+              <td colspan="2" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #64748b; font-style: italic;">(${rows.length} Total Time Slots)</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>Soda Ash Plant</strong> | Section: <strong>LSA at 500#</strong> | Frequency: <strong>Once in 2 Hrs</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2852,6 +2949,24 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSABicarbonateMoistureExcel } = require('./excelService');
       excelResult = await generateSABicarbonateMoistureExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'LSA AT 500# Analysis' ||
+      analysisType === 'LSA AT 500#' ||
+      analysisType === 'LSA 500# Analysis' ||
+      analysisType === 'LSA 500#' ||
+      (cleanType.toLowerCase().includes('lsa') && cleanType.toLowerCase().includes('500'))
+    ) {
+      const { generateSALSA500AnalysisExcel } = require('./excelService');
+      excelResult = await generateSALSA500AnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
