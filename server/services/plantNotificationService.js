@@ -325,6 +325,8 @@ const sendPlantAnalysisEmail = async ({
   savedRecord,
   excelBuffer,
   excelFileName,
+  saveEventId = '',
+  changedSlotKeys = [],
 }) => {
   if (!assignedUser || !assignedUser.email) {
     return {
@@ -341,8 +343,10 @@ const sendPlantAnalysisEmail = async ({
   const plantName = plantDoc.name || 'Industrial Plant';
   const recordId = String(savedRecord?._id || savedRecord?.id || 'N/A');
 
-  // Exact Subject: [PLANT NAME] Analysis Saved - [DATE]
-  const subject = `[${plantName}] Analysis Saved - ${dateFormatted}`;
+  // Unique Subject per save: includes shift and event ID to prevent deduplication / threading suppression
+  const shiftSuffix = shift ? ` (${shift})` : '';
+  const refSuffix = saveEventId ? ` [Ref: ${saveEventId.slice(-8)}]` : '';
+  const subject = `[${plantName}] ${analysisType || 'Analysis'}${shiftSuffix} Saved - ${dateFormatted}${refSuffix}`;
 
   const isSieveAnalysis =
     analysisType === 'Pure Salt Sieve Analysis' ||
@@ -599,14 +603,20 @@ TK 204 Shift Measurements (Unit: Kgm/m³):
       activeSlots = slots.filter(s => s.shift === 'III Shift');
     }
 
-    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
-    sieveTextSummary = `Shift:
-${shiftLabel || 'All Shifts'}
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const num = Number(v);
+      return !isNaN(num) ? num.toFixed(2) : String(v);
+    };
+
+    sieveTextSummary = `Current Saved Shift:
+${shiftLabel || 'All Shifts'} (Persisted Snapshot)
 
 TK 203 Analysis Parameters (Unit: Kgm/m³):
 ` + activeSlots.map(s => {
       const row = rawData[s.key] || {};
-      return `- ${s.time} (${s.shift}): FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCL: ${formatVal(row.tcl)}, PCL: ${formatVal(row.pcl)}, CO2: ${formatVal(row.co2)}`;
+      const isCurSlot = changedSlotKeys && changedSlotKeys.length > 0 ? (changedSlotKeys.includes(s.key) ? ' [Saved Now]' : '') : '';
+      return `- ${s.time} (${s.shift})${isCurSlot}: FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCL: ${formatVal(row.tcl)}, PCL: ${formatVal(row.pcl)}, CO2: ${formatVal(row.co2)}`;
     }).join('\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
@@ -825,10 +835,18 @@ Attachment: ${excelFileName}
       activeSlots = slots.filter(s => s.shift === 'III Shift');
     }
 
-    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const num = Number(v);
+      return !isNaN(num) ? num.toFixed(2) : String(v);
+    };
+
     dataHtml = `
       <div class="field-group">
-        <div class="field-label">TK 203 Analysis Results (${shiftLabel || 'All Shifts'}) — Unit: Kgm/m³</div>
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>TK 203 Analysis Results — Current Save: <strong style="color: #0f2e5a;">${shiftLabel || 'All Shifts'}</strong> (Unit: Kgm/m³)</span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
         <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
           <thead>
             <tr style="background-color: #0f2e5a; color: #ffffff;">
@@ -843,15 +861,17 @@ Attachment: ${excelFileName}
           <tbody>
             ${activeSlots.map((s, idx) => {
               const r = rawData[s.key] || {};
-              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : '';
+              const isCurSlot = changedSlotKeys && changedSlotKeys.length > 0 && changedSlotKeys.includes(s.key);
+              const bg = isCurSlot ? 'background-color: #f0fdf4;' : (idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;');
+              const slotBadge = isCurSlot ? '<span style="font-size: 9px; background: #16a34a; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 4px;">CURRENT SAVE</span>' : '';
               return `
                 <tr style="${bg}">
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.time} <span style="font-size: 10px; color: #64748b; font-weight: normal;">(${s.shift})</span></td>
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.fnh3)}</td>
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.cnh3)}</td>
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.tcl)}</td>
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.pcl)}</td>
-                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${formatVal(r.co2)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.time} <span style="font-size: 10px; color: #64748b; font-weight: normal;">(${s.shift})</span>${slotBadge}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.fnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.cnh3)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.tcl)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.pcl)}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.co2)}</td>
                 </tr>
               `;
             }).join('')}
@@ -1311,12 +1331,16 @@ Attachment: ${excelFileName}
   const fromAddress = process.env.MAIL_FROM || process.env.MAIL_USER || '"Plant Management" <no-reply@spic.co.in>';
 
   try {
-    const info = await transporter.sendMail({
+    const mailOptions = {
       from: fromAddress,
       to: assignedUser.email.trim(),
       subject,
       text: textBody,
       html: htmlBody,
+      headers: {
+        'X-Save-Event-ID': saveEventId || String(Date.now()),
+        'X-Entity-Ref-ID': recordId,
+      },
       attachments: [
         {
           filename: excelFileName,
@@ -1324,7 +1348,9 @@ Attachment: ${excelFileName}
           contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         },
       ],
-    });
+    };
+
+    const info = await transporter.sendMail(mailOptions);
 
     console.log(
       `[PlantNotification] ✅ Nodemailer confirmation: sent to ${assignedUser.email} (MessageId: ${info.messageId})`
@@ -1381,6 +1407,8 @@ const executeSaveAndEmailWorkflow = async ({
   company = null,
   explicitRecord = null,
   rawBody = {},
+  saveEventId = '',
+  changedSlotKeys = [],
 }) => {
   // 1. Resolve Plant from MongoDB
   const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit, company });
@@ -1466,7 +1494,11 @@ const executeSaveAndEmailWorkflow = async ({
   let excelResult = null;
   const cleanCode = plantCode.replace(/[^a-zA-Z0-9]/g, '');
   const cleanType = (analysisType || 'Analysis').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
-  const excelFileName = `${cleanCode}_Plant_${cleanType}_${filenameDate}.xlsx`;
+  const cleanShift = (targetShift || '').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
+  const eventToken = saveEventId ? `_${saveEventId.slice(-6)}` : '';
+  const excelFileName = cleanShift && cleanShift !== 'All_Shifts'
+    ? `${cleanCode}_Plant_${cleanType}_${cleanShift}_${filenameDate}${eventToken}.xlsx`
+    : `${cleanCode}_Plant_${cleanType}_${filenameDate}${eventToken}.xlsx`;
 
   try {
     if (analysisType === 'Pure Salt Sieve Analysis' || cleanType.toLowerCase().includes('pure_salt_sieve')) {
@@ -1567,6 +1599,8 @@ const executeSaveAndEmailWorkflow = async ({
       savedRecord,
       excelBuffer: excelResult.buffer,
       excelFileName: excelResult.filename || excelFileName,
+      saveEventId,
+      changedSlotKeys,
     });
   }
 
@@ -1612,6 +1646,8 @@ const executeSaveAndEmailWorkflow = async ({
       emailSent: true,
       emailStatus: 'sent',
       message: 'Saved & Emailed Successfully ✓',
+      recipient: assignedUser.email,
+      messageId: emailResult.messageId,
       data: savedRecord,
       excel: excelResult
         ? {
@@ -1629,6 +1665,7 @@ const executeSaveAndEmailWorkflow = async ({
       emailStatus: 'failed',
       message: 'Data saved and Excel generated, but email sending failed.',
       emailError: emailResult.error,
+      recipient: assignedUser.email,
       data: savedRecord,
       excel: excelResult
         ? {

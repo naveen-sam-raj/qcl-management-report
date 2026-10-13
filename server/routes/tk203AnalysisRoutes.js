@@ -264,9 +264,13 @@ router.post('/', async (req, res) => {
       lockedShifts.shift3 = true;
     }
 
+    // Generate unique Save Event ID for this exact save operation
+    const saveEventId = `save_tk203_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
     // Package complete data structure
     const updatedRecordData = {
       id: existingData.id || `tk203_${Date.now()}`,
+      lastSaveEventId: saveEventId,
       date: payload.date,
       plant: plantTarget,
       analysisType: 'TK 203 Analysis',
@@ -300,6 +304,7 @@ router.post('/', async (req, res) => {
         submittedBy: updatedRecordData.submittedBy,
         submittedById: updatedRecordData.submittedById,
         company: updatedRecordData.company,
+        lastSaveEventId: saveEventId,
         savedAt: new Date(),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -315,7 +320,7 @@ router.post('/', async (req, res) => {
           action: 'TK_203_ANALYSIS_SAVED',
           user: req.user?._id,
           userName: req.user?.name,
-          details: `TK 203 Analysis saved for date: ${payload.date}, shift: ${SHIFT_DISPLAY_NAMES[activeShiftKey]}.`,
+          details: `TK 203 Analysis saved for date: ${payload.date}, shift: ${SHIFT_DISPLAY_NAMES[activeShiftKey]} [Event: ${saveEventId}].`,
           timestamp: new Date(),
         });
       }
@@ -324,12 +329,15 @@ router.post('/', async (req, res) => {
     // ── Execute Instant Email Dispatch Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
 
-    const emailPromises = newlySavedShifts.map((shiftKey) =>
-      executeSaveAndEmailWorkflow({
+    let lastEmailResult = null;
+    let emailTimedOut = false;
+
+    try {
+      const emailPromise = executeSaveAndEmailWorkflow({
         plantIdentifier: plantTarget,
         analysisType: 'TK 203 Analysis',
         unit: 'TK 203',
-        shift: SHIFT_DISPLAY_NAMES[shiftKey],
+        shift: SHIFT_DISPLAY_NAMES[activeShiftKey],
         date: payload.date,
         data: mergedRows,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
@@ -337,25 +345,31 @@ router.post('/', async (req, res) => {
         company: updatedRecordData.company,
         explicitRecord: savedDoc,
         rawBody: payload,
-      }).catch((err) => {
-        console.warn(`[AutoPlantEmail] Instant workflow note for TK 203 ${shiftKey}:`, err.message);
-        return { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
-      })
-    );
+        saveEventId,
+        changedSlotKeys: slotKeysToUpdate,
+      });
 
-    let lastEmailResult = null;
-    let emailTimedOut = false;
-    const fastCheck = Promise.all(emailPromises);
-    const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 800));
+      // Allow adequate time for local/remote SMTP handshake (up to 7.5s) while preventing browser request timeout
+      const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 7500));
+      const raceResult = await Promise.race([emailPromise, fastLimit]);
 
-    const raceResult = await Promise.race([fastCheck, fastLimit]);
-    if (raceResult === 'TIMEOUT') {
-      emailTimedOut = true;
-    } else if (Array.isArray(raceResult) && raceResult.length > 0) {
-      lastEmailResult = raceResult[raceResult.length - 1];
+      if (raceResult === 'TIMEOUT') {
+        emailTimedOut = true;
+        // Background promise keeps running independently
+        emailPromise.then((bgRes) => {
+          console.log(`[TK203 Save] Background email dispatch finished for event ${saveEventId}:`, bgRes?.emailStatus);
+        }).catch((bgErr) => {
+          console.error(`[TK203 Save] Background email dispatch error for event ${saveEventId}:`, bgErr.message);
+        });
+      } else {
+        lastEmailResult = raceResult;
+      }
+    } catch (err) {
+      console.warn(`[AutoPlantEmail] Instant workflow note for TK 203 ${activeShiftKey}:`, err.message);
+      lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
     }
 
-    const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
+    const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.emailStatus === 'sent'));
     const finalEmailStatus = emailTimedOut
       ? 'pending'
       : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
@@ -375,9 +389,12 @@ router.post('/', async (req, res) => {
       success: true,
       message: emailSent
         ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} & email sent ✓`
-        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email dispatching immediately 🚀`,
+        : emailTimedOut
+        ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email dispatching immediately 🚀`
+        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email delivery failed: ${lastEmailResult?.error || 'Unknown error'}`,
       data: updatedRecordData,
       recordId: savedDoc?._id || updatedRecordData.id,
+      saveEventId,
       emailSent,
       emailPending: emailTimedOut,
       emailStatus: finalEmailStatus,

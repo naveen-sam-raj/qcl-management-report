@@ -466,7 +466,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
         const intervalId = setInterval(async () => {
           attempts += 1;
           try {
-            const checkRes = await api.get(`/tk-203-analysis?date=${date}`);
+            const checkRes = await api.get(`/api/tk-203-analysis?date=${date}`);
             const checkStatus = checkRes.data?.emailStatus;
             const updatedRecord = checkRes.data?.data?.[0];
             if (updatedRecord?._id || checkRes.data?.recordId) {
