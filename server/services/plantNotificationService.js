@@ -393,6 +393,10 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('pcl-tcl') ||
     String(analysisType || '').toLowerCase().includes('pcl_tcl');
 
+  const isCaCl2Analysis =
+    analysisType === 'CaCl2 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('cacl2');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -649,6 +653,11 @@ ${shiftDisplay} (Persisted Snapshot)
 
 PCL/TCL Analysis Measurements (Unit: Kgm/m³ | Tolerance: 0.05–0.10 +0.2/-0.02 | Range: 0.03–0.30):
 ` + streams.map(st => `- Stream ${st.toUpperCase()}: ${formatVal(sValues[st])}`).join('\n') + '\n\n';
+  } else if (isCaCl2Analysis) {
+    const rawData = savedRecord?.data?.readings || savedRecord?.readings || (Array.isArray(savedRecord?.data) ? savedRecord?.data : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Frequency: Day (Persisted Sampling Rows):
+` + rawData.map((r, i) => `Row #${i + 1} (${r.sample || 'CaCl2 Solution'} @ ${r.time || '—'}): pH: ${formatVal(r.ph)} (Target: 7.7 ±1), Conc: ${formatVal(r.conc)}% (Target: 20% ±5), FNH3: ${formatVal(r.fnh3)} PPM, CNH3: ${formatVal(r.cnh3)} PPM, SS: ${formatVal(r.ss)} PPM`).join('\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1199,6 +1208,50 @@ Attachment: ${excelFileName}
         </table>
         <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
           Unit: <strong>Kgm/m³</strong> | Allowed Range: <strong>0.03–0.30 Kgm/m³</strong> (0.05–0.10 Kgm/m³ +0.2 / -0.02)
+        </div>
+      </div>`;
+  } else if (isCaCl2Analysis) {
+    const rawData = savedRecord?.data?.readings || savedRecord?.readings || (Array.isArray(savedRecord?.data) ? savedRecord?.data : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>CaCl2 Analysis Results — Frequency: <strong style="color: #0f2e5a;">Day</strong> (${rawData.length} Sampling ${rawData.length === 1 ? 'Row' : 'Rows'})</span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">#</th>
+              <th style="padding: 7px 8px; text-align: left; border: 1px solid #cbd5e1;">Sample / Stream</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">Time</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">pH (7.7 ±1)</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">CONC % (20 ±5)</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ PPM (±50)</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">CNH₃ PPM (±100)</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">SS PPM (±10)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => {
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #64748b;">${idx + 1}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.sample || 'CaCl2 Solution'}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace;">${r.time || '—'}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.ph)}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.conc)}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.fnh3)}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.cnh3)}</td>
+                  <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #0f172a;">${formatVal(r.ss)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Parameters & Tolerances: <strong>pH: 6.7–8.7</strong> | <strong>CONC: 15%–25%</strong> | <strong>FNH₃: 950–1050 PPM</strong> | <strong>CNH₃: 400–600 PPM</strong> | <strong>SS: 50–70 PPM</strong>
         </div>
       </div>`;
   } else if (isSieveAnalysis) {

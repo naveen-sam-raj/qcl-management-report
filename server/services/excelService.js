@@ -647,6 +647,8 @@ const PARAMETER_DISPLAY_NAMES = {
   f: 'Stream F (Kgm/m³)',
   g: 'Stream G (Kgm/m³)',
   h: 'Stream H (Kgm/m³)',
+  conc: 'Concentration %',
+  ss: 'SS (PPM)',
   unit: 'Unit / Sample Point',
   sample: 'Sample Point',
   time: 'Time',
