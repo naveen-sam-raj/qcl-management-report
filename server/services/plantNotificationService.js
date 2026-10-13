@@ -434,6 +434,13 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 414') ||
     String(analysisType || '').toLowerCase().includes('tk414');
 
+  const isSAP413Analysis =
+    analysisType === 'P413 WSC TANK Analysis' ||
+    analysisType === 'P413 WSC Tank Analysis' ||
+    analysisType === 'P413 Analysis' ||
+    String(analysisType || '').toLowerCase().includes('p413') ||
+    String(analysisType || '').toLowerCase().includes('p 413');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -832,6 +839,25 @@ TK 110 (Feed Tank):
 - FNH3: ${formatVal(row.fnh3)} Kgm/m³ (Spec: 1.30–1.50)
 - CNH3: ${formatVal(row.cnh3)} Kgm/m³ (Spec: 4.00–4.20)
 - TCL: ${formatVal(row.tcl)} Kgm/m³ (Spec: 5.36–5.56)
+- PCL: ${formatVal(row.pcl)} Kgm/m³ (Spec: 1.26–1.46)`;
+    }).join('\n\n') + '\n\n';
+  } else if (isSAP413Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.rows || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftKeys = [
+      { key: 's1', altKey: 'shift1', label: 'I SHIFT (07:00–15:00)' },
+      { key: 's2', altKey: 'shift2', label: 'II SHIFT (15:00–23:00)' },
+      { key: 's3', altKey: 'shift3', label: 'III SHIFT (23:00–07:00)' },
+    ];
+
+    sieveTextSummary = `SA Plant P413 WSC Tank Shift Analysis (Parameters in Kgm/m³):
+` + shiftKeys.map((s) => {
+      const row = shiftsObj[s.key] || shiftsObj[s.altKey] || {};
+      return `${s.label}:
+- FNH3: ${formatVal(row.fnh3)} Kgm/m³ (Spec: 1.48–1.68)
+- CNH3: ${formatVal(row.cnh3)} Kgm/m³ (Spec: 3.99–4.19)
+- TCL: ${formatVal(row.tcl)} Kgm/m³ (Spec: 5.35–5.55)
 - PCL: ${formatVal(row.pcl)} Kgm/m³ (Spec: 1.26–1.46)`;
     }).join('\n\n') + '\n\n';
   } else if (isSieveAnalysis) {
@@ -1853,6 +1879,63 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Tank: <strong>TK 414 TSC TANK</strong> | Frequency: <strong>Once in a Shift</strong>
         </div>
       </div>`;
+  } else if (isSAP413Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.rows || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftList = [
+      { key: 's1', altKey: 'shift1', name: 'I SHIFT',   time: '07:00 – 15:00', color: '#0369a1', bg: '#f0f9ff' },
+      { key: 's2', altKey: 'shift2', name: 'II SHIFT',  time: '15:00 – 23:00', color: '#4338ca', bg: '#eef2ff' },
+      { key: 's3', altKey: 'shift3', name: 'III SHIFT', time: '23:00 – 07:00', color: '#7e22ce', bg: '#faf5ff' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant P413 WSC Tank Analysis — <strong>Shift Measurements Table (Kgm/m³)</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Shift / Schedule</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ (Kgm/m³)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(1.48–1.68)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">CNH₃ (Kgm/m³)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(3.99–4.19)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">TCl (Kgm/m³)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(5.35–5.55)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">PCl (Kgm/m³)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(1.26–1.46)</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${shiftList.map((s) => {
+              const r = shiftsObj[s.key] || shiftsObj[s.altKey] || {};
+              const isCurrentShift = shift && (shift.toLowerCase().includes(s.key) || shift.toLowerCase().includes(s.name.toLowerCase()));
+              const rowBg = isCurrentShift ? 'background-color: #fef9c3; border-left: 3px solid #eab308;' : `background-color: ${s.bg};`;
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: ${s.color};">
+                    <div>${s.name}</div>
+                    <div style="font-size: 10px; color: #64748b; font-weight: normal;">${s.time}</div>
+                  </td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.fnh3)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.cnh3)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.tcl)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.pcl)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f1f5f9; border-top: 2px solid #cbd5e1;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 800; color: #334155; font-size: 11px;">SPECIFICATION</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">1.48 – 1.68</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">3.99 – 4.19</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">5.35 – 5.55</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">1.26 – 1.46</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Tank: <strong>P413 WSC TANK</strong> | Frequency: <strong>Once in a Shift</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2334,6 +2417,24 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSATK414AnalysisExcel } = require('./excelService');
       excelResult = await generateSATK414AnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'P413 WSC TANK Analysis' ||
+      analysisType === 'P413 WSC Tank Analysis' ||
+      analysisType === 'P413 Analysis' ||
+      cleanType.toLowerCase().includes('p_413') ||
+      cleanType.toLowerCase().includes('p413')
+    ) {
+      const { generateSAP413AnalysisExcel } = require('./excelService');
+      excelResult = await generateSAP413AnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,

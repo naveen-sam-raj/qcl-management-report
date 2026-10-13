@@ -2641,6 +2641,210 @@ const generateSATK414AnalysisExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant P413 WSC Tank Analysis
+ * Matches P413 parameters & tolerance specifications:
+ * - FNH3: 1.48–1.68 Kgm/m³
+ * - CNH3: 3.99–4.19 Kgm/m³
+ * - TCL:  5.35–5.55 Kgm/m³
+ * - PCL:  1.26–1.46 Kgm/m³
+ */
+const generateSAP413AnalysisExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_P413_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('P413 WSC Tank Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  const formatCellValue = (val) => {
+    if (
+      val === null ||
+      val === undefined ||
+      String(val).trim() === '' ||
+      String(val).trim() === '—' ||
+      String(val).trim() === '-' ||
+      String(val).trim() === 'null' ||
+      String(val).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? val : n;
+  };
+
+  // Column widths
+  worksheet.columns = [
+    { key: 'col1', width: 28 }, // Shift / Schedule
+    { key: 'col2', width: 22 }, // FNH3
+    { key: 'col3', width: 22 }, // CNH3
+    { key: 'col4', width: 22 }, // TCl
+    { key: 'col5', width: 22 }, // PCl
+  ];
+
+  // 1. Title Block
+  worksheet.mergeCells('A1:E1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'SOUTHERN PETROCHEMICAL INDUSTRIES CORPORATION LTD.';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 28;
+
+  // 2. Subtitle Block
+  worksheet.mergeCells('A2:E2');
+  const subtitleCell = worksheet.getCell('A2');
+  subtitleCell.value = 'SA PLANT — P413 WSC TANK ANALYSIS REPORT';
+  subtitleCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF0F2E5A' } };
+  subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 24;
+
+  worksheet.getRow(3).height = 10;
+
+  // 3. Metadata
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+
+  const addMeta = (rowNum, l1, v1, l2, v2) => {
+    worksheet.getCell(`A${rowNum}`).value = l1;
+    worksheet.getCell(`A${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`A${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`B${rowNum}`).value = v1;
+    worksheet.getCell(`B${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+    worksheet.getCell(`C${rowNum}`).value = l2;
+    worksheet.getCell(`C${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`C${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.mergeCells(`D${rowNum}:E${rowNum}`);
+    const mergedCell = worksheet.getCell(`D${rowNum}`);
+    mergedCell.value = v2;
+    mergedCell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+
+    ['A', 'B', 'C', 'D', 'E'].forEach((col) => {
+      worksheet.getCell(`${col}${rowNum}`).border = metaBorder;
+    });
+    worksheet.getRow(rowNum).height = 20;
+  };
+
+  addMeta(4, 'Plant:', data.plant || 'SA Plant', 'Saved At:', savedDateTimeDisplay);
+  addMeta(5, 'Analysis:', 'P413 WSC Tank Analysis', 'Date / Shift:', `${data.date || formattedDate} (${data.shift || 'All Shifts'})`);
+
+  // 4. Headers
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = [
+    'SHIFT / SCHEDULE',
+    'FNH₃ (Kgm/m³)\n(1.48–1.68)',
+    'CNH₃ (Kgm/m³)\n(3.99–4.19)',
+    'TCl (Kgm/m³)\n(5.35–5.55)',
+    'PCl (Kgm/m³)\n(1.26–1.46)',
+  ];
+  headerRow.height = 30;
+  ['A', 'B', 'C', 'D', 'E'].forEach((c, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: idx === 0 ? 'left' : 'center', vertical: 'middle', wrapText: true, indent: idx === 0 ? 1 : 0 };
+    cell.border = thinBorder;
+  });
+
+  // 5. Data rows
+  const rawData = data.shifts || data.rows || (data.data && (data.data.shifts || data.data.rows)) || data || {};
+  const shiftList = [
+    { key: 's1', altKey: 'shift1', label: 'I SHIFT (07:00 – 15:00)',   bg: 'FFE0F2FE', fontColor: 'FF0369A1' },
+    { key: 's2', altKey: 'shift2', label: 'II SHIFT (15:00 – 23:00)',  bg: 'FFE0E7FF', fontColor: 'FF3730A3' },
+    { key: 's3', altKey: 'shift3', label: 'III SHIFT (23:00 – 07:00)', bg: 'FFF3E8FF', fontColor: 'FF6B21A8' },
+  ];
+
+  shiftList.forEach((s, idx) => {
+    const rowNum = 8 + idx;
+    const row = worksheet.getRow(rowNum);
+    const sData = rawData[s.key] || rawData[s.altKey] || {};
+    row.values = [
+      s.label,
+      formatCellValue(sData.fnh3),
+      formatCellValue(sData.cnh3),
+      formatCellValue(sData.tcl),
+      formatCellValue(sData.pcl),
+    ];
+    row.height = 24;
+
+    for (let c = 1; c <= 5; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: s.bg } };
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: s.fontColor } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+  });
+
+  // 6. Tolerance Limits Reference Row
+  const refRow = worksheet.getRow(11);
+  refRow.values = [
+    'STANDARD SPECIFICATION',
+    '1.48 – 1.68 Kgm/m³',
+    '3.99 – 4.19 Kgm/m³',
+    '5.35 – 5.55 Kgm/m³',
+    '1.26 – 1.46 Kgm/m³',
+  ];
+  refRow.height = 22;
+  for (let c = 1; c <= 5; c++) {
+    const cell = refRow.getCell(c);
+    cell.border = thinBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    if (c === 1) {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, italic: true, color: { argb: 'FF334155' } };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    } else {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF2563EB' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  }
+
+  // Footer note
+  worksheet.mergeCells('A13:E13');
+  const footerCell = worksheet.getCell('A13');
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant P413 WSC Tank Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(13).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -2650,6 +2854,7 @@ module.exports = {
   generateSATK401AnalysisExcel,
   generateSATK405AnalysisExcel,
   generateSATK414AnalysisExcel,
+  generateSAP413AnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,
