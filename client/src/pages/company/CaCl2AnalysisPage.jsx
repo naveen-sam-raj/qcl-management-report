@@ -86,6 +86,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
+  const [emailRetrying, setEmailRetrying]           = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
   const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
@@ -201,6 +202,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
     });
 
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [canEdit]);
 
   // ── Add new reading row ──
@@ -394,7 +396,8 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
       showToast?.('Cannot retry email: Record ID is not available.', 'error');
       return;
     }
-    setSaving(true);
+    if (emailRetrying) return;
+    setEmailRetrying(true);
     try {
       const response = await api.post(`/api/cacl2-analysis/${recordId}/retry-email`);
       if (response.data?.emailSent) {
@@ -412,7 +415,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
       setEmailStatusDetail(msg);
       showToast?.('Retry Email Error: ' + msg, 'error');
     } finally {
-      setSaving(false);
+      setEmailRetrying(false);
     }
   };
 
@@ -503,24 +506,47 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
 
             {!isViewOnly && (
               <button
+                id="btn-cacl2-save"
                 onClick={handleSaveClick}
                 disabled={saving || !canEdit}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+                className={`px-4 py-2 rounded-lg text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-indigo-500/20 disabled:opacity-50 cursor-pointer ${
+                  savePhase === 'completed'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : savePhase === 'email_failed'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+                title="Save CaCl2 Analysis data"
               >
                 {saving ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Saving...
+                    <span>Saving...</span>
                   </>
                 ) : isLocked ? (
                   <>
                     <Lock className="w-3.5 h-3.5" />
-                    Locked (Max Edits Reached)
+                    <span>Locked (Max Edits Reached)</span>
+                  </>
+                ) : savePhase === 'completed' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Saved & Emailed ✓</span>
+                  </>
+                ) : savePhase === 'email_failed' ? (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Saved — Email Failed</span>
+                  </>
+                ) : savePhase === 'email_pending' ? (
+                  <>
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Saved — Email Pending</span>
                   </>
                 ) : (
                   <>
                     <Save className="w-3.5 h-3.5" />
-                    {editCount === 0 ? 'Save Analysis Data' : 'Save Final Edit'}
+                    <span>{editCount === 0 ? 'Save Analysis Data' : 'Save Final Edit'}</span>
                   </>
                 )}
               </button>
@@ -578,11 +604,11 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
           <button
             type="button"
             onClick={handleRetryEmail}
-            disabled={saving}
+            disabled={emailRetrying}
             className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
           >
-            <RefreshCw className={`w-3 h-3 ${saving ? 'animate-spin' : ''}`} />
-            <span>Retry Email</span>
+            <RefreshCw className={`w-3 h-3 ${emailRetrying ? 'animate-spin' : ''}`} />
+            <span>{emailRetrying ? 'Retrying Email...' : 'Retry Email'}</span>
           </button>
         </div>
       )}
