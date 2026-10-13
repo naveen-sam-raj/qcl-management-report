@@ -17,6 +17,8 @@ import {
   Layers,
   Activity,
   TrendingUp,
+  RefreshCw,
+  Mail,
 } from 'lucide-react';
 import {
   validateCellValue,
@@ -24,31 +26,31 @@ import {
   SA_T501_LIMITS,
 } from '../../services/analysisValidation';
 
-// Default initial readings matching the user's legacy screenshot (Date: 13/09/2026)
+// Default initial readings matching the 3 required shifts
 const DEFAULT_READINGS = [
   {
     id: '1',
     shift: 'I',
-    e501_fnh3: '29.9',
-    e501_na2co3: '03.7',
-    t501_fnh3: '04.8',
-    t501_na2co3: '18.6',
+    e501_fnh3: '',
+    e501_na2co3: '',
+    t501_fnh3: '',
+    t501_na2co3: '',
   },
   {
     id: '2',
     shift: 'II',
     e501_fnh3: '',
     e501_na2co3: '',
-    t501_fnh3: '03.4',
-    t501_na2co3: '70.5',
+    t501_fnh3: '',
+    t501_na2co3: '',
   },
   {
     id: '3',
     shift: 'III',
     e501_fnh3: '',
     e501_na2co3: '',
-    t501_fnh3: '04.1',
-    t501_na2co3: '44.5',
+    t501_fnh3: '',
+    t501_na2co3: '',
   },
 ];
 
@@ -58,6 +60,10 @@ const NUMERIC_FIELDS = [
   't501_fnh3',
   't501_na2co3',
 ];
+
+const getTodayAsiaKolkata = () => {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+};
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -80,7 +86,8 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // Option selection: 'all' | 'e501' | 't501'
   const [selectedOption, setSelectedOption] = useState(() => {
@@ -90,51 +97,80 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
     return 'all';
   });
 
-  // ── States ──
-  const [date, setDate] = useState('2026-09-13');
-  const [readings, setReadings] = useState(DEFAULT_READINGS);
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState(null);
+  // ── States (Strict Current-Date Restriction) ──
+  const [date]                                          = useState(() => getTodayAsiaKolkata());
+  const [readings, setReadings]                         = useState(DEFAULT_READINGS);
+  const [originalReadings, setOriginalReadings]         = useState(null);
+  const [errors, setErrors]                             = useState({});
+  const [saving, setSaving]                             = useState(false);
+  const [lastSaved, setLastSaved]                       = useState(null);
 
-  // Fetch existing data when date changes
+  // Email & Persistence states
+  const [savePhase, setSavePhase]                       = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                         = useState(null);
+  const [recipientEmail, setRecipientEmail]             = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]       = useState('');
+  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
+  const [editedFields, setEditedFields]                 = useState({});
+  const [retryingEmail, setRetryingEmail]               = useState(false);
+
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal]         = useState(false);
+  const [confirmData, setConfirmData]                   = useState(null);
+
+  // Fetch existing data for today
   useEffect(() => {
-    if (!date) return;
+    let active = true;
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/e501-t501-analysis?date=${date}`);
-        if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             // Leave default
-          } else if (record.shifts) {
-            setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
-          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            setReadings(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setReadings(record);
-          } else if (record.data && record.data.readings) {
-            setReadings(record.data.readings);
+        if (!active) return;
+
+        if (response.data && response.data.success) {
+          const rec = response.data.record || (Array.isArray(response.data.data) ? response.data.data[0] : response.data.data);
+          if (rec) {
+            setRecordId(rec._id || response.data.recordId || null);
+            setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || '');
+
+            if (rec.emailStatus === 'sent') {
+              setSavePhase('completed');
+              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
+            } else if (rec.emailStatus === 'failed') {
+              setSavePhase('email_failed');
+              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
+            }
+
+            const fetchedReadings = rec.readings || rec.data?.readings;
+            if (Array.isArray(fetchedReadings) && fetchedReadings.length > 0) {
+              setReadings(fetchedReadings);
+              setOriginalReadings(JSON.parse(JSON.stringify(fetchedReadings)));
+            } else {
+              setReadings(DEFAULT_READINGS);
+              setOriginalReadings(null);
+            }
+
+            setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
-            // Leave default
+            setReadings(DEFAULT_READINGS);
+            setOriginalReadings(null);
+            setEditedFields({});
           }
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing E 501 / T 501 data', err);
+        setReadings(DEFAULT_READINGS);
+        setOriginalReadings(null);
+        setEditedFields({});
       }
     };
     fetchExistingData();
+    return () => { active = false; };
   }, [date]);
-
 
   // ── Handle reading cell change ──
   const handleCellChange = useCallback((id, field, value) => {
+    if (isViewOnly) return;
     if (NUMERIC_FIELDS.includes(field) && !isValidDecimal(value)) return;
 
     setReadings((prev) =>
@@ -147,10 +183,11 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       delete copy[`${id}_${field}`];
       return copy;
     });
-  }, []);
+  }, [isViewOnly]);
 
   // ── Add new reading row ──
   const handleAddRow = () => {
+    if (isViewOnly) return;
     const nextId = String(Date.now());
     const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI'];
     const nextShift =
@@ -173,6 +210,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
   // ── Remove reading row ──
   const handleRemoveRow = (id) => {
+    if (isViewOnly) return;
     if (readings.length <= 1) {
       showToast?.('At least one shift row is required.', 'warning');
       return;
@@ -182,10 +220,15 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
   // ── Reset ──
   const handleReset = () => {
-    setReadings(DEFAULT_READINGS);
-    setDate('2026-09-13');
+    if (isViewOnly) return;
+    if (originalReadings) {
+      setReadings(JSON.parse(JSON.stringify(originalReadings)));
+      showToast?.('Restored values to last saved state.', 'info');
+    } else {
+      setReadings(DEFAULT_READINGS);
+      showToast?.('Values reset to defaults.', 'info');
+    }
     setErrors({});
-    showToast?.('Values reset to sample defaults.', 'info');
   };
 
   // ── Summary Calculations ──
@@ -207,8 +250,9 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
     };
   }, [readings]);
 
-  // ── Save handler ──
-  const handleSave = async () => {
+  // ── Pre-Save Prompt & Validation ──
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     const newErrors = {};
 
     readings.forEach((r) => {
@@ -225,7 +269,30 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       return;
     }
 
+    const filledRows = readings.filter(r =>
+      NUMERIC_FIELDS.some(f => r[f] !== '' && r[f] !== null && r[f] !== undefined)
+    );
+
+    if (filledRows.length === 0) {
+      showToast?.('Please enter at least one measurement value before saving.', 'warning');
+      return;
+    }
+
+    setConfirmData({
+      date,
+      readings: filledRows,
+      totalCount: readings.length,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Save Handler ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
+    setShowConfirmModal(false);
+
     try {
       const payload = {
         date,
@@ -237,35 +304,97 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
       const res = await api.post('/api/e501-t501-analysis', payload);
 
-      if (res.data?.success) {
-        showToast?.('E 501 / T 501 Analysis saved successfully!', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+      if (!res.data?.success) {
+        showToast?.(res.data?.message || 'Failed to save E 501 / T 501 Analysis.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
+      setOriginalReadings(JSON.parse(JSON.stringify(readings)));
+      setLastSaved(new Date().toLocaleTimeString());
+
+      const returnedDoc = res.data?.data || res.data?.record || {};
+      const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
+      const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
+
+      setEditedFields(newEdited);
+      if (newRecordId) setRecordId(newRecordId);
+
+      const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
+      const recipient = res.data?.emailRecipient;
+      if (recipient) setRecipientEmail(recipient);
+
+      if (deliveryStatus === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(`Email sent to ${recipient || 'plant operator'}`);
+        showToast?.('Saved & Email Sent Successfully!', 'success');
+      } else if (deliveryStatus === 'failed') {
+        setSavePhase('email_failed');
+        const errDetail = res.data?.message || 'SMTP delivery rejected';
+        setEmailStatusDetail(errDetail);
+        if (errDetail.includes('550') || errDetail.includes('Access denied')) {
+          setIsPermanentMailError(true);
+        }
+        showToast?.('Analysis Saved, but notification email delivery failed.', 'warning');
       } else {
-        showToast?.(res.data?.message || 'E 501 / T 501 data saved.', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved successfully. Email notification is processing in background.');
+        showToast?.('E 501 / T 501 data saved successfully!', 'success');
       }
     } catch (err) {
-      console.warn('API save error, using local fallback:', err);
-      showToast?.('Saved to local session successfully!', 'success');
-      setLastSaved(new Date().toLocaleTimeString());
+      console.error('Error saving E 501 / T 501 data:', err);
+      const msg = err?.response?.data?.message || 'Failed to save E 501 / T 501 Analysis data.';
+      showToast?.(msg, 'error');
+      setSavePhase('idle');
     } finally {
       setSaving(false);
     }
   };
 
+  // ── Retry Email Handler ──
+  const handleRetryEmail = async () => {
+    if (!recordId || retryingEmail) return;
+    setRetryingEmail(true);
+
+    try {
+      const res = await api.post(`/api/e501-t501-analysis/${recordId}/retry-email`);
+      if (res.data?.success && res.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail(`Notification email re-sent to ${res.data.emailRecipient || recipientEmail}`);
+        showToast?.('Email successfully re-sent!', 'success');
+      } else {
+        setSavePhase('email_failed');
+        const errMsg = res.data?.emailError || res.data?.message || 'Retry failed';
+        setEmailStatusDetail(`Retry failed: ${errMsg}`);
+        if (errMsg.includes('550') || errMsg.includes('Access denied')) {
+          setIsPermanentMailError(true);
+        }
+        showToast?.('Email retry failed.', 'error');
+      }
+    } catch (err) {
+      console.error('Retry email error:', err);
+      const msg = err.response?.data?.message || err.message || 'Retry failed';
+      setEmailStatusDetail(`Retry failed: ${msg}`);
+      showToast?.('Email retry failed.', 'error');
+    } finally {
+      setRetryingEmail(false);
+    }
+  };
+
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
+      {/* ── TOP HEADER BAR ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Back</span>
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -279,6 +408,9 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200/60">
                 E 501 / T 501
               </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: Once in a Shift
+              </span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
               <Activity className="w-5 h-5 text-indigo-600" />
@@ -287,8 +419,8 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
           </div>
         </div>
 
-        {/* Action Buttons: Reset & Save on top right only */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
           {lastSaved && (
             <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -296,45 +428,95 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
             </span>
           )}
 
-          <button
-            onClick={handleReset}
-            disabled={saving}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
+          {!isViewOnly && (
+            <button
+              onClick={handleReset}
+              disabled={saving}
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
+            </button>
+          )}
 
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-          >
-            <Save className="w-3.5 h-3.5" />
-            {saving ? 'Saving...' : 'Save E 501 / T 501 Data'}
-          </button>
+          {!isViewOnly && (
+            <button
+              onClick={handleSaveClick}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save E 501 / T 501 Data</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── MAIN ANALYSIS TABLE (Clean TK 203 Dark Header Style) ── */}
+      {/* ── Status Banner (Email / Save Status) ── */}
+      {savePhase === 'completed' && (
+        <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              <strong>Saved — Email Sent</strong>: {emailStatusDetail || `Notification sent to registered SA Plant Operator (${recipientEmail || 'operator'}).`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {savePhase === 'email_failed' && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <div>
+              <span><strong>Saved — Email Failed</strong>: Database record persisted. {emailStatusDetail}</span>
+              {recipientEmail && <span className="block text-[11px] text-amber-700 font-normal">Target recipient: {recipientEmail}</span>}
+            </div>
+          </div>
+          <button
+            onClick={handleRetryEmail}
+            disabled={retryingEmail || isPermanentMailError}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs shrink-0 ${
+              isPermanentMailError
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                : 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer'
+            }`}
+            title={isPermanentMailError ? 'Permanent recipient rejection. Update recipient in User Management.' : 'Retry sending notification email'}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
+            <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── MAIN ANALYSIS TABLE ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner with Integrated Date Selector */}
+        {/* Table top title banner with Date Locked to Today & Tank Filter */}
         <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
               <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
-                E 501 / T 501 Chemical Concentration
+                E 501 / T 501 Readings
               </span>
-              <span className="text-[11px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200/60">
-                Units: g/l
+              <span className="text-[11px] font-bold text-indigo-800 bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-300">
+                Once in a Shift
               </span>
             </div>
 
-            {/* Date Input inside Table Header */}
+            {/* Date Input inside Table Header - Locked to Today */}
             <div className="flex items-center gap-2">
               <label
-                htmlFor="e501-date-input"
+                htmlFor="e501-t501-date-input"
                 className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
               >
                 <span>Date:</span>
@@ -342,20 +524,19 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               </label>
               <div className="relative">
                 <input
-                  id="e501-date-input"
+                  id="e501-t501-date-input"
                   type="date"
                   value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition text-slate-800 bg-white hover:border-slate-400"
-                  required
+                  readOnly
+                  disabled
+                  className="pl-2.5 pr-2 py-1 text-xs font-bold border border-slate-300 rounded-lg text-slate-800 bg-slate-100 cursor-not-allowed select-none"
+                  title="Date is automatically locked to today (Asia/Kolkata timezone)"
                 />
               </div>
-              {date && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1 text-[11px] text-indigo-800 font-bold bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                <Calendar className="w-3 h-3 text-indigo-600" />
+                {formatDateDisplay(date)} (Today)
+              </span>
             </div>
           </div>
 
@@ -366,7 +547,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                 type="button"
                 id="btn-option-all"
                 onClick={() => setSelectedOption('all')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition cursor-pointer ${
                   selectedOption === 'all'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -379,7 +560,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                 type="button"
                 id="btn-option-e501"
                 onClick={() => setSelectedOption('e501')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition cursor-pointer ${
                   selectedOption === 'e501'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -392,7 +573,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                 type="button"
                 id="btn-option-t501"
                 onClick={() => setSelectedOption('t501')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition cursor-pointer ${
                   selectedOption === 't501'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -403,13 +584,15 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               </button>
             </div>
 
-            <button
-              onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 px-3 py-1.5 rounded-lg transition shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Shift Row
-            </button>
+            {!isViewOnly && (
+              <button
+                onClick={handleAddRow}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 px-3 py-1.5 rounded-lg transition shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Shift Row
+              </button>
+            )}
           </div>
         </div>
 
@@ -450,12 +633,14 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                     T 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
                   </th>
                 )}
-                <th
-                  rowSpan={2}
-                  className="py-3 px-3 w-16 text-center border-b border-slate-800"
-                >
-                  Action
-                </th>
+                {!isViewOnly && (
+                  <th
+                    rowSpan={2}
+                    className="py-3 px-3 w-16 text-center border-b border-slate-800"
+                  >
+                    Action
+                  </th>
+                )}
               </tr>
               {/* Row 2: Sub-columns */}
               <tr className="bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider text-center">
@@ -483,6 +668,9 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((reading, index) => {
+                const rowKey = reading.id || `shift_${reading.shift}`;
+                const rowEdits = editedFields[rowKey] || {};
+
                 return (
                   <tr
                     key={reading.id}
@@ -495,15 +683,26 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
                     {/* Shift */}
                     <td className="py-2.5 px-3 text-center border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={reading.shift}
-                        onChange={(e) =>
-                          handleCellChange(reading.id, 'shift', e.target.value)
-                        }
-                        placeholder="Shift"
-                        className="w-full text-center bg-slate-50 border border-slate-200 rounded-md py-1 px-2 text-xs font-extrabold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={reading.shift}
+                          disabled={isViewOnly}
+                          onChange={(e) =>
+                            handleCellChange(reading.id, 'shift', e.target.value)
+                          }
+                          placeholder="Shift"
+                          className="w-full text-center bg-slate-50 border border-slate-200 rounded-md py-1 px-2 text-xs font-extrabold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition disabled:bg-slate-100"
+                        />
+                        {rowEdits.shift && (
+                          <span
+                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                            title="Field previously edited"
+                          >
+                            EDITED
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* E 501 Cells (Limits: FNH3 10–40 g/L, Na2CO3 2–10 g/L) */}
@@ -519,6 +718,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                           const isNormal = validation.isNormal;
                           const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
                           const isFormatError = !!errors[`${reading.id}_${field}`];
+                          const isEdited = !!rowEdits[field];
 
                           return (
                             <td className="py-2.5 px-3 border-r border-slate-100 align-top">
@@ -528,6 +728,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
+                                    disabled={isViewOnly}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -551,6 +752,14 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     }`}
                                     aria-label={`${reading.shift} E 501 FNH3`}
                                   />
+                                  {isEdited && (
+                                    <span
+                                      className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                                      title="Field previously edited"
+                                    >
+                                      EDITED
+                                    </span>
+                                  )}
                                   {isOutOfLimit && (
                                     <span
                                       className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -618,6 +827,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                           const isNormal = validation.isNormal;
                           const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
                           const isFormatError = !!errors[`${reading.id}_${field}`];
+                          const isEdited = !!rowEdits[field];
 
                           return (
                             <td className="py-2.5 px-3 border-r border-slate-100 align-top">
@@ -627,6 +837,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
+                                    disabled={isViewOnly}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -650,6 +861,14 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     }`}
                                     aria-label={`${reading.shift} E 501 Na2CO3`}
                                   />
+                                  {isEdited && (
+                                    <span
+                                      className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                                      title="Field previously edited"
+                                    >
+                                      EDITED
+                                    </span>
+                                  )}
                                   {isOutOfLimit && (
                                     <span
                                       className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -722,6 +941,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                           const isNormal = validation.isNormal;
                           const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
                           const isFormatError = !!errors[`${reading.id}_${field}`];
+                          const isEdited = !!rowEdits[field];
 
                           return (
                             <td className="py-2.5 px-3 border-r border-slate-100 align-top">
@@ -731,6 +951,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
+                                    disabled={isViewOnly}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -754,6 +975,14 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     }`}
                                     aria-label={`${reading.shift} T 501 FNH3`}
                                   />
+                                  {isEdited && (
+                                    <span
+                                      className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                                      title="Field previously edited"
+                                    >
+                                      EDITED
+                                    </span>
+                                  )}
                                   {isOutOfLimit && (
                                     <span
                                       className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -821,6 +1050,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                           const isNormal = validation.isNormal;
                           const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
                           const isFormatError = !!errors[`${reading.id}_${field}`];
+                          const isEdited = !!rowEdits[field];
 
                           return (
                             <td className="py-2.5 px-3 border-r border-slate-100 align-top">
@@ -830,6 +1060,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
+                                    disabled={isViewOnly}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -853,6 +1084,14 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     }`}
                                     aria-label={`${reading.shift} T 501 Na2CO3`}
                                   />
+                                  {isEdited && (
+                                    <span
+                                      className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                                      title="Field previously edited"
+                                    >
+                                      EDITED
+                                    </span>
+                                  )}
                                   {isOutOfLimit && (
                                     <span
                                       className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -913,16 +1152,18 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                     )}
 
                     {/* Delete Row */}
-                    <td className="py-2.5 px-3 text-center">
-                      <button
-                        onClick={() => handleRemoveRow(reading.id)}
-                        disabled={readings.length <= 1}
-                        className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                        title="Delete Shift Row"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
+                    {!isViewOnly && (
+                      <td className="py-2.5 px-3 text-center">
+                        <button
+                          onClick={() => handleRemoveRow(reading.id)}
+                          disabled={readings.length <= 1}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
+                          title="Delete Shift Row"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -933,20 +1174,26 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
         {/* ── Table Summary Footer ── */}
         <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs">
           <div className="flex flex-wrap items-center gap-4 text-slate-600">
-            <span className="flex items-center gap-1.5">
-              <TrendingUp className="w-4 h-4 text-indigo-600" />
-              <span className="font-semibold text-slate-700">E 501 Avg:</span>
-              <span className="font-mono text-slate-900 font-bold">
-                FNH₃: {stats.e501_fnh3_avg} g/l | Na₂CO₃: {stats.e501_na2co3_avg} g/l
+            {(selectedOption === 'all' || selectedOption === 'e501') && (
+              <span className="flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-indigo-600" />
+                <span className="font-semibold text-slate-700">E 501 Avg:</span>
+                <span className="font-mono text-slate-900 font-bold">
+                  FNH₃: {stats.e501_fnh3_avg} g/l | Na₂CO₃: {stats.e501_na2co3_avg} g/l
+                </span>
               </span>
-            </span>
-            <span className="hidden md:inline text-slate-300">|</span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-700">T 501 Avg:</span>
-              <span className="font-mono text-slate-900 font-bold">
-                FNH₃: {stats.t501_fnh3_avg} g/l | Na₂CO₃: {stats.t501_na2co3_avg} g/l
+            )}
+            {selectedOption === 'all' && (
+              <span className="hidden md:inline text-slate-300">|</span>
+            )}
+            {(selectedOption === 'all' || selectedOption === 't501') && (
+              <span className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-700">T 501 Avg:</span>
+                <span className="font-mono text-slate-900 font-bold">
+                  FNH₃: {stats.t501_fnh3_avg} g/l | Na₂CO₃: {stats.t501_na2co3_avg} g/l
+                </span>
               </span>
-            </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -959,6 +1206,80 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
           </div>
         </div>
       </div>
+
+      {/* ── SAVE CONFIRMATION MODAL ── */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-indigo-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
+                  <Save className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
+                  <p className="text-xs text-slate-500">SA Plant — E 501 / T 501 Analysis</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs text-slate-600">
+              <p>
+                You are about to persist readings for <strong>{confirmData?.readings?.length || 0}</strong> active shift entries for today:
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Date:</span>
+                  <span className="font-bold text-slate-800">{date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">E 501 Avg:</span>
+                  <span className="font-bold text-indigo-700">FNH₃: {stats.e501_fnh3_avg} | Na₂CO₃: {stats.e501_na2co3_avg}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">T 501 Avg:</span>
+                  <span className="font-bold text-indigo-700">FNH₃: {stats.t501_fnh3_avg} | Na₂CO₃: {stats.t501_na2co3_avg}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Recipient Operator:</span>
+                  <span className="font-bold text-slate-800">{recipientEmail || 'sa_operator@tfl.com'}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Saving will securely store all rows to MongoDB and dispatch an official notification email with an Excel report.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

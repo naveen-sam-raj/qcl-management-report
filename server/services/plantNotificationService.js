@@ -476,6 +476,16 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'LSA 500#' ||
     (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('500'));
 
+  const isSAE501T501Analysis =
+    analysisType === 'E 501 / T 501 Analysis' ||
+    analysisType === 'E 501 / T 501' ||
+    analysisType === 'E501 / T501 Analysis' ||
+    analysisType === 'E501 / T501' ||
+    analysisType === 'E 501 Analysis' ||
+    analysisType === 'T 501 Analysis' ||
+    (String(analysisType || '').toLowerCase().includes('e501') || String(analysisType || '').toLowerCase().includes('e 501')) ||
+    (String(analysisType || '').toLowerCase().includes('t501') || String(analysisType || '').toLowerCase().includes('t 501'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -999,6 +1009,32 @@ TK 110 (Feed Tank):
         `#${i + 1} | Time: ${r.time || '—'} | NaCl: ${formatVal(r.nacl)}% | BD: ${formatVal(r.bd)} g/L | Turbidity: ${formatVal(r.turbidity)} NTU`
       ).join('\n') +
       `\nAverage NaCl: ${avgNaCl !== '—' ? `${avgNaCl}%` : '—'} (${rows.length} Total Time Slots)\n\n`;
+  } else if (isSAE501T501Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const calcAvg = (field) => {
+      const vals = readings
+        .map((r) => parseFloat(r[field]))
+        .filter((n) => !isNaN(n));
+      return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '—';
+    };
+
+    const eFnh3Avg = calcAvg('e501_fnh3');
+    const eNa2co3Avg = calcAvg('e501_na2co3');
+    const tFnh3Avg = calcAvg('t501_fnh3');
+    const tNa2co3Avg = calcAvg('t501_na2co3');
+
+    sieveTextSummary = `SA Plant E 501 / T 501 Analysis Readings:\n` +
+      readings.map((r, i) =>
+        `#${i + 1} | Shift: ${r.shift || '—'} | E 501 (FNH3: ${formatVal(r.e501_fnh3)} g/L, Na2CO3: ${formatVal(r.e501_na2co3)} g/L) | T 501 (FNH3: ${formatVal(r.t501_fnh3)} g/L, Na2CO3: ${formatVal(r.t501_na2co3)} g/L)`
+      ).join('\n') +
+      `\nCalculated Averages:\nE 501 -> FNH3: ${eFnh3Avg} g/L, Na2CO3: ${eNa2co3Avg} g/L | T 501 -> FNH3: ${tFnh3Avg} g/L, Na2CO3: ${tNa2co3Avg} g/L\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2378,6 +2414,80 @@ Attachment: ${excelFileName}
           Plant: <strong>Soda Ash Plant</strong> | Section: <strong>LSA at 500#</strong> | Frequency: <strong>Once in 2 Hrs</strong>
         </div>
       </div>`;
+  } else if (isSAE501T501Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const calcAvg = (field) => {
+      const vals = readings
+        .map((r) => parseFloat(r[field]))
+        .filter((n) => !isNaN(n));
+      return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '—';
+    };
+
+    const eFnh3Avg = calcAvg('e501_fnh3');
+    const eNa2co3Avg = calcAvg('e501_na2co3');
+    const tFnh3Avg = calcAvg('t501_fnh3');
+    const tNa2co3Avg = calcAvg('t501_na2co3');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant Soda Ash Production — <strong>E 501 / T 501 Analysis Readings</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th rowspan="2" style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 90px;">Shift</th>
+              <th colspan="2" style="padding: 4px 8px; text-align: center; border: 1px solid #cbd5e1; background-color: #312e81;">E 501 (g/L)</th>
+              <th colspan="2" style="padding: 4px 8px; text-align: center; border: 1px solid #cbd5e1; background-color: #312e81;">T 501 (g/L)</th>
+            </tr>
+            <tr style="background-color: #1e1b4b; color: #ffffff; font-size: 10.5px;">
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ [10–40]</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂CO₃ [2–10]</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ [1–5]</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂CO₃ [20–60]</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${readings.map((r, i) => {
+              const rowBg = i % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              const isEFnh3Out = (val) => { const n = parseFloat(val); return !isNaN(n) && (n < 10 || n > 40); };
+              const isENa2co3Out = (val) => { const n = parseFloat(val); return !isNaN(n) && (n < 2 || n > 10); };
+              const isTFnh3Out = (val) => { const n = parseFloat(val); return !isNaN(n) && (n < 1 || n > 5); };
+              const isTNa2co3Out = (val) => { const n = parseFloat(val); return !isNaN(n) && (n < 20 || n > 60); };
+
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #64748b;">${i + 1}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${r.shift ? `Shift ${r.shift}` : `Row #${i + 1}`}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isEFnh3Out(r.e501_fnh3) ? '#e11d48' : '#4f46e5'};">${formatVal(r.e501_fnh3)}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isENa2co3Out(r.e501_na2co3) ? '#e11d48' : '#4f46e5'};">${formatVal(r.e501_na2co3)}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isTFnh3Out(r.t501_fnh3) ? '#e11d48' : '#4f46e5'};">${formatVal(r.t501_fnh3)}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isTNa2co3Out(r.t501_na2co3) ? '#e11d48' : '#4f46e5'};">${formatVal(r.t501_na2co3)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f1f5f9; font-weight: 700;">
+              <td colspan="2" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #0f172a;">AVERAGE (g/L):</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #4f46e5; font-family: monospace;">${eFnh3Avg !== '—' ? `${eFnh3Avg}` : '—'}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #4f46e5; font-family: monospace;">${eNa2co3Avg !== '—' ? `${eNa2co3Avg}` : '—'}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #4f46e5; font-family: monospace;">${tFnh3Avg !== '—' ? `${tFnh3Avg}` : '—'}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #4f46e5; font-family: monospace;">${tNa2co3Avg !== '—' ? `${tNa2co3Avg}` : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Tanks: <strong>E 501 &amp; T 501</strong> | Frequency: <strong>Once in a Shift</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2967,6 +3077,27 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSALSA500AnalysisExcel } = require('./excelService');
       excelResult = await generateSALSA500AnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'E 501 / T 501 Analysis' ||
+      analysisType === 'E 501 / T 501' ||
+      analysisType === 'E501 / T501 Analysis' ||
+      analysisType === 'E501 / T501' ||
+      analysisType === 'E 501 Analysis' ||
+      analysisType === 'T 501 Analysis' ||
+      (cleanType.toLowerCase().includes('e501') || cleanType.toLowerCase().includes('e_501')) ||
+      (cleanType.toLowerCase().includes('t501') || cleanType.toLowerCase().includes('t_501'))
+    ) {
+      const { generateSAE501T501AnalysisExcel } = require('./excelService');
+      excelResult = await generateSAE501T501AnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
