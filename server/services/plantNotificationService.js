@@ -462,6 +462,13 @@ const sendPlantAnalysisEmail = async ({
     (String(analysisType || '').toLowerCase().includes('bicarbonate') && !String(analysisType || '').toLowerCase().includes('moisture')) ||
     (String(analysisType || '').toLowerCase().includes('bi carbonate') && !String(analysisType || '').toLowerCase().includes('moisture'));
 
+  const isSABicarbonateMoistureAnalysis =
+    analysisType === 'Bicarbonate Moisture Analysis' ||
+    analysisType === 'Bi Carbonate Moisture Analysis' ||
+    analysisType === 'Bicarbonate Moisture' ||
+    (String(analysisType || '').toLowerCase().includes('bicarbonate') && String(analysisType || '').toLowerCase().includes('moisture')) ||
+    (String(analysisType || '').toLowerCase().includes('bi carbonate') && String(analysisType || '').toLowerCase().includes('moisture'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -935,6 +942,35 @@ TK 110 (Feed Tank):
 
     sieveTextSummary = `SA Plant Bi Carbonate NaCl/Na2CO3 Readings:\n` +
       readings.map((r, i) => `#${i + 1} | Time: ${r.time || '—'} | Filter: ${r.filter || '—'} | NaCl/Na2CO3: ${formatVal(r.naclNa2co3)}%`).join('\n') + '\n\n';
+  } else if (isSABicarbonateMoistureAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const m404Vals = [];
+    const sbTurbVals = [];
+    readings.forEach((r) => {
+      ['m404_a', 'm404_b', 'm404_c'].forEach((k) => {
+        const val = parseFloat(r[k]);
+        if (!isNaN(val)) m404Vals.push(val);
+      });
+      ['sb_turb1', 'sb_turb2'].forEach((k) => {
+        const val = parseFloat(r[k]);
+        if (!isNaN(val)) sbTurbVals.push(val);
+      });
+    });
+    const m404Avg = m404Vals.length > 0 ? (m404Vals.reduce((a, b) => a + b, 0) / m404Vals.length).toFixed(2) : '—';
+    const sbTurbAvg = sbTurbVals.length > 0 ? (sbTurbVals.reduce((a, b) => a + b, 0) / sbTurbVals.length).toFixed(1) : '—';
+
+    sieveTextSummary = `SA Plant Bicarbonate Moisture Analysis Readings:\n` +
+      readings.map((r, i) =>
+        `#${i + 1} | Shift: ${r.shift || '—'} | Time: ${r.time || '—'} | M 404 (A: ${formatVal(r.m404_a)}%, B: ${formatVal(r.m404_b)}%, C: ${formatVal(r.m404_c)}%) | M 405 Outlet: ${formatVal(r.m405_outlet)} | SB Turbidity: (1: ${formatVal(r.sb_turb1)}, 2: ${formatVal(r.sb_turb2)})`
+      ).join('\n') +
+      `\nCalculated Averages:\nM 404 Avg Moisture: ${m404Avg !== '—' ? `${m404Avg}%` : '—'} | SB Avg Turbidity: ${sbTurbAvg}\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2164,6 +2200,87 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Analysis: <strong>Bi Carbonate NaCl/Na₂CO₃</strong>
         </div>
       </div>`;
+  } else if (isSABicarbonateMoistureAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const m404Vals = [];
+    const sbTurbVals = [];
+    readings.forEach((r) => {
+      ['m404_a', 'm404_b', 'm404_c'].forEach((k) => {
+        const val = parseFloat(r[k]);
+        if (!isNaN(val)) m404Vals.push(val);
+      });
+      ['sb_turb1', 'sb_turb2'].forEach((k) => {
+        const val = parseFloat(r[k]);
+        if (!isNaN(val)) sbTurbVals.push(val);
+      });
+    });
+    const m404Avg = m404Vals.length > 0 ? (m404Vals.reduce((a, b) => a + b, 0) / m404Vals.length).toFixed(2) : '—';
+    const sbTurbAvg = sbTurbVals.length > 0 ? (sbTurbVals.reduce((a, b) => a + b, 0) / sbTurbVals.length).toFixed(1) : '—';
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant Soda Ash Production — <strong>Bicarbonate Moisture Analysis Readings</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th rowspan="2" style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 35px;">#</th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1; width: 110px;">Shift / Sample</th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 65px;">Time</th>
+              <th colspan="3" style="padding: 4px 8px; text-align: center; border: 1px solid #cbd5e1; background-color: #1e293b;">M 404 Moisture (%) [18%–22%]</th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 85px;">M 405 Outlet</th>
+              <th colspan="2" style="padding: 4px 8px; text-align: center; border: 1px solid #cbd5e1; background-color: #1e293b;">SB Turbidity</th>
+            </tr>
+            <tr style="background-color: #1e293b; color: #ffffff; font-size: 10.5px;">
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1; width: 60px;">A</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1; width: 60px;">B</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1; width: 60px;">C</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1; width: 65px;">Turb 1</th>
+              <th style="padding: 4px 6px; text-align: center; border: 1px solid #cbd5e1; width: 65px;">Turb 2</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${readings.map((r, i) => {
+              const rowBg = i % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              const isOutOfLimit = (val) => {
+                const num = parseFloat(val);
+                return !isNaN(num) && (num < 18 || num > 22);
+              };
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #64748b;">${i + 1}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${r.shift || '—'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: #0284c7;">${r.time || '—'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isOutOfLimit(r.m404_a) ? '#e11d48' : '#0284c7'};">${formatVal(r.m404_a)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isOutOfLimit(r.m404_b) ? '#e11d48' : '#0284c7'};">${formatVal(r.m404_b)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isOutOfLimit(r.m404_c) ? '#e11d48' : '#0284c7'};">${formatVal(r.m404_c)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: #334155;">${formatVal(r.m405_outlet)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: #0d9488;">${formatVal(r.sb_turb1)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 600; color: #0d9488;">${formatVal(r.sb_turb2)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f1f5f9; font-weight: 700;">
+              <td colspan="3" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #0f172a;">AVERAGE CALCULATIONS</td>
+              <td colspan="3" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #0284c7; font-family: monospace;">M 404 Avg: ${m404Avg !== '—' ? `${m404Avg}%` : '—'}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #64748b;">—</td>
+              <td colspan="2" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #0d9488; font-family: monospace;">SB Avg: ${sbTurbAvg}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Analysis: <strong>Bicarbonate Moisture Analysis</strong> | Frequency: <strong>Once in 4 Hours</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2717,6 +2834,24 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSABicarbonateAnalysisExcel } = require('./excelService');
       excelResult = await generateSABicarbonateAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'Bicarbonate Moisture Analysis' ||
+      analysisType === 'Bi Carbonate Moisture Analysis' ||
+      analysisType === 'Bicarbonate Moisture' ||
+      (cleanType.toLowerCase().includes('bicarbonate') && cleanType.toLowerCase().includes('moisture')) ||
+      (cleanType.toLowerCase().includes('bi_carbonate') && cleanType.toLowerCase().includes('moisture'))
+    ) {
+      const { generateSABicarbonateMoistureExcel } = require('./excelService');
+      excelResult = await generateSABicarbonateMoistureExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,

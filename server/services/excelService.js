@@ -3428,6 +3428,258 @@ const generateSABicarbonateAnalysisExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant Bicarbonate Moisture Analysis
+ * Columns: Row #, Shift/Sample, Time, M 404 A, M 404 B, M 404 C, M 405 Outlet, SB Turbidity 1, SB Turbidity 2
+ */
+const generateSABicarbonateMoistureExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_Bicarbonate_Moisture_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('Bicarbonate Moisture Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  // Column widths
+  worksheet.columns = [
+    { key: 'col1', width: 8 },  // #
+    { key: 'col2', width: 18 }, // Shift / Sample
+    { key: 'col3', width: 14 }, // Time
+    { key: 'col4', width: 14 }, // M 404 A
+    { key: 'col5', width: 14 }, // M 404 B
+    { key: 'col6', width: 14 }, // M 404 C
+    { key: 'col7', width: 16 }, // M 405 Outlet
+    { key: 'col8', width: 14 }, // SB Turb 1
+    { key: 'col9', width: 14 }, // SB Turb 2
+  ];
+
+  // Header Title
+  worksheet.mergeCells('A1:I1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED - SA PLANT';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  worksheet.getRow(1).height = 28;
+
+  // Subtitle
+  worksheet.mergeCells('A2:I2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = 'BICARBONATE MOISTURE ANALYSIS REPORT — SODA ASH PRODUCTION';
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0284C7' } };
+  worksheet.getRow(2).height = 22;
+
+  // Metadata block (Row 3 & 4)
+  const metaFields = [
+    { r: 3, c1: 'A', c2: 'B', l: 'Plant / Section:', v: 'SA Plant — Soda Ash Production' },
+    { r: 3, c1: 'C', c2: 'D', l: 'Analysis Unit:', v: 'Bicarbonate Moisture (Once in 4 Hours)' },
+    { r: 3, c1: 'E', c2: 'F', l: 'Analysis Date:', v: data.date || '—' },
+    { r: 3, c1: 'G', c2: 'I', l: 'Target M 404 Limits:', v: '18% – 22% (Target: 20% ±2.0%)' },
+    { r: 4, c1: 'A', c2: 'B', l: 'Report Generated:', v: data.savedDateFormatted || new Date().toLocaleDateString('en-IN') },
+    { r: 4, c1: 'C', c2: 'D', l: 'Submitted By:', v: data.submittedBy || 'Shift Chemist' },
+    { r: 4, c1: 'E', c2: 'F', l: 'Save Event ID:', v: (data.saveEventId || '—').slice(-12) },
+    { r: 4, c1: 'G', c2: 'I', l: 'Status:', v: 'Persisted to Database' },
+  ];
+
+  metaFields.forEach((mf) => {
+    worksheet.mergeCells(`${mf.c1}${mf.r}:${mf.c2}${mf.r}`);
+    const c = worksheet.getCell(`${mf.c1}${mf.r}`);
+    c.value = `${mf.l} ${mf.v}`;
+    c.font = { name: 'Calibri', size: 9.5, bold: false, color: { argb: 'FF1E293B' } };
+    c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    c.border = metaBorder;
+  });
+  worksheet.getRow(3).height = 20;
+  worksheet.getRow(4).height = 20;
+
+  // Empty separator row
+  worksheet.getRow(5).height = 8;
+
+  // Group Header Row (Row 6)
+  worksheet.mergeCells('A6:A7');
+  worksheet.getCell('A6').value = '#';
+  worksheet.mergeCells('B6:B7');
+  worksheet.getCell('B6').value = 'SHIFT / SAMPLE';
+  worksheet.mergeCells('C6:C7');
+  worksheet.getCell('C6').value = 'TIME';
+
+  worksheet.mergeCells('D6:F6');
+  worksheet.getCell('D6').value = 'M 404 (MOISTURE %) [LIMIT: 18% – 22%]';
+  worksheet.getCell('D7').value = 'A';
+  worksheet.getCell('E7').value = 'B';
+  worksheet.getCell('F7').value = 'C';
+
+  worksheet.mergeCells('G6:G7');
+  worksheet.getCell('G6').value = 'M 405 OUTLET';
+
+  worksheet.mergeCells('H6:I6');
+  worksheet.getCell('H6').value = 'SB TURBIDITY';
+  worksheet.getCell('H7').value = 'TURB 1';
+  worksheet.getCell('I7').value = 'TURB 2';
+
+  // Format Header Rows 6 and 7
+  for (let r = 6; r <= 7; r++) {
+    worksheet.getRow(r).height = 22;
+    for (let c = 1; c <= 9; c++) {
+      const cell = worksheet.getRow(r).getCell(c);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: r === 6 ? 'FF0F172A' : 'FF1E293B' } };
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = thinBorder;
+    }
+  }
+
+  // Populate data rows
+  const rawData = data.data || data;
+  const readings = Array.isArray(rawData.readings)
+    ? rawData.readings
+    : Array.isArray(data.readings)
+    ? data.readings
+    : [];
+
+  let curRowNum = 8;
+  const parseVal = (v) => {
+    if (v === '' || v === null || v === undefined) return '';
+    const num = Number(v);
+    return isNaN(num) ? String(v) : num;
+  };
+
+  readings.forEach((reading, index) => {
+    const row = worksheet.getRow(curRowNum);
+    row.height = 20;
+
+    row.getCell(1).value = index + 1;
+    row.getCell(2).value = reading.shift || `Row #${index + 1}`;
+    row.getCell(3).value = reading.time || '—';
+    row.getCell(4).value = parseVal(reading.m404_a);
+    row.getCell(5).value = parseVal(reading.m404_b);
+    row.getCell(6).value = parseVal(reading.m404_c);
+    row.getCell(7).value = parseVal(reading.m405_outlet);
+    row.getCell(8).value = parseVal(reading.sb_turb1);
+    row.getCell(9).value = parseVal(reading.sb_turb2);
+
+    const isEven = index % 2 === 1;
+    for (let c = 1; c <= 9; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      if (isEven) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      }
+
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (c === 2) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else if (c === 3) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0284C7' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (c >= 4 && c <= 6) {
+        // M 404 A, B, C
+        const isOutOfLimit = typeof cell.value === 'number' && (cell.value < 18 || cell.value > 22);
+        cell.font = {
+          name: 'Calibri',
+          size: 10.5,
+          bold: true,
+          color: { argb: isOutOfLimit ? 'FFE11D48' : 'FF0284C7' },
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      } else {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF334155' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+    curRowNum++;
+  });
+
+  // Calculate Averages
+  const m404Vals = [];
+  const sbTurbVals = [];
+  readings.forEach((r) => {
+    ['m404_a', 'm404_b', 'm404_c'].forEach((k) => {
+      const val = parseFloat(r[k]);
+      if (!isNaN(val)) m404Vals.push(val);
+    });
+    ['sb_turb1', 'sb_turb2'].forEach((k) => {
+      const val = parseFloat(r[k]);
+      if (!isNaN(val)) sbTurbVals.push(val);
+    });
+  });
+
+  const m404Avg = m404Vals.length > 0 ? (m404Vals.reduce((a, b) => a + b, 0) / m404Vals.length).toFixed(2) : '—';
+  const sbTurbAvg = sbTurbVals.length > 0 ? (sbTurbVals.reduce((a, b) => a + b, 0) / sbTurbVals.length).toFixed(1) : '—';
+
+  // Summary Row
+  worksheet.mergeCells(`A${curRowNum}:C${curRowNum}`);
+  const summaryLabel = worksheet.getCell(`A${curRowNum}`);
+  summaryLabel.value = `AVERAGE CALCULATIONS (${readings.length} ROWS)`;
+  summaryLabel.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  summaryLabel.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.mergeCells(`D${curRowNum}:F${curRowNum}`);
+  const m404AvgCell = worksheet.getCell(`D${curRowNum}`);
+  m404AvgCell.value = `M 404 Avg: ${m404Avg}${m404Avg !== '—' ? '%' : ''}`;
+  m404AvgCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF0284C7' } };
+  m404AvgCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.getCell(`G${curRowNum}`).value = '—';
+  worksheet.getCell(`G${curRowNum}`).alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.mergeCells(`H${curRowNum}:I${curRowNum}`);
+  const sbAvgCell = worksheet.getCell(`H${curRowNum}`);
+  sbAvgCell.value = `SB Avg: ${sbTurbAvg}`;
+  sbAvgCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF0D9488' } };
+  sbAvgCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  worksheet.getRow(curRowNum).height = 22;
+  for (let c = 1; c <= 9; c++) {
+    const cell = worksheet.getRow(curRowNum).getCell(c);
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    cell.border = thinBorder;
+  }
+  curRowNum++;
+
+  // Footer note
+  worksheet.mergeCells(`A${curRowNum}:I${curRowNum}`);
+  const footerCell = worksheet.getCell(`A${curRowNum}`);
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant Bicarbonate Moisture Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(curRowNum).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -3441,8 +3693,10 @@ module.exports = {
   generateSATK419AnalysisExcel,
   generateSAT401AnalysisExcel,
   generateSABicarbonateAnalysisExcel,
+  generateSABicarbonateMoistureExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,
   generateGasConcExcel,
 };
+

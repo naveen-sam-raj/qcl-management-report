@@ -118,6 +118,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/t401') ||
     url.includes('/bicarbonate-analysis') ||
     url.includes('/bi-carbonate-analysis') ||
+    url.includes('/bicarbonate-moisture') ||
+    url.includes('/bi-carbonate-moisture') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {
