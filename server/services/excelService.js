@@ -2019,12 +2019,221 @@ const generateBrineAnalysisExcel = async (data) => {
   };
 };
 
+/**
+ * Generates an authentic .xlsx Excel workbook for SA Plant -> TK 401 Analysis.
+ *
+ * @param {Object} data - Analysis data containing date, plant, shifts/rows, submittedBy
+ * @returns {Promise<{ filename: string, buffer: Buffer, base64: string }>}
+ */
+const generateSATK401AnalysisExcel = async (data) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Southern Petrochemical Industries Corporation (SPIC / TFL) - SA Plant';
+  workbook.lastModifiedBy = data.submittedBy || 'Plant Admin';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_TK_401_Analysis_${formattedDate}.xlsx`;
+
+  const worksheet = workbook.addWorksheet('TK 401 Analysis', {
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true },
+    views: [{ showGridLines: true }],
+  });
+
+  worksheet.columns = [
+    { key: 'shift', width: 28 }, // SHIFT / SCHEDULE
+    { key: 'fnh3', width: 22 },  // FNH3 (Kgm/m3)
+    { key: 'cnh3', width: 22 },  // CNH3 (Kgm/m3)
+    { key: 'tcl',  width: 22 },  // TCL (Kgm/m3)
+    { key: 'pcl',  width: 22 },  // PCL (Kgm/m3)
+    { key: 'tcao', width: 20 },  // TCAO
+  ];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  const formatCellValue = (val) => {
+    if (
+      val === null ||
+      val === undefined ||
+      String(val).trim() === '' ||
+      String(val).trim() === '—' ||
+      String(val).trim() === '-' ||
+      String(val).trim() === 'null' ||
+      String(val).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? val : n;
+  };
+
+  // 1. Title Row
+  worksheet.mergeCells('A1:F1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'TK 401 ANALYSIS REPORT';
+  titleCell.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 30;
+
+  // 2. Subtitle Row
+  worksheet.mergeCells('A2:F2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = 'Southern Petrochemical Industries Corporation (SPIC / TFL) - SA Plant';
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 22;
+
+  // 3. Metadata
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+
+  const addMeta = (rowNum, l1, v1, l2, v2) => {
+    worksheet.getCell(`A${rowNum}`).value = l1;
+    worksheet.getCell(`A${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`A${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`B${rowNum}`).value = v1;
+    worksheet.getCell(`B${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+    worksheet.mergeCells(`C${rowNum}:D${rowNum}`);
+    worksheet.getCell(`C${rowNum}`).value = l2;
+    worksheet.getCell(`C${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`C${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.mergeCells(`E${rowNum}:F${rowNum}`);
+    const mergedCell = worksheet.getCell(`E${rowNum}`);
+    mergedCell.value = v2;
+    mergedCell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+
+    ['A', 'B', 'C', 'D', 'E', 'F'].forEach((col) => {
+      worksheet.getCell(`${col}${rowNum}`).border = metaBorder;
+    });
+    worksheet.getRow(rowNum).height = 20;
+  };
+
+  addMeta(4, 'Plant:', data.plant || 'SA Plant', 'Saved At:', savedDateTimeDisplay);
+  addMeta(5, 'Analysis:', 'TK 401 Analysis', 'Date / Shift:', `${data.date || formattedDate} (${data.shift || 'All Shifts'})`);
+
+  // 4. Headers
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = [
+    'SHIFT / SCHEDULE',
+    'FNH₃ (Kgm/m³)\n(3.87–4.07)',
+    'CNH₃ (Kgm/m³)\n(1.82–2.02)',
+    'TCl (Kgm/m³)\n(5.37–5.57)',
+    'PCl (Kgm/m³)\n(3.45–3.65)',
+    'TCaO\n(No Limit)',
+  ];
+  headerRow.height = 30;
+  ['A', 'B', 'C', 'D', 'E', 'F'].forEach((c, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: idx === 0 ? 'left' : 'center', vertical: 'middle', wrapText: true, indent: idx === 0 ? 1 : 0 };
+    cell.border = thinBorder;
+  });
+
+  // 5. Data rows
+  const rawData = data.shifts || data.rows || (data.data && (data.data.shifts || data.data.rows)) || data || {};
+  const shiftList = [
+    { key: 's1', altKey: 'shift1', label: 'I SHIFT (07:00 – 15:00)',   bg: 'FFE0F2FE', fontColor: 'FF0369A1' },
+    { key: 's2', altKey: 'shift2', label: 'II SHIFT (15:00 – 23:00)',  bg: 'FFE0E7FF', fontColor: 'FF3730A3' },
+    { key: 's3', altKey: 'shift3', label: 'III SHIFT (23:00 – 07:00)', bg: 'FFF3E8FF', fontColor: 'FF6B21A8' },
+  ];
+
+  shiftList.forEach((s, idx) => {
+    const rowNum = 8 + idx;
+    const row = worksheet.getRow(rowNum);
+    const sData = rawData[s.key] || rawData[s.altKey] || {};
+    row.values = [
+      s.label,
+      formatCellValue(sData.fnh3),
+      formatCellValue(sData.cnh3),
+      formatCellValue(sData.tcl),
+      formatCellValue(sData.pcl),
+      formatCellValue(sData.tcao),
+    ];
+    row.height = 24;
+
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: s.bg } };
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: s.fontColor } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+  });
+
+  // 6. Tolerance Limits Reference Row
+  const refRow = worksheet.getRow(11);
+  refRow.values = [
+    'STANDARD SPECIFICATION',
+    '3.87 – 4.07 Kgm/m³',
+    '1.82 – 2.02 Kgm/m³',
+    '5.37 – 5.57 Kgm/m³',
+    '3.45 – 3.65 Kgm/m³',
+    '—',
+  ];
+  refRow.height = 22;
+  for (let c = 1; c <= 6; c++) {
+    const cell = refRow.getCell(c);
+    cell.border = thinBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    if (c === 1) {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, italic: true, color: { argb: 'FF334155' } };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    } else {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF2563EB' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  }
+
+  // Footer note
+  worksheet.mergeCells('A13:F13');
+  const footerCell = worksheet.getCell('A13');
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant TK 401 Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(13).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
   generatePureSaltSieveAnalysisExcel,
   generateRawSaltAnalysisExcel,
   generateBrineAnalysisExcel,
+  generateSATK401AnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,
