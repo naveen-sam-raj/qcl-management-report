@@ -4135,6 +4135,263 @@ const generateSAE501T501AnalysisExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant LSA Shift Analysis
+ * 4 Rows: I SHIFT, II SHIFT, III SHIFT, COMPOSITE
+ * 8 Parameters: Na2CO3 (%), NaCl (%), Fe (%), Na2SO4 (%), VM (%), IR (%), BD (g/L), Turbidity (NTU)
+ */
+const generateSALSAAnalysisExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_LSA_Shift_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('LSA Shift Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+  worksheet.pageSetup = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+  };
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  worksheet.columns = [
+    { key: 'shift', width: 22 },
+    { key: 'na2co3', width: 15 },
+    { key: 'nacl', width: 14 },
+    { key: 'fe', width: 14 },
+    { key: 'na2so4', width: 15 },
+    { key: 'vm', width: 14 },
+    { key: 'ir', width: 14 },
+    { key: 'bd', width: 15 },
+    { key: 'turbidity', width: 16 },
+  ];
+
+  // 1. Company Header
+  worksheet.mergeCells('A1:I1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'SOUTHERN PETROCHEMICAL INDUSTRIES CORPORATION LTD.';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+  worksheet.getRow(1).height = 28;
+
+  // 2. Subheader
+  worksheet.mergeCells('A2:I2');
+  const subTitle = worksheet.getCell('A2');
+  subTitle.value = 'TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED (TFL) — SODA ASH PLANT';
+  subTitle.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FFE2E8F0' } };
+  subTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+  subTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+  worksheet.getRow(2).height = 22;
+
+  // 3. Document Name
+  worksheet.mergeCells('A3:I3');
+  const docTitle = worksheet.getCell('A3');
+  docTitle.value = 'LSA SHIFT ANALYSIS REPORT (I, II, III SHIFT & 24-HR COMPOSITE)';
+  docTitle.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  docTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+  docTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+  worksheet.getRow(3).height = 24;
+
+  // 4. Meta Information
+  const metaLabels = [
+    ['PLANT:', 'SA Plant', 'UNIT / SECTION:', 'LSA (Light Soda Ash)', 'DATE:', data.date || '—'],
+    ['RECORD ID:', data.id || data._id || '—', 'SUBMITTED BY:', data.submittedBy || 'Shift Chemist', 'SAVED AT:', data.submittedAt ? new Date(data.submittedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—'],
+  ];
+
+  let curRowNum = 4;
+  metaLabels.forEach((mRow) => {
+    const row = worksheet.getRow(curRowNum);
+    row.height = 20;
+
+    row.getCell(1).value = mRow[0];
+    row.getCell(1).font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF475569' } };
+    row.getCell(2).value = mRow[1];
+    row.getCell(2).font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+
+    row.getCell(3).value = mRow[2];
+    row.getCell(3).font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF475569' } };
+    row.getCell(4).value = mRow[3];
+    row.getCell(4).font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+
+    row.getCell(5).value = mRow[4];
+    row.getCell(5).font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF475569' } };
+    worksheet.mergeCells(`F${curRowNum}:I${curRowNum}`);
+    const metaValCell = worksheet.getCell(`F${curRowNum}`);
+    metaValCell.value = mRow[5];
+    metaValCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+
+    for (let c = 1; c <= 9; c++) {
+      const cell = row.getCell(c);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      cell.border = thinBorder;
+    }
+    curRowNum++;
+  });
+
+  // Empty separator
+  worksheet.getRow(curRowNum).height = 10;
+  curRowNum++;
+
+  // 5. Table Headers
+  const hRow1 = worksheet.getRow(curRowNum);
+  hRow1.height = 24;
+
+  const headerCols = [
+    { text: 'SHIFT / SAMPLE', col: 1 },
+    { text: 'Na₂CO₃ (%)', col: 2 },
+    { text: 'NaCl (%)', col: 3 },
+    { text: 'Fe (%)', col: 4 },
+    { text: 'Na₂SO₄ (%)', col: 5 },
+    { text: 'VM (%)', col: 6 },
+    { text: 'IR (%)', col: 7 },
+    { text: 'BD (g/L)', col: 8 },
+    { text: 'TURBIDITY (NTU)', col: 9 },
+  ];
+
+  headerCols.forEach((hc) => {
+    const cell = hRow1.getCell(hc.col);
+    cell.value = hc.text;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    cell.border = thinBorder;
+  });
+  curRowNum++;
+
+  // Tolerance Sub-Header Row
+  const hRow2 = worksheet.getRow(curRowNum);
+  hRow2.height = 20;
+  const toleranceCols = [
+    { text: 'Tolerance Range', col: 1 },
+    { text: '98.5–99.5%', col: 2 },
+    { text: '0.5–1.0%', col: 3 },
+    { text: '0.006–0.008%', col: 4 },
+    { text: '0.079–0.081%', col: 5 },
+    { text: '0.5–2.1%', col: 6 },
+    { text: '0.14–0.16%', col: 7 },
+    { text: '500–750 g/L', col: 8 },
+    { text: '75–85 NTU', col: 9 },
+  ];
+
+  toleranceCols.forEach((tc) => {
+    const cell = hRow2.getCell(tc.col);
+    cell.value = tc.text;
+    cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF94A3B8' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    cell.border = thinBorder;
+  });
+  curRowNum++;
+
+  // 6. Data Rows
+  const rawData = data.shifts || data.data?.shifts || data.rows || data;
+  const shiftsMap = [
+    { key: 'iShift', label: 'I SHIFT (06:00–14:00)', isComp: false },
+    { key: 'iiShift', label: 'II SHIFT (14:00–22:00)', isComp: false },
+    { key: 'iiiShift', label: 'III SHIFT (22:00–06:00)', isComp: false },
+    { key: 'composite', label: 'COMPOSITE (24-Hour)', isComp: true },
+  ];
+
+  const parseVal = (v) => {
+    if (v === '' || v === null || v === undefined) return '—';
+    const num = Number(v);
+    return isNaN(num) ? String(v) : num;
+  };
+
+  shiftsMap.forEach((sMeta, idx) => {
+    const sData = rawData[sMeta.key] || {};
+    const row = worksheet.getRow(curRowNum);
+    row.height = 22;
+
+    row.getCell(1).value = sMeta.label;
+    row.getCell(2).value = parseVal(sData.na2co3);
+    row.getCell(3).value = parseVal(sData.nacl);
+    row.getCell(4).value = parseVal(sData.fe);
+    row.getCell(5).value = parseVal(sData.na2so4);
+    row.getCell(6).value = parseVal(sData.vm);
+    row.getCell(7).value = parseVal(sData.ir);
+    row.getCell(8).value = parseVal(sData.bd);
+    row.getCell(9).value = parseVal(sData.turbidity);
+
+    const isComp = sMeta.isComp;
+    const rowBg = isComp ? 'FFFEF3C7' : idx % 2 === 1 ? 'FFF8FAFC' : 'FFFFFFFF';
+
+    for (let c = 1; c <= 9; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
+
+      if (c === 1) {
+        cell.font = {
+          name: 'Calibri',
+          size: 10,
+          bold: true,
+          color: { argb: isComp ? 'FF78350F' : 'FF0F172A' },
+        };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else {
+        const val = cell.value;
+        let isOut = false;
+        if (typeof val === 'number') {
+          if (c === 2 && (val < 98.5 || val > 99.5)) isOut = true;
+          if (c === 3 && (val < 0.5 || val > 1.0)) isOut = true;
+          if (c === 4 && (val < 0.006 || val > 0.008)) isOut = true;
+          if (c === 5 && (val < 0.079 || val > 0.081)) isOut = true;
+          if (c === 6 && (val < 0.5 || val > 2.1)) isOut = true;
+          if (c === 7 && (val < 0.14 || val > 0.16)) isOut = true;
+          if (c === 8 && (val < 500 || val > 750)) isOut = true;
+          if (c === 9 && (val < 75 || val > 85)) isOut = true;
+        }
+
+        cell.font = {
+          name: 'Calibri',
+          size: 10,
+          bold: isComp || isOut,
+          color: { argb: isOut ? 'FFE11D48' : isComp ? 'FF78350F' : 'FF0F172A' },
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        if (typeof val === 'number') {
+          if (c === 2 || c === 3 || c === 6) cell.numFmt = '0.00';
+          else if (c === 4) cell.numFmt = '0.0000';
+          else if (c === 5 || c === 7) cell.numFmt = '0.000';
+          else cell.numFmt = '0';
+        }
+      }
+    }
+    curRowNum++;
+  });
+
+  // Footer note
+  worksheet.mergeCells(`A${curRowNum}:I${curRowNum}`);
+  const footerCell = worksheet.getCell(`A${curRowNum}`);
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant LSA Shift Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(curRowNum).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -4151,6 +4408,7 @@ module.exports = {
   generateSABicarbonateMoistureExcel,
   generateSALSA500AnalysisExcel,
   generateSAE501T501AnalysisExcel,
+  generateSALSAAnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,

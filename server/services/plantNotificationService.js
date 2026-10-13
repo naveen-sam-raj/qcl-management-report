@@ -486,6 +486,11 @@ const sendPlantAnalysisEmail = async ({
     (String(analysisType || '').toLowerCase().includes('e501') || String(analysisType || '').toLowerCase().includes('e 501')) ||
     (String(analysisType || '').toLowerCase().includes('t501') || String(analysisType || '').toLowerCase().includes('t 501'));
 
+  const isSALSAShiftAnalysis =
+    analysisType === 'LSA Shift Analysis' ||
+    analysisType === 'LSA Shift' ||
+    (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('shift') && !String(analysisType || '').toLowerCase().includes('bagging'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -1035,6 +1040,31 @@ TK 110 (Feed Tank):
         `#${i + 1} | Shift: ${r.shift || '—'} | E 501 (FNH3: ${formatVal(r.e501_fnh3)} g/L, Na2CO3: ${formatVal(r.e501_na2co3)} g/L) | T 501 (FNH3: ${formatVal(r.t501_fnh3)} g/L, Na2CO3: ${formatVal(r.t501_na2co3)} g/L)`
       ).join('\n') +
       `\nCalculated Averages:\nE 501 -> FNH3: ${eFnh3Avg} g/L, Na2CO3: ${eNa2co3Avg} g/L | T 501 -> FNH3: ${tFnh3Avg} g/L, Na2CO3: ${tNa2co3Avg} g/L\n\n`;
+  } else if (isSALSAShiftAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.data?.shifts || rawData.rows || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const sList = [
+      { key: 'iShift', label: 'I SHIFT (06:00–14:00)' },
+      { key: 'iiShift', label: 'II SHIFT (14:00–22:00)' },
+      { key: 'iiiShift', label: 'III SHIFT (22:00–06:00)' },
+      { key: 'composite', label: 'COMPOSITE (24-Hour Composite)' },
+    ];
+
+    sieveTextSummary = `SA Plant LSA Shift Analysis Readings (8 Parameters):\n` +
+      sList.map((s) => {
+        const r = shiftsObj[s.key] || {};
+        return `${s.label}:
+- Na2CO3: ${formatVal(r.na2co3)}% (Spec: 98.5–99.5%)
+- NaCl: ${formatVal(r.nacl)}% (Spec: 0.5–1.0%)
+- Fe: ${formatVal(r.fe)}% (Spec: 0.006–0.008%)
+- Na2SO4: ${formatVal(r.na2so4)}% (Spec: 0.079–0.081%)
+- VM: ${formatVal(r.vm)}% (Spec: 0.5–2.1%)
+- IR: ${formatVal(r.ir)}% (Spec: 0.14–0.16%)
+- BD: ${formatVal(r.bd)} g/L (Spec: 500–750 g/L)
+- Turbidity: ${formatVal(r.turbidity)} NTU (Spec: 75–85 NTU)`;
+      }).join('\n\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2488,6 +2518,71 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Tanks: <strong>E 501 &amp; T 501</strong> | Frequency: <strong>Once in a Shift</strong>
         </div>
       </div>`;
+  } else if (isSALSAShiftAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.data?.shifts || rawData.rows || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const sList = [
+      { key: 'iShift', label: 'I SHIFT', desc: '06:00–14:00', isComp: false },
+      { key: 'iiShift', label: 'II SHIFT', desc: '14:00–22:00', isComp: false },
+      { key: 'iiiShift', label: 'III SHIFT', desc: '22:00–06:00', isComp: false },
+      { key: 'composite', label: 'COMPOSITE', desc: '24-Hour Composite', isComp: true },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant — <strong>LSA Shift Analysis Readings</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Shift</th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂CO₃ %<br/><span style="font-size: 9.5px; opacity: 0.85;">[98.5–99.5]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">NaCl %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.5–1.0]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Fe %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.006–0.008]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂SO₄ %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.079–0.081]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">VM %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.5–2.1]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">IR %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.14–0.16]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">BD (g/L)<br/><span style="font-size: 9.5px; opacity: 0.85;">[500–750]</span></th>
+              <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Turbidity<br/><span style="font-size: 9.5px; opacity: 0.85;">[75–85 NTU]</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sList.map((s) => {
+              const r = shiftsObj[s.key] || {};
+              const isComp = s.isComp;
+              const rowBg = isComp ? 'background-color: #fef3c7;' : 'background-color: #ffffff;';
+
+              const checkOut = (val, min, max) => {
+                const n = parseFloat(val);
+                return !isNaN(n) && (n < min || n > max);
+              };
+
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: ${isComp ? '#78350f' : '#0f172a'}; font-family: monospace;">
+                    ${s.label} <span style="font-size: 9.5px; font-weight: normal; color: #64748b;">(${s.desc})</span>
+                  </td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.na2co3, 98.5, 99.5) ? '#e11d48' : '#0f172a'};">${formatVal(r.na2co3)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.nacl, 0.5, 1.0) ? '#e11d48' : '#0f172a'};">${formatVal(r.nacl)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.fe, 0.006, 0.008) ? '#e11d48' : '#0f172a'};">${formatVal(r.fe)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.na2so4, 0.079, 0.081) ? '#e11d48' : '#0f172a'};">${formatVal(r.na2so4)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.vm, 0.5, 2.1) ? '#e11d48' : '#0f172a'};">${formatVal(r.vm)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.ir, 0.14, 0.16) ? '#e11d48' : '#0f172a'};">${formatVal(r.ir)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.bd, 500, 750) ? '#e11d48' : '#0f172a'};">${formatVal(r.bd)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.turbidity, 75, 85) ? '#e11d48' : '#0f172a'};">${formatVal(r.turbidity)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Section: <strong>LSA</strong> | Frequency: <strong>Once in a Shift</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -3098,6 +3193,22 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSAE501T501AnalysisExcel } = require('./excelService');
       excelResult = await generateSAE501T501AnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'LSA Shift Analysis' ||
+      analysisType === 'LSA Shift' ||
+      (cleanType.toLowerCase().includes('lsa') && cleanType.toLowerCase().includes('shift') && !cleanType.toLowerCase().includes('bagging'))
+    ) {
+      const { generateSALSAAnalysisExcel } = require('./excelService');
+      excelResult = await generateSALSAAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Flame,
   Layers,
+  RefreshCw,
 } from 'lucide-react';
 import {
   getCellLimit,
@@ -76,12 +77,13 @@ const buildEmptyData = () => ({
   composite: { na2co3: '', nacl: '', fe: '', na2so4: '', vm: '', ir: '', bd: '', turbidity: '' },
 });
 
-// Sample data matching user's reference screenshot
-const SCREENSHOT_DATA = {
-  iShift:    { na2co3: '99.1', nacl: '0.71', fe: '0.0030', na2so4: '0.000', vm: '0.14', ir: '',      bd: '635', turbidity: '63' },
-  iiShift:   { na2co3: '99.1', nacl: '0.71', fe: '0.0029', na2so4: '0.000', vm: '0.16', ir: '',      bd: '641', turbidity: '66' },
-  iiiShift:  { na2co3: '99.0', nacl: '0.81', fe: '0.0032', na2so4: '0.000', vm: '0.12', ir: '',      bd: '628', turbidity: '66' },
-  composite: { na2co3: '99.1', nacl: '0.74', fe: '0.0030', na2so4: '0.064', vm: '0.14', ir: '0.100', bd: '635', turbidity: '65' },
+const getTodayAsiaKolkata = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 };
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -105,54 +107,79 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States ──
-  const [date, setDate] = useState(() => {
-    // Default to today's date formatted as YYYY-MM-DD
-    return new Date().toISOString().split('T')[0];
-  });
-  const [data, setData] = useState(buildEmptyData());
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
+  // ── States (Strict Current-Date Restriction) ──
+  const [date]                                          = useState(() => getTodayAsiaKolkata());
+  const [data, setData]                                 = useState(buildEmptyData());
+  const [originalData, setOriginalData]                 = useState(null);
+  const [errors, setErrors]                             = useState({});
+  const [saving, setSaving]                             = useState(false);
+  const [lastSaved, setLastSaved]                       = useState(null);
 
-  // Fetch existing data when date changes
+  // Email & Persistence states
+  const [savePhase, setSavePhase]                       = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                         = useState(null);
+  const [recipientEmail, setRecipientEmail]             = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]       = useState('');
+  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
+  const [editedFields, setEditedFields]                 = useState({});
+  const [retryingEmail, setRetryingEmail]               = useState(false);
+
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal]         = useState(false);
+  const [confirmData, setConfirmData]                   = useState(null);
+
+  // Fetch existing data when date mounts / loads
   useEffect(() => {
-    if (!date) return;
+    let active = true;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/lsa-analysis?date=${date}`);
-        if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             // Leave default
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else if (record.data && record.data.rows) {
-            setData(record.data.rows);
+        const response = await api.get(`/api/lsa-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data && response.data.success) {
+          const rec = response.data.record || (Array.isArray(response.data.data) ? response.data.data[0] : response.data.data);
+          if (rec) {
+            setRecordId(rec._id || response.data.recordId || null);
+            setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || '');
+
+            if (rec.emailStatus === 'sent') {
+              setSavePhase('completed');
+              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
+            } else if (rec.emailStatus === 'failed') {
+              setSavePhase('email_failed');
+              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
+            }
+
+            const shifts = rec.shifts || rec.data?.shifts;
+            if (shifts && typeof shifts === 'object') {
+              setData(shifts);
+              setOriginalData(JSON.parse(JSON.stringify(shifts)));
+            } else {
+              setData(buildEmptyData());
+              setOriginalData(null);
+            }
+
+            setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
-            // Leave default
+            setData(buildEmptyData());
+            setOriginalData(null);
+            setEditedFields({});
           }
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing LSA Shift data:', err);
       }
     };
     fetchExistingData();
-  }, [date]);
 
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError] = useState(false);
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   // ── Input Changes ──
   const handleChange = useCallback((shiftKey, paramKey, value) => {
@@ -173,37 +200,36 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
       return next;
     });
 
-    setSaveSuccess(false);
-  }, []);
+    if (savePhase !== 'idle') {
+      setSavePhase('idle');
+    }
+  }, [savePhase]);
 
   // ── Reset ──
   const handleReset = () => {
-    setData(buildEmptyData());
-    setDate('');
+    if (originalData) {
+      setData(JSON.parse(JSON.stringify(originalData)));
+    } else {
+      setData(buildEmptyData());
+    }
     setErrors({});
-    setDateError(false);
-    setSaveSuccess(false);
-    showToast('LSA Shift analysis form cleared successfully.', 'info');
+    setSavePhase('idle');
+    showToast?.('LSA Shift analysis form cleared / reset to last saved state.', 'info');
   };
 
-  // ── Validation & Submission ──
+  // ── Validation ──
   const validate = () => {
+    const newErrors = {};
     let hasError = false;
 
-    if (!date) {
-      setDateError(true);
-      hasError = true;
-    } else {
-      setDateError(false);
-    }
-
-    const newErrors = {};
     SHIFTS.forEach((s) => {
       PARAMETERS.forEach((p) => {
-        const val = data[s.key][p.key];
-        if (val !== '' && isNaN(Number(val))) {
-          newErrors[`${s.key}_${p.key}`] = 'Numbers only';
-          hasError = true;
+        const val = data[s.key]?.[p.key];
+        if (val !== '' && val !== null && val !== undefined) {
+          if (isNaN(Number(val))) {
+            newErrors[`${s.key}_${p.key}`] = 'Numbers only';
+            hasError = true;
+          }
         }
       });
     });
@@ -212,50 +238,135 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
     return !hasError;
   };
 
-  const handleSave = async () => {
+  // ── Open Save Confirmation Modal ──
+  const handleSaveClick = () => {
     if (!validate()) {
-      showToast('Please select analysis date and enter valid numeric values.', 'error');
+      showToast?.('Please enter valid numeric values for highlighted fields.', 'error');
       return;
     }
 
     const hasValues = Object.values(data).some((sObj) =>
-      Object.values(sObj).some((val) => val !== '' && val !== null)
+      Object.values(sObj).some((val) => val !== '' && val !== null && val !== undefined)
     );
 
     if (!hasValues) {
-      showToast('Please enter at least one measurement value.', 'warning');
+      showToast?.('Please enter at least one measurement value before saving.', 'warning');
       return;
     }
 
-    setSaving(true);
+    const activeShifts = SHIFTS.filter((s) =>
+      Object.values(data[s.key] || {}).some((v) => v !== '' && v !== null && v !== undefined)
+    );
 
-    const payload = {
+    setConfirmData({
       date,
-      plant: 'SA',
-      unit: 'LSA',
-      analysisType: 'LSA Shift Analysis',
-      submittedBy: user?.name || 'Plant Operator',
-      shifts: data,
-    };
+      activeShifts,
+      data,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Confirm Save Execution ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSavePhase('saving');
+    setShowConfirmModal(false);
 
     try {
-      const response = await api.post('/api/lsa-analysis', payload);
-      setSaving(false);
-      setSaveSuccess(true);
-      showToast(response.data?.message || 'LSA Shift Analysis data saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 6000);
+      const payload = {
+        date,
+        plant: 'SA',
+        unit: 'LSA',
+        analysisType: 'LSA Shift Analysis',
+        shifts: data,
+        submittedBy: user?.name || 'Shift Chemist',
+      };
+
+      const res = await api.post('/api/lsa-analysis', payload);
+
+      if (!res.data?.success) {
+        showToast?.(res.data?.message || 'Failed to save LSA Shift Analysis.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+      setLastSaved(new Date().toLocaleTimeString());
+
+      const returnedDoc = res.data?.data || res.data?.record || {};
+      const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
+      const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
+
+      setRecordId(newRecordId || recordId);
+      setEditedFields(newEdited);
+      setRecipientEmail(res.data?.emailRecipient || returnedDoc.emailRecipient || 'sa_operator@tfl.com');
+
+      const isEmailSent = res.data?.emailDeliveryStatus === 'sent' || res.data?.emailStatus === 'sent';
+      const isEmailFailed = res.data?.emailDeliveryStatus === 'failed' || res.data?.emailStatus === 'failed';
+
+      if (isEmailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail(`Notification dispatched to ${res.data?.emailRecipient || 'SA Plant operator'}`);
+        showToast?.('LSA Shift Analysis saved and email notification sent!', 'success');
+      } else if (isEmailFailed) {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(res.data?.message || 'Email delivery failed.');
+        showToast?.('Data saved to MongoDB, but email dispatch failed.', 'warning');
+      } else {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved successfully. Email notification is processing in background.');
+        showToast?.('LSA Shift Analysis saved successfully.', 'success');
+      }
     } catch (err) {
-      setSaving(false);
-      console.error('[LSAShiftAnalysis] Save failed:', err);
+      console.error('[LSAShiftAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
+      showToast?.('Save Error: ' + serverMessage, 'error');
+      setSavePhase('idle');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Retry Email Dispatch ──
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast?.('No saved record reference found to retry email.', 'warning');
+      return;
+    }
+    setRetryingEmail(true);
+    try {
+      const res = await api.post(`/api/lsa-analysis/${recordId}/retry-email`);
+      if (res.data?.success && (res.data?.emailSent || res.data?.emailDeliveryStatus === 'sent')) {
+        setSavePhase('completed');
+        setEmailStatusDetail(`Notification email successfully re-sent to ${res.data?.emailRecipient || res.data?.recipient || recipientEmail}`);
+        showToast?.('Notification email re-sent successfully!', 'success');
+      } else {
+        const errorMsg = res.data?.message || 'SMTP delivery rejected.';
+        if (errorMsg.includes('550') || errorMsg.includes('NoSuchUser') || errorMsg.includes('Invalid recipient')) {
+          setIsPermanentMailError(true);
+        }
+        setEmailStatusDetail(`Retry failed: ${errorMsg}`);
+        showToast?.(`Email retry failed: ${errorMsg}`, 'error');
+      }
+    } catch (err) {
+      console.error('[LSAShiftAnalysis] Retry email failed:', err);
+      const msg = err.response?.data?.message || err.message;
+      if (msg.includes('550') || msg.includes('NoSuchUser')) {
+        setIsPermanentMailError(true);
+      }
+      setEmailStatusDetail(`Retry failed: ${msg}`);
+      showToast?.(`Email retry failed: ${msg}`, 'error');
+    } finally {
+      setRetryingEmail(false);
     }
   };
 
   return (
     <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb Header matching TK 203 theme ────────────────────────── */}
+      {/* ── Breadcrumb Header ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
@@ -278,6 +389,8 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                 <ChevronRight className="w-3 h-3" />
                 <Layers className="w-3.5 h-3.5 text-blue-500" />
                 <span className="text-blue-600 font-semibold">LSA</span>
+                <ChevronRight className="w-3 h-3" />
+                <span className="text-slate-600 font-bold">Once in a Shift</span>
               </div>
               <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
                 LSA SHIFT ANALYSIS
@@ -286,106 +399,93 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
           </div>
 
           {/* Right: Actions */}
-          {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <label
-                htmlFor="lsa-shift-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+            {lastSaved && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Saved at {lastSaved}
+              </span>
+            )}
+
+            {!isViewOnly && (
+              <button
+                id="btn-lsa-reset"
+                onClick={handleReset}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
+                title="Clear all fields or revert to last saved state"
               >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="lsa-shift-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    if (typeof setDateError === 'function') setDateError(false);
-                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    typeof dateError !== 'undefined' && dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
-                />
-              </div>
-              {date && (
-                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {typeof dateError !== 'undefined' && dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
-            </div>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              id="btn-lsa-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Clear all fields"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
-
-            <button
-              id="btn-lsa-save"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
-              title="Save LSA Shift data"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
-          </div>
+            {!isViewOnly && (
+              <button
+                id="btn-lsa-save"
+                onClick={handleSaveClick}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+                title="Save LSA Shift data"
+              >
+                {saving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save / Submit</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
-        <div
-          id="lsa-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              LSA Shift Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
+      {/* ── Status Banner (Email / Save Status) ── */}
+      {savePhase === 'completed' && (
+        <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              <strong>Saved — Email Sent</strong>: {emailStatusDetail || `Notification sent to registered SA Plant Operator (${recipientEmail || 'operator'}).`}
             </span>
           </div>
+        </div>
+      )}
+
+      {savePhase === 'email_failed' && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <div>
+              <span><strong>Saved — Email Failed</strong>: Database record persisted. {emailStatusDetail}</span>
+              {recipientEmail && <span className="block text-[11px] text-amber-700 font-normal">Target recipient: {recipientEmail}</span>}
+            </div>
+          </div>
           <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
-            aria-label="Dismiss"
+            onClick={handleRetryEmail}
+            disabled={retryingEmail || isPermanentMailError}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs shrink-0 ${
+              isPermanentMailError
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                : 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer'
+            }`}
+            title={isPermanentMailError ? 'Permanent recipient rejection. Update recipient in User Management.' : 'Retry sending notification email'}
           >
-            ×
+            <RefreshCw className={`w-3.5 h-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
+            <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
           </button>
         </div>
       )}
 
-      {/* ── Analysis Table Card matching TK 203 theme ──────────────────────── */}
+      {/* ── Analysis Table Card ────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
-        {/* Table header with Integrated Date Selector */}
+        {/* Table header with Integrated Date Selector Locked to Today */}
         <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
@@ -395,7 +495,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
               </span>
             </div>
 
-            {/* Date Input inside Table Header */}
+            {/* Date Input inside Table Header - Locked to Today in Asia/Kolkata */}
             <div className="flex items-center gap-2">
               <label
                 htmlFor="lsa-shift-date-input"
@@ -409,28 +509,17 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                   id="lsa-shift-date-input"
                   type="date"
                   value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setDateError(false);
-                    setSaveSuccess(false);
-                  }}
-                  className={`pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 ${
-                    dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 bg-white hover:border-slate-400'
-                  }`}
+                  readOnly
+                  disabled
+                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg text-slate-800 border-slate-300 bg-slate-100 cursor-not-allowed opacity-90 shadow-2xs"
+                  title="Date automatically locked to current date (Asia/Kolkata timezone)"
                   required
                 />
               </div>
-              {date && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {dateError && (
-                <span className="text-[11px] text-red-500 font-medium">Date required</span>
-              )}
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-700 font-bold bg-blue-100/70 px-2 py-0.5 rounded-md border border-blue-200">
+                <Calendar className="w-3 h-3 text-blue-500" />
+                {formatDateDisplay(date)}
+              </span>
             </div>
           </div>
           <span className="text-[11px] font-bold text-slate-400 font-mono hidden sm:inline">
@@ -467,6 +556,8 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
             {/* Data rows with shift styling */}
             <tbody className="divide-y divide-slate-200">
               {SHIFTS.map((shift) => {
+                const shiftEdits = editedFields[shift.key] || {};
+
                 return (
                   <tr
                     key={shift.key}
@@ -484,12 +575,13 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                       </div>
                     </td>
 
-                    {/* Parameter Input Cells matching TK 203 rounded inputs */}
+                    {/* Parameter Input Cells */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${shift.key}_${param.key}`;
-                      const cellVal = data[shift.key][param.key];
+                      const cellVal = data[shift.key]?.[param.key] ?? '';
                       const isInvalid = !!errors[fieldKey];
                       const errorMessage = errors[fieldKey];
+                      const isEdited = !!shiftEdits[param.key];
 
                       const limit = getCellLimit(plantId || 'sa', 'lsa', shift.key, param.key) || SA_LSA_LIMITS[param.key];
                       const validation = validateCellValue(cellVal, limit);
@@ -505,6 +597,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                                 id={`lsa-input-${shift.key}-${param.key}`}
                                 type="text"
                                 inputMode="decimal"
+                                disabled={isViewOnly}
                                 value={cellVal}
                                 onChange={(e) =>
                                   handleChange(shift.key, param.key, e.target.value)
@@ -530,6 +623,16 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                                 }`}
                                 aria-label={`${shift.label} ${param.label}`}
                               />
+
+                              {isEdited && (
+                                <span
+                                  className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                                  title="Field previously edited"
+                                >
+                                  EDITED
+                                </span>
+                              )}
+
                               {isOutOfLimit && (
                                 <span
                                   className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -608,6 +711,78 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
           </p>
         </div>
       </div>
+
+      {/* ── SAVE CONFIRMATION MODAL ── */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-blue-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
+                  <Save className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
+                  <p className="text-xs text-slate-500">SA Plant — LSA Shift Analysis</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs text-slate-600">
+              <p>
+                You are about to persist readings for <strong>{confirmData?.activeShifts?.length || 0}</strong> active shift entries for today:
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Date:</span>
+                  <span className="font-bold text-slate-800">{date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Active Shifts:</span>
+                  <span className="font-bold text-blue-700">
+                    {confirmData?.activeShifts?.map(s => s.label).join(', ') || 'None'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Recipient Operator:</span>
+                  <span className="font-bold text-slate-800">{recipientEmail || 'sa_operator@tfl.com'}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Saving will securely store all parameters to MongoDB and dispatch an official notification email with an Excel report.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
