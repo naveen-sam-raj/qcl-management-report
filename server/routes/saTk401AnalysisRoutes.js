@@ -484,12 +484,18 @@ router.post('/:id/retry-email', async (req, res) => {
       explicitRecord: record,
     });
 
+    const isPermanentFailure =
+      result.emailError &&
+      /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(result.emailError);
+
     return res.status(result.success && result.emailSent ? 200 : 400).json({
       success: result.success,
       emailSent: result.emailSent,
       emailStatus: result.emailStatus,
       emailRecipient: result.recipient || result.data?.emailRecipient || '',
-      error: result.error,
+      emailError: result.emailError || result.error || '',
+      isPermanentFailure: !!isPermanentFailure,
+      error: result.emailError || result.error,
     });
   } catch (error) {
     console.error('[TK 401 Retry Email] Error:', error);

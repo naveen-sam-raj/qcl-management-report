@@ -195,6 +195,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
 
@@ -491,6 +492,10 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
       const emailSent = response.data?.emailSent;
       const emailPending = response.data?.emailPending;
       const statusFromApi = response.data?.emailStatus;
+      const emailErrMsg = emailRes?.error || response.data?.emailError || emailRes?.status || '';
+
+      const is550 = /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(emailErrMsg);
+      setIsPermanentMailError(is550);
 
       if (emailSent || statusFromApi === 'sent') {
         setSavePhase('completed');
@@ -502,8 +507,8 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
         showToast?.('Saved — Email Dispatching 🚀', 'info');
       } else {
         setSavePhase('email_failed');
-        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
-        showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+        setEmailStatusDetail(emailErrMsg || 'Email delivery failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (emailErrMsg || 'Server error'), 'warning');
       }
     } catch (err) {
       setSavePhase('idle');
@@ -525,16 +530,22 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
       const response = await api.post(`/api/sa-tk-401-analysis/${recordId}/retry-email`);
       if (response.data?.emailSent) {
         setSavePhase('completed');
-        setEmailStatusDetail('Email sent successfully on retry.');
+        setIsPermanentMailError(false);
+        setEmailStatusDetail('Email accepted by SMTP server ✓');
         showToast?.('Email resent successfully!', 'success');
       } else {
+        const errMsg = response.data?.emailError || response.data?.error || 'Email delivery failed on retry.';
+        const is550 = response.data?.isPermanentFailure || /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(errMsg);
         setSavePhase('email_failed');
-        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed on retry.');
-        showToast?.('Email retry failed: ' + (response.data?.emailError || 'Rejected by server'), 'error');
+        setIsPermanentMailError(is550);
+        setEmailStatusDetail(errMsg);
+        showToast?.('Email retry failed: ' + errMsg, 'error');
       }
     } catch (err) {
       const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
+      const is550 = err.response?.data?.isPermanentFailure || /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(msg);
       setSavePhase('email_failed');
+      setIsPermanentMailError(is550);
       setEmailStatusDetail(msg);
       showToast?.('Retry Email Error: ' + msg, 'error');
     } finally {
@@ -736,12 +747,19 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
                 </span>
                 <span className="text-slate-500">(Registered SA Plant Operator)</span>
                 {emailStatusDetail && (
-                  <span className="italic text-slate-600">— {emailStatusDetail}</span>
+                  <span className={`italic ${savePhase === 'email_failed' ? 'text-rose-700 font-semibold' : 'text-slate-600'}`}>
+                    — {emailStatusDetail}
+                  </span>
                 )}
               </div>
             )}
+            {isPermanentMailError && (
+              <div className="text-[11px] text-rose-800 bg-rose-100/80 border border-rose-200 rounded p-1.5 font-medium">
+                <strong>Permanent Recipient Error (550 / Access Denied):</strong> The mail server rejected this recipient address. Do not repeatedly retry without updating the active SA Plant user's registered email address in User Management.
+              </div>
+            )}
           </div>
-          {savePhase === 'email_failed' && (
+          {savePhase === 'email_failed' && !isPermanentMailError && (
             <button
               onClick={handleRetryEmail}
               disabled={saving}
