@@ -397,6 +397,11 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'CaCl2 Analysis' ||
     String(analysisType || '').toLowerCase().includes('cacl2');
 
+  const isACLProductAnalysis =
+    analysisType === 'ACL Product Analysis' ||
+    String(analysisType || '').toLowerCase().includes('acl product') ||
+    String(analysisType || '').toLowerCase().includes('acl-product');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -658,6 +663,40 @@ PCL/TCL Analysis Measurements (Unit: Kgm/m³ | Tolerance: 0.05–0.10 +0.2/-0.02
     const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
     sieveTextSummary = `Frequency: Day (Persisted Sampling Rows):
 ` + rawData.map((r, i) => `Row #${i + 1} (${r.sample || 'CaCl2 Solution'} @ ${r.time || '—'}): pH: ${formatVal(r.ph)} (Target: 7.7 ±1), Conc: ${formatVal(r.conc)}% (Target: 20% ±5), FNH3: ${formatVal(r.fnh3)} PPM, CNH3: ${formatVal(r.cnh3)} PPM, SS: ${formatVal(r.ss)} PPM`).join('\n') + '\n\n';
+  } else if (isACLProductAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const chem = rawData.chemicalData || rawData.chemical || {};
+    const bss = rawData.bssData || rawData.bss || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const bssMeshKeys = ['p6', 'p8', 'p12', 'p16', 'p18', 'p44', 'p60', 'p100', 'm100'];
+    const bssLabels = {
+      p6: '+6 %', p8: '+8 %', p12: '+12 %', p16: '+16 %', p18: '+18 %',
+      p44: '+44 %', p60: '+60 %', p100: '+100 %', m100: '-100 %'
+    };
+    let bssSum = 0;
+    let bssCount = 0;
+    bssMeshKeys.forEach(k => {
+      const v = bss[k];
+      if (v !== '' && v !== null && v !== undefined && !isNaN(Number(v))) {
+        bssSum += Number(v);
+        bssCount += 1;
+      }
+    });
+    const totalRecoveryStr = bssCount > 0 ? `${bssSum.toFixed(1)} %` : '—';
+
+    sieveTextSummary = `Chemical & Physical Characteristics (7 Parameters):
+- NH4Cl %: ${formatVal(chem.nh4cl)}
+- NaCl %: ${formatVal(chem.nacl)}
+- Fe2O3 %: ${formatVal(chem.fe2o3)}
+- H2O %: ${formatVal(chem.h2o)}
+- IR %: ${formatVal(chem.ir)}
+- Bulk Density (BD): ${formatVal(chem.bd)}
+- +18 % (Spec): ${formatVal(chem.p18_spec)}
+
+B S S (Sieve Analysis) — 9 Mesh Sizes:
+` + bssMeshKeys.map(k => `- ${bssLabels[k]}: ${formatVal(bss[k])}`).join('\n') + `
+- Total Sieve Recovery: ${totalRecoveryStr}\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1253,6 +1292,98 @@ Attachment: ${excelFileName}
         <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
           Parameters & Tolerances: <strong>pH: 6.7–8.7</strong> | <strong>CONC: 15%–25%</strong> | <strong>FNH₃: 950–1050 PPM</strong> | <strong>CNH₃: 400–600 PPM</strong> | <strong>SS: 50–70 PPM</strong>
         </div>
+      </div>`;
+  } else if (isACLProductAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const chem = rawData.chemicalData || rawData.chemical || {};
+    const bss = rawData.bssData || rawData.bss || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const bssMeshKeys = ['p6', 'p8', 'p12', 'p16', 'p18', 'p44', 'p60', 'p100', 'm100'];
+    const bssLabels = {
+      p6: '+6 % (+6 Mesh)', p8: '+8 % (+8 Mesh)', p12: '+12 % (+12 Mesh)', p16: '+16 % (+16 Mesh)', p18: '+18 % (+18 Mesh)',
+      p44: '+44 % (+44 Mesh)', p60: '+60 % (+60 Mesh)', p100: '+100 % (+100 Mesh)', m100: '-100 % (-100 Mesh)'
+    };
+    let bssSum = 0;
+    let bssCount = 0;
+    bssMeshKeys.forEach(k => {
+      const v = bss[k];
+      if (v !== '' && v !== null && v !== undefined && !isNaN(Number(v))) {
+        bssSum += Number(v);
+        bssCount += 1;
+      }
+    });
+    const totalRecoveryStr = bssCount > 0 ? `${bssSum.toFixed(1)} %` : '—';
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>ACL Product Analysis — <strong>Chemical & Physical Characteristics</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Value</th>
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">NH₄Cl % (Ammonium Chloride)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.nh4cl)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">NaCl % (Sodium Chloride)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.nacl)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">Fe₂O₃ % (Ferric Oxide)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.fe2o3)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">H₂O % (Moisture)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.h2o)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">IR % (Insoluble Residue)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.ir)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">BD (Bulk Density - g/L)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;">${formatVal(chem.bd)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">+18 % (Oversize Particle Spec)</td>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7;" colspan="3">${formatVal(chem.p18_spec)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="field-group" style="margin-top: 14px;">
+        <div class="field-label">
+          <span>B S S (Sieve Analysis) — <strong>Particle Distribution (9 Mesh Sizes)</strong></span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #1e1b4b; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Mesh Fraction</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Retained %</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bssMeshKeys.map((k, idx) => {
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">${bssLabels[k]}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #4338ca;">${formatVal(bss[k])}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f0fdf4; border-top: 2px solid #86efac;">
+              <td style="padding: 7px 8px; border: 1px solid #e2e8f0; font-weight: 800; color: #166534;">TOTAL SIEVE RECOVERY</td>
+              <td style="padding: 7px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 800; color: #166534; font-size: 13px;">${totalRecoveryStr}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
