@@ -17,6 +17,10 @@ import {
   ChevronRight,
   Droplets,
   Factory,
+  Lock,
+  Mail,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -41,6 +45,20 @@ const buildEmptyData = () =>
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
+
+// Strict Current Date helper in Asia/Kolkata timezone
+const getTodayAsiaKolkata = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
+};
 
 const formatDateDisplay = (isoDate) => {
   if (!isoDate) return '—';
@@ -82,56 +100,124 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── State ──
-  const [date, setDate]               = useState('');
-  const [data, setData]               = useState(buildEmptyData());
-  const [errors, setErrors]           = useState({});
-  const [saving, setSaving]           = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError]     = useState(false);
+  // ── States (Date is strictly locked to Today in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [data, setData]                             = useState(buildEmptyData());
+  const [originalData, setOriginalData]             = useState(null);
+  const [errors, setErrors]                         = useState({});
+  const [saving, setSaving]                         = useState(false);
+  const [emailRetrying, setEmailRetrying]           = useState(false);
+  const [saveSuccess, setSaveSuccess]               = useState(false);
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                     = useState(null);
+  const [recipientEmail, setRecipientEmail]         = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lastSaved, setLastSaved]                   = useState(null);
 
-  
+  // Locking and Edit History States
+  const [editCount, setEditCount]                   = useState(0);
+  const [isLocked, setIsLocked]                     = useState(false);
+  const [editedFields, setEditedFields]             = useState({});
+
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal]     = useState(false);
+  const [confirmData, setConfirmData]               = useState(null);
+
+  // Fetch existing data on mount or date change
   useEffect(() => {
-    if (!date) return;
+    let active = true;
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/brine-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail) {
+          setRecipientEmail(response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             setData(buildEmptyData());
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else if (record.data && record.data.rows) {
-            setData(record.data.rows);
-          } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data) {
-            setData(record);
+
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+
+          if (record) {
+            const fetchedRows =
+              record.rows ||
+              record.data?.rows ||
+              (record.data && typeof record.data === 'object' && !Array.isArray(record.data) ? record.data : null);
+
+            if (fetchedRows && typeof fetchedRows === 'object') {
+              const populated = buildEmptyData();
+              ROWS.forEach((r) => {
+                const tankData = fetchedRows[r.key] || {};
+                PARAMETERS.forEach((p) => {
+                  const val = tankData[p.key];
+                  populated[r.key][p.key] = val !== undefined && val !== null ? String(val) : '';
+                });
+              });
+              setData(populated);
+              setOriginalData(JSON.parse(JSON.stringify(populated)));
+            } else {
+              setData(buildEmptyData());
+              setOriginalData(null);
+            }
+
+            const recEditCount = record.editCount ?? record.data?.editCount ?? (record.isSaved ? 1 : 0);
+            const recIsLocked = record.isLocked ?? record.data?.isLocked ?? (recEditCount >= 2);
+            setEditCount(recEditCount);
+            setIsLocked(recIsLocked);
+            setEditedFields(record.editedFields || record.data?.editedFields || {});
           } else {
             setData(buildEmptyData());
+            setOriginalData(null);
+            setEditCount(0);
+            setIsLocked(false);
+            setEditedFields({});
           }
+        } else {
+          setData(buildEmptyData());
+          setOriginalData(null);
+          setEditCount(0);
+          setIsLocked(false);
+          setEditedFields({});
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing Brine data', err);
+        setData(buildEmptyData());
+        setOriginalData(null);
+        setEditCount(0);
+        setIsLocked(false);
+        setEditedFields({});
       }
     };
+
     fetchExistingData();
+    return () => {
+      active = false;
+    };
   }, [date]);
 
+  // Can user edit this date's analysis?
+  const canEdit = !isViewOnly && !isLocked && editCount < 2;
 
-  // ── Real-time input change ──
+  // ── Input change ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
+    if (!canEdit) return;
     if (!isValidDecimal(value)) return;
 
     setData((prev) => ({
@@ -139,7 +225,6 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
     }));
 
-    // Clear cell error if any
     setErrors((prev) => {
       const next = { ...prev };
       delete next[`${rowKey}_${paramKey}`];
@@ -147,96 +232,182 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
     });
 
     setSaveSuccess(false);
-  }, []);
+  }, [canEdit]);
 
-  const handleReset = () => {
-    setData(buildEmptyData());
-    setDate('');
+  // ── Reset Handler ──
+  const handleReset = useCallback(() => {
+    if (!canEdit) return;
+    if (originalData) {
+      setData(JSON.parse(JSON.stringify(originalData)));
+    } else {
+      setData(buildEmptyData());
+    }
     setErrors({});
     setSaveSuccess(false);
-    setDateError(false);
-    showToast('Brine analysis form cleared successfully.', 'info');
-  };
+    showToast?.('Brine analysis form reset.', 'info');
+  }, [canEdit, originalData, showToast]);
 
-  // Full dataset validation before submission
-  const validate = () => {
-    let hasError = false;
-
-    if (!date) {
-      setDateError(true);
-      hasError = true;
-    } else {
-      setDateError(false);
-    }
-
-    // Verify all entered fields are numeric
+  // ── Validation ──
+  const validate = useCallback(() => {
+    let isValid = true;
     const newErrors = {};
+
     ROWS.forEach((r) => {
       PARAMETERS.forEach((p) => {
         const val = data[r.key][p.key];
         if (val !== '' && isNaN(Number(val))) {
           newErrors[`${r.key}_${p.key}`] = 'Enter numbers only';
-          hasError = true;
+          isValid = false;
         }
       });
     });
 
     setErrors(newErrors);
-    return !hasError;
-  };
+    return isValid;
+  }, [data]);
 
-  const handleSave = async () => {
-    if (!validate()) {
-      showToast('Please specify analysis date and valid numbers before saving.', 'error');
+  // ── Save Trigger: Open Confirmation Modal ──
+  const handleSaveClick = () => {
+    if (!canEdit) {
+      showToast?.('This analysis is locked and cannot be edited.', 'warning');
       return;
     }
 
-    setSaving(true);
+    if (!validate()) {
+      showToast?.('Please correct highlighted errors before saving.', 'error');
+      return;
+    }
 
-    const payload = {
+    const hasData = ROWS.some((r) =>
+      PARAMETERS.some((p) => data[r.key][p.key] !== '')
+    );
+    if (!hasData) {
+      showToast?.('Please enter at least one measurement value for TK 109 or TK 110.', 'warning');
+      return;
+    }
+
+    const isFinalEdit = editCount === 1;
+
+    setConfirmData({
       date,
-      plant: 'ACL',
-      analysisType: 'Brine Analysis',
-      frequency: 'WEEK',
-      unit: 'g/L',
-      submittedBy: user?.name || 'Plant Operator',
-      submittedAt: new Date().toISOString(),
-      rows: Object.fromEntries(
-        ROWS.map((r) => [
-          r.key,
-          Object.fromEntries(
-            PARAMETERS.map((p) => {
-              const val = data[r.key][p.key];
-              return [p.key, val !== '' ? parseFloat(val) : null];
-            })
-          ),
-        ])
-      ),
-    };
+      data,
+      isFinalEdit,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Confirm Save Handler ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSavePhase('saving');
+    setSaveSuccess(false);
+    setShowConfirmModal(false);
 
     try {
-      const response = await api.post('/api/brine-analysis', payload);
-      setSaving(false);
-      setSaveSuccess(true);
-      showToast(response.data?.message || 'Brine Analysis saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 6000);
+      const payload = {
+        date,
+        plant: 'ACL',
+        plantId: 'acl',
+        analysisType: 'Brine Analysis',
+        frequency: 'WEEK',
+        unit: 'g/L',
+        submittedBy: user?.name || 'Plant Operator',
+        rows: Object.fromEntries(
+          ROWS.map((r) => [
+            r.key,
+            Object.fromEntries(
+              PARAMETERS.map((p) => {
+                const val = data[r.key][p.key];
+                return [p.key, val !== '' ? parseFloat(val) : null];
+              })
+            ),
+          ])
+        ),
+      };
+
+      const response = await api.post('/brine-analysis', payload);
+
+      if (response?.data && response.data.success) {
+        setSaveSuccess(true);
+        setLastSaved(new Date().toLocaleTimeString());
+        setOriginalData(JSON.parse(JSON.stringify(data)));
+
+        if (response.data.recordId) {
+          setRecordId(response.data.recordId);
+        }
+        if (response.data.data) {
+          const rec = response.data.data;
+          setEditCount(rec.editCount || 1);
+          setIsLocked(rec.isLocked || (rec.editCount >= 2));
+          if (rec.editedFields) setEditedFields(rec.editedFields);
+        }
+        if (response.data.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient);
+        }
+
+        const emailRes = response.data?.emailNotification;
+        const emailSent = response.data?.emailSent;
+        const emailPending = response.data?.emailPending;
+        const statusFromApi = response.data?.emailStatus;
+
+        if (emailSent || statusFromApi === 'sent') {
+          setSavePhase('completed');
+          setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+          showToast?.('Saved — Email Sent ✓', 'success');
+        } else if (emailPending || statusFromApi === 'pending') {
+          setSavePhase('email_pending');
+          setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+          showToast?.('Saved — Email Dispatching 🚀', 'info');
+        } else {
+          setSavePhase('email_failed');
+          setEmailStatusDetail(emailRes?.error || 'Email delivery failed');
+          showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+        }
+      }
     } catch (err) {
-      setSaving(false);
+      setSavePhase('idle');
       console.error('[BrineAnalysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
+      showToast?.('Save Error: ' + serverMessage, 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ── Retry Email Dispatch ──
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast?.('Cannot retry email: Record ID is not available.', 'error');
+      return;
+    }
+    setEmailRetrying(true);
+    try {
+      const response = await api.post(`/brine-analysis/${recordId}/retry-email`);
+      if (response?.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email sent successfully on retry.');
+        showToast?.('Email resent successfully!', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response?.data?.error || 'Email delivery failed on retry.');
+        showToast?.('Email retry failed: ' + (response?.data?.error || 'Rejected by server'), 'error');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message;
+      setSavePhase('email_failed');
+      setEmailStatusDetail(msg);
+      showToast?.('Retry Email Error: ' + msg, 'error');
+    } finally {
+      setEmailRetrying(false);
+    }
+  };
 
   return (
-    <div className="space-y-4 animate-fadeIn">
-
-      {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
+    <div className="space-y-4 animate-fadeIn font-sans">
+      {/* ── Breadcrumb Header with Locked Current Date ──────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-
           {/* Left: Back + Title */}
           <div className="flex items-center gap-3.5 min-w-0">
             <button
@@ -264,83 +435,154 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
                 <span className="text-[11px] font-black px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-wide">
                   WEEK
                 </span>
+                {isLocked ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-300">
+                    <Lock className="w-3 h-3 text-slate-500" /> Locked (Max Edits Reached)
+                  </span>
+                ) : editCount === 1 ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                    Edit Mode (1 Edit Remaining)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                    Initial Entry
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
           {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
+            {/* Integrated Locked Current-Date Section */}
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <label
-                htmlFor="brine-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="brine-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    if (typeof setDateError === 'function') setDateError(false);
-                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    typeof dateError !== 'undefined' && dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
-                />
-              </div>
-              {date && (
-                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider leading-none">
+                  DATE (TODAY ONLY)
+                </span>
+                <span className="text-xs font-black text-slate-800 leading-tight">
                   {formatDateDisplay(date)}
                 </span>
-              )}
-              {typeof dateError !== 'undefined' && dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
+              </div>
+              <span className="ml-1 text-[9px] bg-blue-100 text-blue-800 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 uppercase">
+                Asia/Kolkata
+              </span>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-brine-reset"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-                title="Clear all fields"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
+            {lastSaved && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Saved at {lastSaved}
+              </span>
+            )}
 
-              <button
-                id="btn-brine-save"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
-                title="Save brine analysis"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {canEdit && (
+                <button
+                  id="btn-brine-reset"
+                  onClick={handleReset}
+                  disabled={saving || emailRetrying}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
+                  title="Clear all fields"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset</span>
+                </button>
+              )}
+
+              {!isViewOnly && (
+                <button
+                  id="btn-brine-save"
+                  onClick={handleSaveClick}
+                  disabled={saving || emailRetrying || !canEdit}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+                  title="Save brine analysis"
+                >
+                  {saving ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : isLocked ? (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Locked</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
+      {/* ── Status Banner for Email Dispatch State ── */}
+      {savePhase === 'completed' && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-emerald-900 text-xs animate-fadeIn shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div>
+              <span className="font-extrabold">Saved — Email Sent ✓</span>
+              <span className="text-emerald-700 ml-1.5">
+                Delivered to registered ACL operator ({recipientEmail || 'assigned user'}).
+              </span>
+            </div>
+          </div>
+          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
+            {emailStatusDetail}
+          </span>
+        </div>
+      )}
+
+      {savePhase === 'email_pending' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between text-amber-900 text-xs animate-fadeIn shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Mail className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
+            <div>
+              <span className="font-extrabold">Saved — Email Pending</span>
+              <span className="text-amber-700 ml-1.5">
+                Data persisted. Dispatched to queue for {recipientEmail || 'ACL operator'}.
+              </span>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">
+            Processing in background
+          </span>
+        </div>
+      )}
+
+      {savePhase === 'email_failed' && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between text-rose-900 text-xs animate-fadeIn shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <div>
+              <span className="font-extrabold">Saved — Email Failed</span>
+              <span className="text-rose-700 ml-1.5">
+                Analysis data is safely saved in the database, but email delivery to{' '}
+                <strong>{recipientEmail || 'operator'}</strong> encountered an issue: {emailStatusDetail}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={handleRetryEmail}
+            disabled={emailRetrying}
+            className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition shadow-2xs cursor-pointer shrink-0 disabled:opacity-60"
+            title="Retry sending notification email"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${emailRetrying ? 'animate-spin' : ''}`} />
+            <span>{emailRetrying ? 'Retrying...' : 'Retry Email'}</span>
+          </button>
+        </div>
+      )}
+
       {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
+      {saveSuccess && savePhase !== 'email_failed' && savePhase !== 'completed' && (
         <div
           id="brine-success-banner"
           className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
@@ -364,9 +606,8 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       )}
 
-      {/* ── Analysis Table Card with Integrated Date Selector ───────────────── */}
+      {/* ── Analysis Table Card with Tolerance Limits & EDITED Badges ─────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-sm">
@@ -412,12 +653,13 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
                       </div>
                     </td>
 
-                    {/* Parameter input cells (Tolerance / Limit Validation) */}
+                    {/* Parameter input cells (Tolerance / Limit Validation & EDITED Badges) */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
                       const cellVal = data[row.key][param.key];
                       const isFormatError = !!errors[fieldKey];
                       const formatErrorMessage = errors[fieldKey];
+                      const isFieldEdited = !!editedFields[fieldKey];
 
                       const limit = getCellLimit(plantId, 'brine', row.key, param.key);
                       const validation = validateCellValue(cellVal, limit);
@@ -433,6 +675,7 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={cellVal}
+                                disabled={!canEdit}
                                 onChange={(e) =>
                                   handleChange(row.key, param.key, e.target.value)
                                 }
@@ -447,10 +690,14 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
                                     : ''
                                 }
                                 className={`w-full max-w-[125px] mx-auto text-center text-sm font-mono font-bold px-3 py-2 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                                  isOutOfLimit
+                                  !canEdit
+                                    ? 'border-2 border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed'
+                                    : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200 shadow-xs'
                                     : isFormatError
                                     ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
+                                    : cellVal !== ''
+                                    ? 'border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200'
                                     : styles.inputFocus
                                 }`}
                                 aria-label={`${row.label} ${param.label}`}
@@ -464,6 +711,13 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
                                 </span>
                               )}
                             </div>
+
+                            {/* EDITED Badge */}
+                            {isFieldEdited && (
+                              <span className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider uppercase bg-amber-500 text-white shadow-2xs animate-fadeIn">
+                                EDITED
+                              </span>
+                            )}
 
                             {/* Error Message if invalid number format */}
                             {isFormatError && (
@@ -522,6 +776,109 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       </div>
 
+      {/* ── Confirmation Modal ────────────────────────────────────────────── */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-scaleUp">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-blue-600/30 rounded-lg border border-blue-400/30">
+                  <Droplets className="w-4 h-4 text-blue-300" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-100">
+                    Confirm Brine Analysis Save
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    ACL Plant — {formatDateDisplay(confirmData.date)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="text-slate-400 hover:text-white transition p-1 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto text-xs">
+              {confirmData.isFinalEdit && (
+                <div className="bg-amber-50 border border-amber-300 text-amber-900 px-3.5 py-2.5 rounded-xl flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Final Edit Warning:</span> This is your 2nd and final permitted edit for today’s record. Once saved, this record will be permanently locked against further edits.
+                  </div>
+                </div>
+              )}
+
+              {/* Data Summary */}
+              {ROWS.map((row) => (
+                <div key={row.key}>
+                  <h4 className="font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-2 flex items-center gap-1.5">
+                    <Droplets className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{row.label} ({row.tankType})</span>
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    {PARAMETERS.map((p) => {
+                      const val = confirmData.data[row.key][p.key];
+                      return (
+                        <div key={p.key} className="flex justify-between items-center py-1 border-b border-slate-200/60 last:border-0">
+                          <span className="font-semibold text-slate-600">{p.label}:</span>
+                          <span className="font-mono font-bold text-blue-900">
+                            {val !== '' ? `${val} g/L` : '—'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {/* Notification Notice */}
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 px-3.5 py-2.5 rounded-xl flex items-start gap-2">
+                <Mail className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Email Notification:</span> Saving will automatically generate the official report Excel sheet and dispatch an email to the registered ACL Plant operator ({recipientEmail || 'assigned user'}).
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                disabled={saving}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSave}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm cursor-pointer disabled:opacity-60"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

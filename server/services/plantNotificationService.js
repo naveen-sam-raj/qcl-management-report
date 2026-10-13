@@ -413,6 +413,10 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('raw-salt') ||
     String(analysisType || '').toLowerCase().includes('raw_salt');
 
+  const isBrineAnalysis =
+    analysisType === 'Brine Analysis' ||
+    String(analysisType || '').toLowerCase().includes('brine');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -735,6 +739,25 @@ B S S (Sieve Analysis) — 9 Mesh Sizes:
 - SO4 %: ${formatVal(params.so4)} (Sulphate Content)
 - IR %: ${formatVal(params.ir)} (Insoluble Residue)
 - H2O %: ${formatVal(params.h2o)} (Moisture Content)\n\n`;
+  } else if (isBrineAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = rawData.rows || rawData || {};
+    const tk109 = rows.tk109 || {};
+    const tk110 = rows.tk110 || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    sieveTextSummary = `Brine Analysis (TK 109 & TK 110 Measurements in g/L):
+TK 109 (Storage Tank):
+- NaCl: ${formatVal(tk109.nacl)} g/L (Spec: 270–370)
+- Ca: ${formatVal(tk109.ca)} g/L (Spec: 1–3)
+- Mg: ${formatVal(tk109.mg)} g/L (Spec: 4–6)
+- SO4: ${formatVal(tk109.so4)} g/L (Spec: 5–15)
+
+TK 110 (Feed Tank):
+- NaCl: ${formatVal(tk110.nacl)} g/L (Spec: 270–370)
+- Ca: ${formatVal(tk110.ca)} g/L (Spec: 1–3)
+- Mg: ${formatVal(tk110.mg)} g/L (Spec: 4–6)
+- SO4: ${formatVal(tk110.so4)} g/L (Spec: 5–15)\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1523,6 +1546,60 @@ Attachment: ${excelFileName}
           Raw Salt Input: Dissolution Stream & Brine Preparation Base
         </div>
       </div>`;
+  } else if (isBrineAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = rawData.rows || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const tankList = [
+      { key: 'tk109', name: 'TK 109', type: 'Storage Tank', color: '#0369a1', bg: '#f0f9ff' },
+      { key: 'tk110', name: 'TK 110', type: 'Feed Tank',    color: '#047857', bg: '#f0fdf4' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Brine Analysis — <strong>TK 109 & TK 110 Measurements (g/L)</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Tank / Unit</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">NaCl (g/L)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(270–370)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Ca (g/L)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(1–3)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Mg (g/L)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(4–6)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">SO₄ (g/L)<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(5–15)</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tankList.map((t) => {
+              const r = rows[t.key] || {};
+              return `
+                <tr style="background-color: ${t.bg};">
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: ${t.color};">
+                    <div>${t.name}</div>
+                    <div style="font-size: 10px; color: #64748b; font-weight: normal;">${t.type}</div>
+                  </td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.nacl)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.ca)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.mg)}</td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(r.so4)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr style="background-color: #f1f5f9; border-top: 2px solid #cbd5e1;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 800; color: #334155; font-size: 11px;">SPECIFICATION</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">270 – 370 g/L</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">1 – 3 g/L</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">4 – 6 g/L</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #2563eb; font-size: 11px;">5 – 15 g/L</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Frequency: <strong>WEEK</strong> | Parameter Unit: <strong>g/L</strong> | Plant: <strong>ACL Plant</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -1941,6 +2018,20 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateRawSaltAnalysisExcel } = require('./excelService');
       excelResult = await generateRawSaltAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'Brine Analysis' ||
+      cleanType.toLowerCase().includes('brine')
+    ) {
+      const { generateBrineAnalysisExcel } = require('./excelService');
+      excelResult = await generateBrineAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
