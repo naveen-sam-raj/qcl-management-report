@@ -448,6 +448,12 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 419') ||
     String(analysisType || '').toLowerCase().includes('tk419');
 
+  const isSAT401Analysis =
+    analysisType === 'T 401 Analysis' ||
+    analysisType === 'T401 Analysis' ||
+    (String(analysisType || '').toLowerCase().includes('t 401') && !String(analysisType || '').toLowerCase().includes('tk 401')) ||
+    (String(analysisType || '').toLowerCase().includes('t401') && !String(analysisType || '').toLowerCase().includes('tk401'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -884,6 +890,32 @@ TK 110 (Feed Tank):
 - FNH3: ${formatVal(row.fnh3)} Kgm/m³ (Spec: 1.98–2.18)
 - CNH3: ${formatVal(row.cnh3)} Kgm/m³ (Spec: 3.96–4.16)`;
     }).join('\n\n') + '\n\n';
+  } else if (isSAT401Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const unitsObj = rawData.units || rawData.towers || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const unitList = [
+      { key: 'a', label: 'T 401 A' },
+      { key: 'b', label: 'T 401 B' },
+      { key: 'c', label: 'T 401 C' },
+      { key: 'd', label: 'T 401 D' },
+      { key: 'e', label: 'T 401 E' },
+      { key: 'f', label: 'T 401 F' },
+    ];
+    const shiftKeys = [
+      { key: 's1', altKey: 'shift1', label: 'I SHIFT' },
+      { key: 's2', altKey: 'shift2', label: 'II SHIFT' },
+      { key: 's3', altKey: 'shift3', label: 'III SHIFT' },
+    ];
+
+    sieveTextSummary = `SA Plant T 401 Analysis (Parameters in Kgm/m³):\n` +
+      unitList.map(u => {
+        const uData = unitsObj[u.key] || {};
+        return `${u.label}:\n` + shiftKeys.map(s => {
+          const row = uData[s.key] || uData[s.altKey] || {};
+          return `  ${s.label}: FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCl: ${formatVal(row.tcl)}, PCl: ${formatVal(row.pcl)}`;
+        }).join('\n');
+      }).join('\n\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2011,6 +2043,66 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Tank: <strong>TK 419 SC TANK</strong> | Frequency: <strong>Once in a Shift</strong>
         </div>
       </div>`;
+  } else if (isSAT401Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const unitsObj = rawData.units || rawData.towers || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const unitList = [
+      { key: 'a', label: 'T 401 A', sub: 'Option A' },
+      { key: 'b', label: 'T 401 B', sub: 'Option B' },
+      { key: 'c', label: 'T 401 C', sub: 'Option C' },
+      { key: 'd', label: 'T 401 D', sub: 'Option D' },
+      { key: 'e', label: 'T 401 E', sub: 'Option E' },
+      { key: 'f', label: 'T 401 F', sub: 'Option F' },
+    ];
+    const shiftList = [
+      { key: 's1', altKey: 'shift1', name: 'I SHIFT', time: '07:00 – 15:00', color: '#0369a1', bg: '#f0f9ff' },
+      { key: 's2', altKey: 'shift2', name: 'II SHIFT', time: '15:00 – 23:00', color: '#4338ca', bg: '#eef2ff' },
+      { key: 's3', altKey: 'shift3', name: 'III SHIFT', time: '23:00 – 07:00', color: '#7e22ce', bg: '#faf5ff' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant T 401 Analysis — <strong>Tower Options A–F Shift Measurements (Kgm/m³)</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Tower Unit</th>
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Shift</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">FNH₃ (0.88–1.08)</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">CNH₃ (4.40–4.60)</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">TCl (5.70–5.90)</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">PCl (1.02–1.22)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${unitList.map(u => {
+              const uData = unitsObj[u.key] || {};
+              return shiftList.map((s, sIdx) => {
+                const r = uData[s.key] || uData[s.altKey] || {};
+                const isCur = shift && (shift.toLowerCase().includes(s.key) || shift.toLowerCase().includes(s.name.toLowerCase()));
+                const rowBg = isCur ? 'background-color: #fef9c3;' : (sIdx % 2 === 1 ? `background-color: ${s.bg};` : 'background-color: #ffffff;');
+                return `
+                  <tr style="${rowBg}">
+                    ${sIdx === 0 ? `<td rowspan="3" style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 800; color: #0f172a; vertical-align: middle; background-color: #f8fafc;">${u.label}<br><span style="font-size: 10px; color: #2563eb; font-weight: bold;">${u.sub}</span></td>` : ''}
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: ${s.color};">${s.name}</td>
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.fnh3)}</td>
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.cnh3)}</td>
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.tcl)}</td>
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.pcl)}</td>
+                  </tr>
+                `;
+              }).join('');
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Tower: <strong>T 401 (Options A–F)</strong> | Frequency: <strong>Once in a Shift</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2528,6 +2620,23 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSATK419AnalysisExcel } = require('./excelService');
       excelResult = await generateSATK419AnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'T 401 Analysis' ||
+      analysisType === 'T401 Analysis' ||
+      (cleanType.toLowerCase().includes('t_401') && !cleanType.toLowerCase().includes('tk_401')) ||
+      (cleanType.toLowerCase().includes('t401') && !cleanType.toLowerCase().includes('tk401'))
+    ) {
+      const { generateSAT401AnalysisExcel } = require('./excelService');
+      excelResult = await generateSAT401AnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,

@@ -3033,6 +3033,235 @@ const generateSATK419AnalysisExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant T 401 Tower Analysis
+ * Matches T 401 units (Options A-F), 3 shifts (I, II, III), and parameters:
+ * - FNH3: 0.88–1.08 Kgm/m³
+ * - CNH3: 4.40–4.60 Kgm/m³
+ * - TCl:  5.70–5.90 Kgm/m³
+ * - PCl:  1.02–1.22 Kgm/m³
+ */
+const generateSAT401AnalysisExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const towerOption = data.towerOption || data.selectedOption || data.option || 'All';
+  const filename = data.filename || `SA_Plant_T401_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('T 401 Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  const formatCellValue = (val) => {
+    if (
+      val === null ||
+      val === undefined ||
+      String(val).trim() === '' ||
+      String(val).trim() === '—' ||
+      String(val).trim() === '-' ||
+      String(val).trim() === 'null' ||
+      String(val).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? val : n;
+  };
+
+  // Column widths
+  worksheet.columns = [
+    { key: 'col1', width: 22 }, // Tower / Option
+    { key: 'col2', width: 24 }, // Shift / Schedule
+    { key: 'col3', width: 20 }, // FNH3
+    { key: 'col4', width: 20 }, // CNH3
+    { key: 'col5', width: 20 }, // TCl
+    { key: 'col6', width: 20 }, // PCl
+  ];
+
+  // 1. Title Block
+  worksheet.mergeCells('A1:F1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'SOUTHERN PETROCHEMICAL INDUSTRIES CORPORATION LTD.';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 28;
+
+  // 2. Subtitle Block
+  worksheet.mergeCells('A2:F2');
+  const subtitleCell = worksheet.getCell('A2');
+  subtitleCell.value = `SA PLANT — T 401 ANALYSIS REPORT (OPTIONS A–F)`;
+  subtitleCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF0F2E5A' } };
+  subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 24;
+
+  worksheet.getRow(3).height = 10;
+
+  // 3. Metadata
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+
+  const addMeta = (rowNum, l1, v1, l2, v2) => {
+    worksheet.getCell(`A${rowNum}`).value = l1;
+    worksheet.getCell(`A${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`A${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`B${rowNum}`).value = v1;
+    worksheet.getCell(`B${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+    worksheet.mergeCells(`C${rowNum}:D${rowNum}`);
+    worksheet.getCell(`C${rowNum}`).value = l2;
+    worksheet.getCell(`C${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`C${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.mergeCells(`E${rowNum}:F${rowNum}`);
+    const mergedCell = worksheet.getCell(`E${rowNum}`);
+    mergedCell.value = v2;
+    mergedCell.font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+
+    ['A', 'B', 'C', 'D', 'E', 'F'].forEach((col) => {
+      worksheet.getCell(`${col}${rowNum}`).border = metaBorder;
+    });
+    worksheet.getRow(rowNum).height = 20;
+  };
+
+  addMeta(4, 'Plant:', data.plant || 'SA Plant', 'Saved At:', savedDateTimeDisplay);
+  addMeta(5, 'Analysis:', 'T 401 Analysis', 'Option / Shift:', `${towerOption} (${data.shift || 'All Shifts'})`);
+
+  // 4. Header Row
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = [
+    'TOWER UNIT',
+    'SHIFT / SCHEDULE',
+    'FNH₃ (Kgm/m³)\n(0.88–1.08)',
+    'CNH₃ (Kgm/m³)\n(4.40–4.60)',
+    'TCl (Kgm/m³)\n(5.70–5.90)',
+    'PCl (Kgm/m³)\n(1.02–1.22)',
+  ];
+  headerRow.height = 30;
+  ['A', 'B', 'C', 'D', 'E', 'F'].forEach((c, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: idx < 2 ? 'left' : 'center', vertical: 'middle', wrapText: true, indent: idx < 2 ? 1 : 0 };
+    cell.border = thinBorder;
+  });
+
+  // 5. Data rows
+  const unitsObj = data.units || data.towers || (data.data && (data.data.units || data.data.towers)) || {};
+  const unitList = [
+    { key: 'a', label: 'T 401 A (Option A)' },
+    { key: 'b', label: 'T 401 B (Option B)' },
+    { key: 'c', label: 'T 401 C (Option C)' },
+    { key: 'd', label: 'T 401 D (Option D)' },
+    { key: 'e', label: 'T 401 E (Option E)' },
+    { key: 'f', label: 'T 401 F (Option F)' },
+  ];
+
+  const shiftList = [
+    { key: 's1', altKey: 'shift1', label: 'I SHIFT (07:00 – 15:00)', bg: 'FFE0F2FE', fontColor: 'FF0369A1' },
+    { key: 's2', altKey: 'shift2', label: 'II SHIFT (15:00 – 23:00)', bg: 'FFE0E7FF', fontColor: 'FF3730A3' },
+    { key: 's3', altKey: 'shift3', label: 'III SHIFT (23:00 – 07:00)', bg: 'FFF3E8FF', fontColor: 'FF6B21A8' },
+  ];
+
+  let curRowNum = 8;
+  unitList.forEach((unit) => {
+    const uData = unitsObj[unit.key] || {};
+    shiftList.forEach((shift) => {
+      const sData = uData[shift.key] || uData[shift.altKey] || {};
+      const row = worksheet.getRow(curRowNum);
+      row.values = [
+        unit.label,
+        shift.label,
+        formatCellValue(sData.fnh3),
+        formatCellValue(sData.cnh3),
+        formatCellValue(sData.tcl),
+        formatCellValue(sData.pcl),
+      ];
+      row.height = 22;
+
+      for (let c = 1; c <= 6; c++) {
+        const cell = row.getCell(c);
+        cell.border = thinBorder;
+        if (c === 1) {
+          cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+          cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        } else if (c === 2) {
+          cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: shift.fontColor } };
+          cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shift.bg } };
+        } else {
+          cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF0F172A' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          if (typeof cell.value === 'number') cell.numFmt = '0.00';
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+        }
+      }
+      curRowNum++;
+    });
+  });
+
+  // 6. Tolerance Reference Row
+  const refRow = worksheet.getRow(curRowNum);
+  refRow.values = [
+    'STANDARD SPECIFICATION',
+    'TOLERANCE LIMITS',
+    '0.88 – 1.08 Kgm/m³',
+    '4.40 – 4.60 Kgm/m³',
+    '5.70 – 5.90 Kgm/m³',
+    '1.02 – 1.22 Kgm/m³',
+  ];
+  refRow.height = 22;
+  for (let c = 1; c <= 6; c++) {
+    const cell = refRow.getCell(c);
+    cell.border = thinBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    if (c <= 2) {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, italic: true, color: { argb: 'FF334155' } };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    } else {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF2563EB' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  }
+  curRowNum++;
+
+  // Footer note
+  worksheet.mergeCells(`A${curRowNum}:F${curRowNum}`);
+  const footerCell = worksheet.getCell(`A${curRowNum}`);
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant T 401 Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(curRowNum).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -3044,6 +3273,7 @@ module.exports = {
   generateSATK414AnalysisExcel,
   generateSAP413AnalysisExcel,
   generateSATK419AnalysisExcel,
+  generateSAT401AnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,

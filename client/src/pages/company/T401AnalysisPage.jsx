@@ -18,12 +18,15 @@ import {
   Factory,
   Layers,
   FlaskConical,
+  Lock,
+  RefreshCw,
+  Send,
+  Mail,
 } from "lucide-react";
 
 // ─── SA Plant T 401 Parameters & Validation Limits ───────────────────────────
 // Plant: SA Plant
-// Analysis: T401
-// Options: A, B, C, D, E, F
+// Analysis: T401 (Options A, B, C, D, E, F)
 // Parameters: FNH3, CNH3, TCL, PCL
 // Frequency: Once in a Shift
 //
@@ -112,9 +115,9 @@ const UNITS = [
 
 // 3 Shifts (I, II, III)
 const SHIFTS = [
-  { key: "s1", label: "I",   title: "I Shift (07:00 – 15:00)",  badgeColor: "bg-sky-100 text-sky-800 border-sky-300" },
-  { key: "s2", label: "II",  title: "II Shift (15:00 – 23:00)", badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-300" },
-  { key: "s3", label: "III", title: "III Shift (23:00 – 07:00)", badgeColor: "bg-purple-100 text-purple-800 border-purple-300" },
+  { key: "s1", label: "I",   title: "I Shift (07:00 – 15:00)",  name: "I SHIFT",   badgeColor: "bg-sky-100 text-sky-800 border-sky-300" },
+  { key: "s2", label: "II",  title: "II Shift (15:00 – 23:00)", name: "II SHIFT",  badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-300" },
+  { key: "s3", label: "III", title: "III Shift (23:00 – 07:00)", name: "III SHIFT", badgeColor: "bg-purple-100 text-purple-800 border-purple-300" },
 ];
 
 // 4 Parameters per shift
@@ -138,6 +141,10 @@ const buildEmptyData = () =>
     ])
   );
 
+const getTodayAsiaKolkata = () => {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+};
+
 const isValidDecimal = (val) => val === "" || /^-?\d*\.?\d*$/.test(val);
 
 const formatDateDisplay = (isoDate) => {
@@ -159,55 +166,150 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === "user" ? "/portal" : "/admin/tfl";
+  const isViewOnly = user?.role === "user";
+  const basePath = isViewOnly ? "/portal" : "/admin/tfl";
 
-  // ── States ──
-  const [date, setDate]                     = useState("");
+  // ── States (Strict Current-Date Restriction) ──
+  const [date]                              = useState(() => getTodayAsiaKolkata());
   const [data, setData]                     = useState(buildEmptyData());
+  const [originalData, setOriginalData]     = useState(null);
   const [errors, setErrors]                 = useState({});
   const [saving, setSaving]                 = useState(false);
   const [saveSuccess, setSaveSuccess]       = useState(false);
-  const [dateError, setDateError]           = useState(false);
   const [selectedOption, setSelectedOption] = useState("all");
+  
+  // Save & Email tracking states
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [recordId, setRecordId]                     = useState(null);
+  const [recipientEmail, setRecipientEmail]         = useState('');
+  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
+  const [lockedShifts, setLockedShifts]             = useState({});
+  const [editedFields, setEditedFields]             = useState({});
+  const [retryingEmail, setRetryingEmail]           = useState(false);
 
-  // Fetch existing data when date changes
+  // Confirmation modal
+  const [showConfirmModal, setShowConfirmModal]     = useState(false);
+  const [confirmData, setConfirmData]               = useState(null);
+
+  // ── Sequential Shift Workflow per Tower (Options A–F operate independently) ──
+  // - Initially: Only I SHIFT (s1) is editable (NEW); s2 and s3 are WAITING.
+  // - Once s1 is saved: s1 remains editable until s2 is saved; s2 becomes EDITABLE.
+  // - Once s2 is saved: s1 is permanently LOCKED; s2 remains editable until s3 is saved; s3 becomes EDITABLE.
+  // - Once s3 is saved: s2 is permanently LOCKED; s3 enters FINAL EDIT ALLOWED (exactly 1 final edit).
+  // - After s3 final edit: all shifts for that tower are permanently LOCKED.
+  const isShiftDisabled = useCallback((towerKey, shiftKey) => {
+    if (isViewOnly) return true;
+    const uLocks = lockedShifts[towerKey] || {};
+    if (shiftKey === 's1') {
+      return Boolean(uLocks.s1) || Boolean(uLocks.s2Saved);
+    }
+    if (shiftKey === 's2') {
+      if (!uLocks.s1Saved) return true;
+      return Boolean(uLocks.s2) || Boolean(uLocks.s3Saved);
+    }
+    if (shiftKey === 's3') {
+      if (!uLocks.s2Saved) return true;
+      if (uLocks.s3) return true;
+      if (uLocks.s3Saved && (uLocks.s3Edits || 0) >= 1) return true;
+      return false;
+    }
+    return true;
+  }, [isViewOnly, lockedShifts]);
+
+  const getShiftBadgeStatus = useCallback((towerKey, shiftKey) => {
+    const uLocks = lockedShifts[towerKey] || {};
+    if (shiftKey === 's1') {
+      if (uLocks.s1 || uLocks.s2Saved) return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+      if (uLocks.s1Saved) return { label: 'EDITABLE', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+      return { label: 'NEW', color: 'bg-sky-100 text-sky-800 border-sky-300' };
+    }
+    if (shiftKey === 's2') {
+      if (uLocks.s2 || uLocks.s3Saved) return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+      if (uLocks.s2Saved) return { label: 'EDITABLE', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+      if (uLocks.s1Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+      return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+    }
+    if (shiftKey === 's3') {
+      if (uLocks.s3 || (uLocks.s3Saved && (uLocks.s3Edits || 0) >= 1)) {
+        return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+      }
+      if (uLocks.s3Saved && (uLocks.s3Edits || 0) === 0) {
+        return { label: 'FINAL EDIT', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+      }
+      if (uLocks.s2Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+      return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+    }
+    return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+  }, [lockedShifts]);
+
+  // Fetch existing data for today
   useEffect(() => {
-    if (!date) return;
+    let active = true;
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/t-401-analysis?date=${date}`);
-        if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             // Leave default
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else if (record.data && record.data.rows) {
-            setData(record.data.rows);
+        if (!active) return;
+
+        if (response.data && response.data.success) {
+          const rec = response.data.record || (Array.isArray(response.data.data) ? response.data.data[0] : response.data.data);
+          if (rec) {
+            setRecordId(rec._id || response.data.recordId || null);
+            setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || response.data.emailRecipient || '');
+            
+            if (rec.emailStatus === 'sent') {
+              setSavePhase('completed');
+              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
+            } else if (rec.emailStatus === 'failed') {
+              setSavePhase('email_failed');
+              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
+            }
+
+            const fetchedUnits = rec.units || rec.towers || rec.shifts || rec.data?.units || rec.data?.towers || rec.data;
+            if (fetchedUnits && typeof fetchedUnits === 'object') {
+              const populated = buildEmptyData();
+              UNITS.forEach((unit) => {
+                const uSource = fetchedUnits[unit.key] || fetchedUnits[unit.option] || {};
+                SHIFTS.forEach((shift) => {
+                  const sSource = uSource[shift.key] || uSource[`shift${shift.key.slice(1)}`] || {};
+                  PARAMETERS.forEach((p) => {
+                    const val = sSource[p.key];
+                    populated[unit.key][shift.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+                  });
+                });
+              });
+              setData(populated);
+              setOriginalData(JSON.parse(JSON.stringify(populated)));
+            } else {
+              setData(buildEmptyData());
+              setOriginalData(null);
+            }
+
+            setLockedShifts(rec.lockedShifts || response.data.lockedShifts || {});
+            setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
-            // Leave default
+            setData(buildEmptyData());
+            setOriginalData(null);
+            setLockedShifts({});
+            setEditedFields({});
           }
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing T 401 data', err);
+        setData(buildEmptyData());
+        setOriginalData(null);
+        setLockedShifts({});
+        setEditedFields({});
       }
     };
     fetchExistingData();
+    return () => { active = false; };
   }, [date]);
-
 
   // ── Input Changes ──
   const handleCellChange = useCallback((unitKey, shiftKey, paramKey, value) => {
+    if (isShiftDisabled(unitKey, shiftKey)) return;
     if (!isValidDecimal(value)) return;
 
     setData((prev) => ({
@@ -227,28 +329,24 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
       return next;
     });
     setSaveSuccess(false);
-  }, []);
+  }, [isShiftDisabled]);
 
   // ── Reset ──
   const handleReset = useCallback(() => {
-    setData(buildEmptyData());
+    if (originalData) {
+      setData(JSON.parse(JSON.stringify(originalData)));
+    } else {
+      setData(buildEmptyData());
+    }
     setErrors({});
-    setDateError(false);
     setSaveSuccess(false);
-    showToast?.("T 401 analysis form cleared successfully.", "info");
-  }, [showToast]);
+    showToast?.("Restored unsaved fields to last persisted state.", "info");
+  }, [originalData, showToast]);
 
   // ── Validation ──
   const validateForm = useCallback(() => {
     let isValid = true;
     const newErrors = {};
-
-    if (!date) {
-      setDateError(true);
-      isValid = false;
-    } else {
-      setDateError(false);
-    }
 
     UNITS.forEach((u) => {
       SHIFTS.forEach((s) => {
@@ -264,54 +362,184 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
 
     setErrors(newErrors);
     return isValid;
-  }, [date, data]);
+  }, [data]);
 
-  // ── Save / Submit ──
-  const handleSave = async () => {
+  const isParamDiff = (oldVal, newVal) => {
+    if (oldVal === undefined || oldVal === null || oldVal === '') oldVal = null;
+    if (newVal === undefined || newVal === null || newVal === '') newVal = null;
+    if (oldVal === null && newVal === null) return false;
+    if (oldVal === null || newVal === null) return true;
+    if (!isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
+      return Number(oldVal) !== Number(newVal);
+    }
+    return String(oldVal) !== String(newVal);
+  };
+
+  const isShiftDiff = (oldShift, newShift) => {
+    if (!oldShift && newShift) return true;
+    if (oldShift && !newShift) return false;
+    return PARAMETERS.some((p) => isParamDiff(oldShift?.[p.key], newShift?.[p.key]));
+  };
+
+  // ── Pre-Save Click & Modal Prompt ──
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     if (!validateForm()) {
-      showToast?.("Please correct highlighted errors before saving.", "error");
+      showToast?.("Please correct numeric errors before saving.", "error");
       return;
     }
 
-    const hasData = UNITS.some((u) =>
-      SHIFTS.some((s) =>
-        PARAMETERS.some((p) => data[u.key][s.key][p.key] !== "")
-      )
-    );
+    const towersToCheck = (selectedOption && selectedOption !== 'all')
+      ? UNITS.filter(u => u.key === selectedOption)
+      : UNITS;
 
-    if (!hasData) {
-      showToast?.("Please enter at least one measurement value for T 401.", "warning");
+    const changes = [];
+    towersToCheck.forEach((u) => {
+      SHIFTS.forEach((s) => {
+        if (isShiftDisabled(u.key, s.key)) return;
+        const currentShiftData = data[u.key][s.key];
+        const hasAnyVal = Object.values(currentShiftData).some(v => v !== '' && v !== null && v !== undefined);
+        const oldShiftData = originalData ? originalData[u.key]?.[s.key] : null;
+        const hasDiff = isShiftDiff(oldShiftData, currentShiftData);
+
+        if (hasAnyVal && hasDiff) {
+          changes.push({
+            towerKey: u.key,
+            towerLabel: u.label,
+            option: u.option,
+            shiftKey: s.key,
+            shiftLabel: s.name,
+            shiftTitle: s.title,
+            data: currentShiftData,
+          });
+        }
+      });
+    });
+
+    if (changes.length === 0) {
+      showToast?.("No new or modified shift data found to save for the active tower selection.", "info");
       return;
     }
 
+    // If single option is selected, enforce single-shift saving
+    if (selectedOption !== 'all') {
+      const distinctShifts = [...new Set(changes.map(c => c.shiftKey))];
+      if (distinctShifts.length > 1) {
+        showToast?.("Only one shift can be saved at a time. Please save changes shift-by-shift.", "warning");
+        return;
+      }
+    }
+
+    setConfirmData({
+      selectedOption,
+      changes,
+      date,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Confirm Save Handler ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
     setSaveSuccess(false);
+    setShowConfirmModal(false);
+
+    const payload = {
+      date,
+      plant: "SA",
+      analysisType: "T 401 Analysis",
+      tower: "T 401",
+      targetTower: selectedOption,
+      selectedOption,
+      units: data,
+      towers: data,
+      submittedBy: user?.name || "Shift Chemist",
+      submittedAt: new Date().toISOString(),
+    };
 
     try {
-      const payload = {
-        date,
-        plant: "SA",
-        analysisType: "T 401 Analysis",
-        tower: "T 401",
-        frequency: "Once in a Shift",
-        units: data,
-        submittedBy: user?.name || "Plant Operator",
-      };
-
       const response = await api.post("/api/t-401-analysis", payload);
 
+      if (!response?.data?.success) {
+        showToast?.(response.data?.message || "Failed to save T 401 Analysis.", "error");
+        setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
       setSaveSuccess(true);
-      showToast?.(response.data?.message || "T 401 Analysis data saved successfully!", "success");
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+
+      const returnedDoc = response.data?.data || response.data?.analysis || {};
+      const newLocked = response.data?.lockedShifts || returnedDoc.lockedShifts || {};
+      const newEdited = response.data?.editedFields || returnedDoc.editedFields || {};
+      const newRecordId = response.data?.recordId || returnedDoc._id || returnedDoc.id;
+
+      setLockedShifts(newLocked);
+      setEditedFields(newEdited);
+      if (newRecordId) setRecordId(newRecordId);
+
+      const deliveryStatus = response.data?.emailDeliveryStatus || response.data?.emailStatus;
+      const recipient = response.data?.emailRecipient;
+      if (recipient) setRecipientEmail(recipient);
+
+      if (deliveryStatus === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(`Notification email delivered successfully to ${recipient || 'SA Plant operator'}.`);
+        showToast?.(`T 401 Analysis saved & notification sent to ${recipient || 'operator'}!`, 'success');
+      } else if (deliveryStatus === 'failed') {
+        setSavePhase('email_failed');
+        const smtpErr = response.data?.emailError || response.data?.message || 'SMTP delivery rejected';
+        if (smtpErr.toLowerCase().includes('550') || smtpErr.toLowerCase().includes('access denied')) {
+          setIsPermanentMailError(true);
+        }
+        setEmailStatusDetail(`Database save succeeded. Email failed: ${smtpErr}`);
+        showToast?.('Data saved, but notification email delivery failed.', 'warning');
+      } else {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email notification queued.');
+        showToast?.('T 401 Analysis data saved successfully!', 'success');
+      }
     } catch (err) {
-      console.error("[T401Analysis] Save failed:", err);
-      const msg =
-        err.response?.data?.message ||
-        err.response?.data?.errors?.[0] ||
-        err.message ||
-        "Failed to save T 401 Analysis data.";
+      console.error("[T 401 Save] Error:", err);
+      const msg = err.response?.data?.message || err.message || "Failed to save T 401 Analysis.";
       showToast?.(msg, "error");
+      setSavePhase('idle');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Retry Email Handler ──
+  const handleRetryEmail = async () => {
+    if (!recordId || retryingEmail) return;
+    setRetryingEmail(true);
+
+    try {
+      const response = await api.post(`/t-401-analysis/${recordId}/retry-email`);
+      if (response.data && response.data.emailSent) {
+        setSavePhase('completed');
+        setIsPermanentMailError(false);
+        setEmailStatusDetail(`Notification email delivered successfully to ${response.data.emailRecipient || recipientEmail}.`);
+        showToast?.(`Notification email delivered to ${response.data.emailRecipient || recipientEmail}!`, 'success');
+      } else {
+        setSavePhase('email_failed');
+        const errDetail = response.data?.emailError || response.data?.message || 'SMTP delivery failed';
+        if (errDetail.toLowerCase().includes('550') || errDetail.toLowerCase().includes('access denied')) {
+          setIsPermanentMailError(true);
+        }
+        setEmailStatusDetail(`Retry failed: ${errDetail}`);
+        showToast?.(`Email retry failed: ${errDetail}`, 'error');
+      }
+    } catch (err) {
+      console.error("[T 401 Retry Email] Error:", err);
+      const msg = err.response?.data?.message || err.message || "Failed to retry email delivery.";
+      setEmailStatusDetail(`Retry failed: ${msg}`);
+      showToast?.(msg, 'error');
+    } finally {
+      setRetryingEmail(false);
     }
   };
 
@@ -351,104 +579,145 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
               </span>
             </div>
 
-            {/* Date Input inside Header */}
+            {/* Date Display (Strict Current Date Lock) */}
             <div className="flex items-center gap-1.5 ml-0 sm:ml-2">
-              <label
-                htmlFor="t401-date-input"
-                className="text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-0.5"
-              >
+              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-0.5">
                 <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="t401-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  setDate(e.target.value);
-                  setDateError(false);
-                  setSaveSuccess(false);
-                }}
-                className={`px-2 py-0.5 text-xs font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 h-7 ${
-                  dateError
-                    ? "border-red-400 bg-red-50 focus:ring-red-400"
-                    : "border-slate-300 bg-white hover:border-slate-400"
-                }`}
-                required
-              />
-              {date && (
-                <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-slate-600 font-semibold bg-slate-100 px-2 py-0.5 rounded-md leading-none h-7">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-blue-900 bg-blue-50/80 border border-blue-200 rounded-lg">
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                <span>{formatDateDisplay(date)}</span>
+                <span className="text-[9.5px] font-semibold text-blue-600 bg-blue-100/80 px-1 py-0.2 rounded">
+                  Today (Asia/Kolkata)
                 </span>
-              )}
-              {dateError && (
-                <span className="text-[10px] text-red-500 font-bold">Required</span>
-              )}
+              </span>
             </div>
           </div>
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              id="btn-t401-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer h-7"
-              title="Clear all fields"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset</span>
-            </button>
+            {!isViewOnly && (
+              <button
+                id="btn-t401-reset"
+                onClick={handleReset}
+                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer h-7"
+                title="Restore unsaved fields"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
+            )}
 
-            <button
-              id="btn-t401-save"
-              onClick={handleSave}
-              disabled={saving}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer h-7 ${
-                saveSuccess
-                  ? "bg-emerald-600 hover:bg-emerald-700"
-                  : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
-              } disabled:opacity-60 disabled:cursor-not-allowed`}
-              title="Save T 401 data"
-            >
-              {saving ? (
-                <>
-                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save / Submit</span>
-                </>
-              )}
-            </button>
+            {!isViewOnly && (
+              <button
+                id="btn-t401-save"
+                onClick={handleSaveClick}
+                disabled={saving}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-1 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer h-7 ${
+                  savePhase === 'completed'
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : savePhase === 'email_failed'
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
+                } disabled:opacity-60 disabled:cursor-not-allowed`}
+                title="Save T 401 data"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : savePhase === 'completed' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Saved!</span>
+                  </>
+                ) : savePhase === 'email_failed' ? (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Saved (Email Failed)</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save / Submit</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner ── */}
-      {saveSuccess && (
+      {/* ── Status Banners (Email Sent / Pending / Failed) ── */}
+      {savePhase === 'completed' && (
         <div
           id="t401-success-banner"
           className="flex items-center gap-2.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs animate-fadeIn"
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <div className="text-xs text-emerald-800 font-medium">
-            <span className="font-bold">Saved:</span> T 401 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
+            <span className="font-bold">Saved — Email Sent:</span> {emailStatusDetail || `T 401 Analysis recorded and email sent.`}
           </div>
           <button
-            onClick={() => setSaveSuccess(false)}
+            onClick={() => setSavePhase('idle')}
             className="ml-auto text-emerald-500 hover:text-emerald-700 text-sm leading-none shrink-0 cursor-pointer"
             aria-label="Dismiss"
           >
             ×
           </button>
+        </div>
+      )}
+
+      {savePhase === 'email_pending' && (
+        <div
+          id="t401-pending-banner"
+          className="flex items-center gap-2.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-lg shadow-2xs animate-fadeIn"
+        >
+          <RefreshCw className="w-4 h-4 text-sky-600 animate-spin shrink-0" />
+          <div className="text-xs text-sky-800 font-medium">
+            <span className="font-bold">Saved — Email Pending:</span> {emailStatusDetail}
+          </div>
+          <button
+            onClick={() => setSavePhase('idle')}
+            className="ml-auto text-sky-500 hover:text-sky-700 text-sm leading-none shrink-0 cursor-pointer"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {savePhase === 'email_failed' && (
+        <div
+          id="t401-failed-banner"
+          className="flex items-center gap-2.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg shadow-2xs animate-fadeIn justify-between flex-wrap"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <div className="text-xs text-amber-900 font-medium">
+              <span className="font-bold">Saved — Email Failed:</span> {emailStatusDetail}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {!isPermanentMailError && (
+              <button
+                onClick={handleRetryEmail}
+                disabled={retryingEmail}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-400 rounded-md transition cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${retryingEmail ? 'animate-spin' : ''}`} />
+                <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
+              </button>
+            )}
+            <button
+              onClick={() => setSavePhase('idle')}
+              className="text-amber-600 hover:text-amber-800 text-sm leading-none cursor-pointer"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
         </div>
       )}
 
@@ -491,7 +760,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
         </div>
       </div>
 
-      {/* ── 6 Tower Units Grid (3 Columns x 2 Rows, compact fit on single screen without scrolling) ── */}
+      {/* ── 6 Tower Units Grid (Options A–F) ── */}
       <div
         className={`grid gap-2 ${
           selectedOption === "all"
@@ -526,7 +795,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="pb-1 text-left w-10 font-extrabold text-[10px] text-slate-500">
+                    <th className="pb-1 text-left w-12 font-extrabold text-[10px] text-slate-500">
                       SHIFT
                     </th>
                     {PARAMETERS.map((p) => {
@@ -546,120 +815,215 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {SHIFTS.map((shift) => (
-                    <tr
-                      key={shift.key}
-                      className="hover:bg-slate-50/80 transition-colors"
-                    >
-                      {/* Shift Badge */}
-                      <td className="py-1 pr-1 align-middle">
-                        <span
-                          className={`font-mono font-extrabold px-1.5 py-0.5 rounded text-[10px] border shadow-2xs inline-block text-center w-7 ${shift.badgeColor}`}
-                          title={shift.title}
-                        >
-                          {shift.label}
-                        </span>
-                      </td>
+                  {SHIFTS.map((shift) => {
+                    const isDisabled = isShiftDisabled(unit.key, shift.key);
+                    const shiftStatus = getShiftBadgeStatus(unit.key, shift.key);
 
-                      {/* Inputs (FNH3, CNH3, TCl, PCl) */}
-                      {PARAMETERS.map((param) => {
-                        const cellVal = data[unit.key][shift.key][param.key];
-                        const hasValue = cellVal !== "" && cellVal !== null && cellVal !== undefined;
-                        const fieldKey = `${unit.key}_${shift.key}_${param.key}`;
-                        const isFormatError = !!errors[fieldKey];
+                    return (
+                      <tr
+                        key={shift.key}
+                        className={`transition-colors ${isDisabled ? 'bg-slate-50/70 opacity-90' : 'hover:bg-slate-50/80'}`}
+                      >
+                        {/* Shift Badge & Status */}
+                        <td className="py-1 pr-1 align-middle">
+                          <div className="flex flex-col items-center">
+                            <span
+                              className={`font-mono font-extrabold px-1.5 py-0.5 rounded text-[10px] border shadow-2xs inline-block text-center w-7 ${shift.badgeColor}`}
+                              title={shift.title}
+                            >
+                              {shift.label}
+                            </span>
+                            <span
+                              className={`text-[7.5px] font-black uppercase px-1 py-0.2 rounded border mt-0.5 whitespace-nowrap leading-none ${shiftStatus.color}`}
+                            >
+                              {shiftStatus.label}
+                            </span>
+                          </div>
+                        </td>
 
-                        const limit = getCellLimit("sa", "t401", shift.key, param.key) || SA_T401_LIMITS[param.key];
-                        const validation = validateCellValue(cellVal, limit);
-                        const isOutOfLimit = validation.isOutOfLimit;
-                        const isNormal = validation.isNormal;
+                        {/* Inputs (FNH3, CNH3, TCl, PCl) */}
+                        {PARAMETERS.map((param) => {
+                          const cellVal = data[unit.key][shift.key][param.key];
+                          const hasValue = cellVal !== "" && cellVal !== null && cellVal !== undefined;
+                          const fieldKey = `${unit.key}_${shift.key}_${param.key}`;
+                          const isFormatError = !!errors[fieldKey];
+                          const isFieldEdited = Boolean(editedFields[unit.key]?.[shift.key]?.[param.key]);
 
-                        return (
-                          <td key={param.key} className="py-0.5 px-0.5 text-center align-middle">
-                            <div className="flex flex-col items-center justify-center mx-auto">
-                              <div className="relative w-full max-w-[80px]">
-                                <input
-                                  id={`t401-input-${unit.key}-${shift.key}-${param.key}`}
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={cellVal}
-                                  placeholder={param.placeholder}
-                                  onChange={(e) =>
-                                    handleCellChange(unit.key, shift.key, param.key, e.target.value)
-                                  }
-                                  title={
-                                    limit
-                                      ? isOutOfLimit
-                                        ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                          const limit = getCellLimit("sa", "t401", shift.key, param.key) || SA_T401_LIMITS[param.key];
+                          const validation = validateCellValue(cellVal, limit);
+                          const isOutOfLimit = validation.isOutOfLimit;
+                          const isNormal = validation.isNormal;
+
+                          return (
+                            <td key={param.key} className="py-0.5 px-0.5 text-center align-middle">
+                              <div className="flex flex-col items-center justify-center mx-auto">
+                                <div className="relative w-full max-w-[80px]">
+                                  <input
+                                    id={`t401-input-${unit.key}-${shift.key}-${param.key}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={cellVal}
+                                    disabled={isDisabled}
+                                    placeholder={param.placeholder}
+                                    onChange={(e) =>
+                                      handleCellChange(unit.key, shift.key, param.key, e.target.value)
+                                    }
+                                    title={
+                                      isDisabled
+                                        ? `Locked / Read-only (${shiftStatus.label})`
+                                        : limit
+                                        ? isOutOfLimit
+                                          ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                          : hasValue
+                                          ? `NORMAL: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                          : `Allowed range: ${limit.formattedRange}`
+                                        : param.label
+                                    }
+                                    className={`w-full px-1 py-0.5 h-6 text-xs font-mono font-bold text-center rounded-md transition-all focus:outline-none shadow-2xs ${
+                                      isDisabled
+                                        ? "bg-slate-100/90 text-slate-500 border border-slate-200 cursor-not-allowed"
+                                        : isOutOfLimit
+                                        ? "border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-1 focus:ring-rose-200"
+                                        : isFormatError
+                                        ? "border-red-500 bg-red-50 text-red-950 ring-1 ring-red-300"
+                                        : hasValue && isNormal && limit
+                                        ? "border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-1 focus:ring-emerald-200"
                                         : hasValue
-                                        ? `NORMAL: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
-                                        : `Allowed range: ${limit.formattedRange}`
-                                      : param.label
-                                  }
-                                  className={`w-full px-1 py-0.5 h-6 text-xs font-mono font-bold text-center rounded-md transition-all focus:outline-none shadow-2xs ${
-                                    isOutOfLimit
-                                      ? "border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-1 focus:ring-rose-200"
-                                      : isFormatError
-                                      ? "border-red-500 bg-red-50 text-red-950 ring-1 ring-red-300"
-                                      : hasValue && isNormal && limit
-                                      ? "border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-1 focus:ring-emerald-200"
-                                      : hasValue
-                                      ? "border-2 border-blue-500 bg-blue-50/60 text-blue-900 font-extrabold focus:ring-1 focus:ring-blue-200"
-                                      : "border border-slate-300 bg-white hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-100 text-slate-800"
-                                  }`}
-                                  aria-label={`Option ${unit.option} Shift ${shift.label} ${param.label}`}
-                                />
-                                {isOutOfLimit && (
-                                  <span
-                                    className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3 h-3 shadow-xs flex items-center justify-center pointer-events-none"
-                                    title="Out of limit"
-                                  >
-                                    <AlertCircle className="w-2 h-2 text-white" />
-                                  </span>
-                                )}
-                              </div>
+                                        ? "border-2 border-blue-500 bg-blue-50/60 text-blue-900 font-extrabold focus:ring-1 focus:ring-blue-200"
+                                        : "border border-slate-300 bg-white hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-100 text-slate-800"
+                                    }`}
+                                    aria-label={`Option ${unit.option} Shift ${shift.label} ${param.label}`}
+                                  />
+                                  {isOutOfLimit && (
+                                    <span
+                                      className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3 h-3 shadow-xs flex items-center justify-center pointer-events-none"
+                                      title="Out of limit"
+                                    >
+                                      <AlertCircle className="w-2 h-2 text-white" />
+                                    </span>
+                                  )}
+                                  {isFieldEdited && (
+                                    <span
+                                      id={`badge-edited-${unit.key}-${shift.key}-${param.key}`}
+                                      className="absolute -top-1.5 -left-1 bg-amber-500 text-white text-[7px] font-black px-1 rounded shadow-2xs pointer-events-none tracking-tight uppercase"
+                                      title="Field modified after initial save"
+                                    >
+                                      EDITED
+                                    </span>
+                                  )}
+                                </div>
 
-                              {/* Micro Status / Range */}
-                              <div className="h-3 flex items-center justify-center mt-0.5">
-                                {isFormatError ? (
-                                  <span className="text-[7.5px] text-red-600 font-extrabold leading-none">
-                                    Invalid
-                                  </span>
-                                ) : hasValue && isNormal && limit ? (
-                                  <span
-                                    id={`t401-status-${unit.key}-${shift.key}-${param.key}`}
-                                    className="text-[8px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 leading-none"
-                                  >
-                                    <CheckCircle2 className="w-2 h-2 text-emerald-600 shrink-0" />
-                                    <span>NORMAL</span>
-                                  </span>
-                                ) : hasValue && isOutOfLimit ? (
-                                  <span
-                                    id={`t401-status-${unit.key}-${shift.key}-${param.key}`}
-                                    className="px-1 py-0 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[7.5px] font-black tracking-tight whitespace-nowrap leading-none"
-                                  >
-                                    OUT OF LIMIT
-                                  </span>
-                                ) : (
-                                  <span
-                                    id={`t401-range-${unit.key}-${shift.key}-${param.key}`}
-                                    className="text-[8px] text-slate-400 font-medium leading-none"
-                                  >
-                                    {limit?.formattedRange ? limit.formattedRange.replace(" Kgm/m³", "") : ""}
-                                  </span>
-                                )}
+                                {/* Micro Status / Range */}
+                                <div className="h-3 flex items-center justify-center mt-0.5">
+                                  {isFormatError ? (
+                                    <span className="text-[7.5px] text-red-600 font-extrabold leading-none">
+                                      Invalid
+                                    </span>
+                                  ) : hasValue && isNormal && limit ? (
+                                    <span
+                                      id={`t401-status-${unit.key}-${shift.key}-${param.key}`}
+                                      className="text-[8px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 leading-none"
+                                    >
+                                      <CheckCircle2 className="w-2 h-2 text-emerald-600 shrink-0" />
+                                      <span>NORMAL</span>
+                                    </span>
+                                  ) : hasValue && isOutOfLimit ? (
+                                    <span
+                                      id={`t401-status-${unit.key}-${shift.key}-${param.key}`}
+                                      className="px-1 py-0 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[7.5px] font-black tracking-tight whitespace-nowrap leading-none"
+                                    >
+                                      OUT OF LIMIT
+                                    </span>
+                                  ) : (
+                                    <span
+                                      id={`t401-range-${unit.key}-${shift.key}-${param.key}`}
+                                      className="text-[8px] text-slate-400 font-medium leading-none"
+                                    >
+                                      {limit?.formattedRange ? limit.formattedRange.replace(" Kgm/m³", "") : ""}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         ))}
       </div>
+
+      {/* ── Pre-Save Confirmation Modal ── */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden transform transition-all">
+            <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Save className="w-4 h-4 text-blue-400" />
+                <h3 className="font-extrabold text-sm tracking-wide">Confirm T 401 Save</h3>
+              </div>
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="text-slate-400 hover:text-white transition cursor-pointer text-base leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="text-xs text-slate-600">
+                Are you sure you want to save the following changes for <strong>{formatDateDisplay(confirmData.date)}</strong>?
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-56 overflow-y-auto space-y-2">
+                {confirmData.changes.map((ch, idx) => (
+                  <div key={idx} className="bg-white p-2.5 rounded border border-slate-200 text-xs shadow-2xs">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-blue-900">{ch.towerLabel} ({ch.shiftLabel})</span>
+                      <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Option {ch.option}</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 text-center font-mono">
+                      {PARAMETERS.map((p) => (
+                        <div key={p.key} className="bg-slate-50 p-1 rounded border border-slate-100">
+                          <div className="text-[9px] text-slate-500 font-bold">{p.label}</div>
+                          <div className="text-xs font-black text-slate-800">{ch.data[p.key] || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-[11px] text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  Saving will lock previous shifts according to sequential shift policy and dispatch email notifications to the assigned SA Plant operator.
+                </span>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-300 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSave}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition shadow-xs cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Confirm & Save</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
