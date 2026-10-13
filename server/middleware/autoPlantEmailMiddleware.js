@@ -101,6 +101,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/cacl2-analysis') ||
     url.includes('/cacl2') ||
     url.includes('/acl-product') ||
+    url.includes('/acl-300-analysis') ||
+    url.includes('/acl-300') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {

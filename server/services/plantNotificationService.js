@@ -402,6 +402,11 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('acl product') ||
     String(analysisType || '').toLowerCase().includes('acl-product');
 
+  const isACL300Analysis =
+    analysisType === 'ACL 300# Analysis' ||
+    String(analysisType || '').toLowerCase().includes('acl 300') ||
+    String(analysisType || '').toLowerCase().includes('acl-300');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -697,6 +702,21 @@ PCL/TCL Analysis Measurements (Unit: Kgm/m³ | Tolerance: 0.05–0.10 +0.2/-0.02
 B S S (Sieve Analysis) — 9 Mesh Sizes:
 ` + bssMeshKeys.map(k => `- ${bssLabels[k]}: ${formatVal(bss[k])}`).join('\n') + `
 - Total Sieve Recovery: ${totalRecoveryStr}\n\n`;
+  } else if (isACL300Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.shiftRows || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftKeys = ['shift1', 'shift2', 'shift3'];
+    const shiftNames = { shift1: 'I SHIFT (06:00–14:00)', shift2: 'II SHIFT (14:00–22:00)', shift3: 'III SHIFT (22:00–06:00)' };
+
+    sieveTextSummary = `ACL 300# Shift Analysis (Particle Size & NaCl %):
+` + shiftKeys.map((sk) => {
+      const s = shiftsObj[sk] || {};
+      return `${shiftNames[sk]}:
+- +18 %: ${formatVal(s.p18)} (+18 Mesh Particle Spec)
+- +44 %: ${formatVal(s.p44)} (+44 Mesh Particle Spec)
+- NaCl %: ${formatVal(s.nacl)} (Sodium Chloride Content)`;
+    }).join('\n\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1384,6 +1404,60 @@ Attachment: ${excelFileName}
             </tr>
           </tbody>
         </table>
+      </div>`;
+  } else if (isACL300Analysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftsObj = rawData.shifts || rawData.shiftRows || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftList = [
+      { key: 'shift1', name: 'SHIFT 1', time: '06:00 – 14:00 (I Shift)', color: '#1e40af', bg: '#eff6ff' },
+      { key: 'shift2', name: 'SHIFT 2', time: '14:00 – 22:00 (II Shift)', color: '#4338ca', bg: '#eef2ff' },
+      { key: 'shift3', name: 'SHIFT 3', time: '22:00 – 06:00 (III Shift)', color: '#0f766e', bg: '#f0fdfa' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>ACL 300# Analysis — <strong>Shift Measurements Table</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Shift / Schedule</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">+18 %<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(+18 Mesh Spec)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">+44 %<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(+44 Mesh Spec)</span></th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">NaCl %<br><span style="font-size: 10px; font-weight: normal; opacity: 0.85;">(Sodium Chloride)</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${shiftList.map((s) => {
+              const row = shiftsObj[s.key] || {};
+              const isCurrentShift = shift && (shift.toLowerCase().includes(s.key) || shift.toLowerCase().includes(s.name.toLowerCase()));
+              const rowBg = isCurrentShift ? 'background-color: #fef9c3; border-left: 3px solid #eab308;' : '';
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: ${s.color};">
+                    <div>${s.name}</div>
+                    <div style="font-size: 10px; color: #64748b; font-weight: normal;">${s.time}</div>
+                  </td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">
+                    ${formatVal(row.p18)}
+                  </td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">
+                    ${formatVal(row.p44)}
+                  </td>
+                  <td style="padding: 8px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">
+                    ${formatVal(row.nacl)}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Operational Quality Standard: <strong>+18 Mesh Particle Distribution</strong>, <strong>+44 Mesh Particle Distribution</strong>, and <strong>Sodium Chloride (NaCl %)</strong>.
+        </div>
       </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
