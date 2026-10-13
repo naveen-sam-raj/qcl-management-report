@@ -96,6 +96,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/pure-salt-analysis') ||
     url.includes('/tk-203-analysis') ||
     url.includes('/tk203') ||
+    url.includes('/pcl-tcl-analysis') ||
+    url.includes('/pcl-tcl') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {

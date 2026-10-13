@@ -387,6 +387,12 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('tk 207') ||
     String(analysisType || '').toLowerCase().includes('tk207');
 
+  const isPclTclAnalysis =
+    analysisType === 'PCL/TCL Analysis' ||
+    String(analysisType || '').toLowerCase().includes('pcl/tcl') ||
+    String(analysisType || '').toLowerCase().includes('pcl-tcl') ||
+    String(analysisType || '').toLowerCase().includes('pcl_tcl');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -618,6 +624,31 @@ TK 203 Analysis Parameters (Unit: Kgm/m³):
       const isCurSlot = changedSlotKeys && changedSlotKeys.length > 0 ? (changedSlotKeys.includes(s.key) ? ' [Saved Now]' : '') : '';
       return `- ${s.time} (${s.shift})${isCurSlot}: FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCL: ${formatVal(row.tcl)}, PCL: ${formatVal(row.pcl)}, CO2: ${formatVal(row.co2)}`;
     }).join('\n') + '\n\n';
+  } else if (isPclTclAnalysis) {
+    const rawData = savedRecord?.data?.shiftRows || savedRecord?.data?.rows || savedRecord?.shiftRows || savedRecord?.data || {};
+    let sKey = 'shift1';
+    const cleanShift = String(shiftLabel || '').trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else {
+      sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT (06:00 – 14:00)' : sKey === 'shift2' ? 'II SHIFT (14:00 – 22:00)' : 'III SHIFT (22:00 – 06:00)';
+    const sValues = rawData[sKey] || {};
+    const streams = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const num = Number(v);
+      return !isNaN(num) ? num.toFixed(2) : String(v);
+    };
+
+    sieveTextSummary = `Shift:
+${shiftDisplay} (Persisted Snapshot)
+
+PCL/TCL Analysis Measurements (Unit: Kgm/m³ | Tolerance: 0.05–0.10 +0.2/-0.02 | Range: 0.03–0.30):
+` + streams.map(st => `- Stream ${st.toUpperCase()}: ${formatVal(sValues[st])}`).join('\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1119,6 +1150,56 @@ Attachment: ${excelFileName}
             }).join('')}
           </tbody>
         </table>
+      </div>`;
+  } else if (isPclTclAnalysis) {
+    const rawData = savedRecord?.data?.shiftRows || savedRecord?.data?.rows || savedRecord?.shiftRows || savedRecord?.data || {};
+    let sKey = 'shift1';
+    const cleanShift = String(shiftLabel || '').trim();
+    if (cleanShift === 'shift3' || /III|\b3\b|shift\s*3/i.test(cleanShift)) {
+      sKey = 'shift3';
+    } else if (cleanShift === 'shift2' || /II|\b2\b|shift\s*2/i.test(cleanShift)) {
+      sKey = 'shift2';
+    } else {
+      sKey = 'shift1';
+    }
+    const shiftDisplay = sKey === 'shift1' ? 'I SHIFT (06:00 – 14:00)' : sKey === 'shift2' ? 'II SHIFT (14:00 – 22:00)' : 'III SHIFT (22:00 – 06:00)';
+    const sValues = rawData[sKey] || {};
+    const streams = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const formatVal = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const num = Number(v);
+      return !isNaN(num) ? num.toFixed(2) : String(v);
+    };
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>PCL/TCL Analysis Results — Current Save: <strong style="color: #0f2e5a;">${shiftDisplay}</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 6px; text-align: left; border: 1px solid #cbd5e1;">Shift</th>
+              ${streams.map(st => `<th style="padding: 7px 4px; text-align: center; border: 1px solid #cbd5e1;">Stream ${st.toUpperCase()}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b; background-color: #f8fafc;">
+                ${sKey === 'shift1' ? 'I SHIFT' : sKey === 'shift2' ? 'II SHIFT' : 'III SHIFT'}
+                <div style="font-size: 9px; color: #16a34a; font-weight: bold;">CURRENT SAVE</div>
+              </td>
+              ${streams.map(st => {
+                const val = formatVal(sValues[st]);
+                return `<td style="padding: 6px 4px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a; background-color: #f0fdf4;">${val}</td>`;
+              }).join('')}
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Unit: <strong>Kgm/m³</strong> | Allowed Range: <strong>0.03–0.30 Kgm/m³</strong> (0.05–0.10 Kgm/m³ +0.2 / -0.02)
+        </div>
       </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
