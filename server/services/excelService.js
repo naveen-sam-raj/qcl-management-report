@@ -1642,10 +1642,186 @@ const generatePureSaltSieveAnalysisExcel = async (data) => {
   };
 };
 
+/**
+ * Generates an authentic .xlsx Excel workbook for ACL Plant -> Raw Salt Analysis.
+ *
+ * @param {Object} data - Analysis data containing date, plant, parameters, submittedBy
+ * @returns {Promise<{ filename: string, buffer: Buffer, base64: string }>}
+ */
+const generateRawSaltAnalysisExcel = async (data) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Tuticorin Alkali Chemicals and Fertilizers Limited - ACL Plant';
+  workbook.lastModifiedBy = data.submittedBy || 'Plant Admin';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `ACL_Plant_Raw_Salt_Analysis_${formattedDate}.xlsx`;
+
+  const worksheet = workbook.addWorksheet('Raw Salt Analysis', {
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true },
+    views: [{ showGridLines: true }],
+  });
+
+  worksheet.columns = [
+    { key: 'param', width: 20 },
+    { key: 'desc', width: 32 },
+    { key: 'spec', width: 22 },
+    { key: 'val', width: 20 },
+  ];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  const formatCellValue = (val) => {
+    if (
+      val === null ||
+      val === undefined ||
+      String(val).trim() === '' ||
+      String(val).trim() === '—' ||
+      String(val).trim() === '-' ||
+      String(val).trim() === 'null' ||
+      String(val).trim() === 'undefined'
+    ) {
+      return '*';
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? val : n;
+  };
+
+  // 1. Title Row
+  worksheet.mergeCells('A1:D1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'RAW SALT CHEMICAL ANALYSIS';
+  titleCell.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 30;
+
+  // 2. Subtitle Row
+  worksheet.mergeCells('A2:D2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = 'Tuticorin Alkali Chemicals and Fertilizers Limited - ACL Plant';
+  subCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 22;
+
+  // 3. Metadata
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+
+  const addMeta = (rowNum, l1, v1, l2, v2) => {
+    worksheet.getCell(`A${rowNum}`).value = l1;
+    worksheet.getCell(`A${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`A${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`B${rowNum}`).value = v1;
+    worksheet.getCell(`B${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+    worksheet.getCell(`C${rowNum}`).value = l2;
+    worksheet.getCell(`C${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`C${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`D${rowNum}`).value = v2;
+    worksheet.getCell(`D${rowNum}`).font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+
+    ['A', 'B', 'C', 'D'].forEach((col) => {
+      worksheet.getCell(`${col}${rowNum}`).border = metaBorder;
+    });
+    worksheet.getRow(rowNum).height = 20;
+  };
+
+  addMeta(4, 'Plant:', data.plant || 'ACL Plant', 'Saved At:', savedDateTimeDisplay);
+  addMeta(5, 'Analysis:', 'Raw Salt Analysis', 'Date:', data.date || formattedDate);
+
+  // 4. Headers
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = ['PARAMETER', 'DESCRIPTION', 'STANDARD SPEC', 'RECORDED VALUE'];
+  headerRow.height = 26;
+  ['A', 'B', 'C', 'D'].forEach((c, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: idx >= 2 ? 'center' : 'left', vertical: 'middle', indent: idx === 0 ? 1 : 0 };
+    cell.border = thinBorder;
+  });
+
+  // 5. Data rows
+  const params = data.parameters || (data.data && data.data.parameters) || data || {};
+  const paramsList = [
+    { key: 'nacl', label: 'NaCl %', subLabel: 'Sodium Chloride Content', spec: 'Standard Specs' },
+    { key: 'ca',   label: 'Ca %',   subLabel: 'Calcium Content',         spec: 'Standard Specs' },
+    { key: 'mg',   label: 'Mg %',   subLabel: 'Magnesium Content',       spec: 'Standard Specs' },
+    { key: 'so4',  label: 'SO4 %',  subLabel: 'Sulphate Content',        spec: 'Standard Specs' },
+    { key: 'ir',   label: 'IR %',   subLabel: 'Insoluble Residue',       spec: 'Standard Specs' },
+    { key: 'h2o',  label: 'H2O %',  subLabel: 'Moisture Content',        spec: 'Standard Specs' },
+  ];
+
+  paramsList.forEach((p, idx) => {
+    const rowNum = 8 + idx;
+    const row = worksheet.getRow(rowNum);
+    const val = formatCellValue(params[p.key]);
+    row.values = [p.label, p.subLabel, p.spec, val];
+    row.height = 24;
+
+    const bg = idx % 2 === 1 ? 'FFF8FAFC' : 'FFFFFFFF';
+    for (let c = 1; c <= 4; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else if (c === 2) {
+        cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF475569' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      } else if (c === 3) {
+        cell.font = { name: 'Calibri', size: 9.5, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0284C7' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+  });
+
+  // Footer note
+  worksheet.mergeCells('A15:D15');
+  const footerCell = worksheet.getCell('A15');
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (ACL Raw Salt Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(15).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
   generatePureSaltSieveAnalysisExcel,
+  generateRawSaltAnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,

@@ -407,6 +407,12 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('acl 300') ||
     String(analysisType || '').toLowerCase().includes('acl-300');
 
+  const isRawSaltAnalysis =
+    analysisType === 'Raw Salt Analysis' ||
+    String(analysisType || '').toLowerCase().includes('raw salt') ||
+    String(analysisType || '').toLowerCase().includes('raw-salt') ||
+    String(analysisType || '').toLowerCase().includes('raw_salt');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -717,6 +723,18 @@ B S S (Sieve Analysis) — 9 Mesh Sizes:
 - +44 %: ${formatVal(s.p44)} (+44 Mesh Particle Spec)
 - NaCl %: ${formatVal(s.nacl)} (Sodium Chloride Content)`;
     }).join('\n\n') + '\n\n';
+  } else if (isRawSaltAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const params = rawData.parameters || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    sieveTextSummary = `Raw Salt Chemical Analysis (6 Parameters):
+- NaCl %: ${formatVal(params.nacl)} (Sodium Chloride Content)
+- Ca %: ${formatVal(params.ca)} (Calcium Content)
+- Mg %: ${formatVal(params.mg)} (Magnesium Content)
+- SO4 %: ${formatVal(params.so4)} (Sulphate Content)
+- IR %: ${formatVal(params.ir)} (Insoluble Residue)
+- H2O %: ${formatVal(params.h2o)} (Moisture Content)\n\n`;
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -1459,6 +1477,52 @@ Attachment: ${excelFileName}
           Operational Quality Standard: <strong>+18 Mesh Particle Distribution</strong>, <strong>+44 Mesh Particle Distribution</strong>, and <strong>Sodium Chloride (NaCl %)</strong>.
         </div>
       </div>`;
+  } else if (isRawSaltAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const params = rawData.parameters || rawData || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const rawSaltParamsList = [
+      { key: 'nacl', label: 'NaCl %', subLabel: 'Sodium Chloride Content', spec: 'Standard Specs' },
+      { key: 'ca',   label: 'Ca %',   subLabel: 'Calcium Content',         spec: 'Standard Specs' },
+      { key: 'mg',   label: 'Mg %',   subLabel: 'Magnesium Content',       spec: 'Standard Specs' },
+      { key: 'so4',  label: 'SO₄ %',  subLabel: 'Sulphate Content',        spec: 'Standard Specs' },
+      { key: 'ir',   label: 'IR %',   subLabel: 'Insoluble Residue',       spec: 'Standard Specs' },
+      { key: 'h2o',  label: 'H₂O %',  subLabel: 'Moisture Content',        spec: 'Standard Specs' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Raw Salt Chemical Analysis — <strong>Recorded Specifications (6 Parameters)</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Description</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Standard Spec</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Persisted Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawSaltParamsList.map((p, idx) => {
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-family: monospace;">${p.label}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; color: #475569;">${p.subLabel}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 11px;">${p.spec}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace; font-size: 13px;">${formatVal(params[p.key])}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Raw Salt Input: Dissolution Stream & Brine Preparation Base
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -1862,6 +1926,21 @@ const executeSaveAndEmailWorkflow = async ({
     } else if (analysisType === 'Pure Salt Analysis' || (cleanType.toLowerCase().includes('pure_salt') && !cleanType.toLowerCase().includes('sieve'))) {
       const { generatePureSaltAnalysisExcel } = require('./excelService');
       excelResult = await generatePureSaltAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'Raw Salt Analysis' ||
+      cleanType.toLowerCase().includes('raw_salt') ||
+      cleanType.toLowerCase().includes('rawsalt')
+    ) {
+      const { generateRawSaltAnalysisExcel } = require('./excelService');
+      excelResult = await generateRawSaltAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
