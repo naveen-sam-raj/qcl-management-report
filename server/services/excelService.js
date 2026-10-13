@@ -3262,6 +3262,172 @@ const generateSAT401AnalysisExcel = async (data = {}) => {
   };
 };
 
+/**
+ * Generates an Excel spreadsheet for SA Plant Bi Carbonate NaCl/Na2CO3 Analysis
+ * Includes Time, Filter, and NaCl / Na2CO3 (%) readings
+ */
+const generateSABicarbonateAnalysisExcel = async (data = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SPIC / TFL Plant Management System';
+  workbook.created = new Date();
+
+  const formattedDate = formatDateForFilename(data.date);
+  const filename = data.filename || `SA_Plant_Bi_Carbonate_Analysis_${formattedDate}.xlsx`;
+  const worksheet = workbook.addWorksheet('Bi Carbonate Analysis');
+
+  worksheet.views = [{ showGridLines: true }];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  const metaBorder = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  // Column widths
+  worksheet.columns = [
+    { key: 'col1', width: 12 }, // Row #
+    { key: 'col2', width: 20 }, // Time
+    { key: 'col3', width: 24 }, // Filter
+    { key: 'col4', width: 28 }, // NaCl / Na2CO3 (%)
+  ];
+
+  // 1. Title Block
+  worksheet.mergeCells('A1:D1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'SOUTHERN PETROCHEMICAL INDUSTRIES CORPORATION LTD.';
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 28;
+
+  // 2. Subtitle Block
+  worksheet.mergeCells('A2:D2');
+  const subtitleCell = worksheet.getCell('A2');
+  subtitleCell.value = 'SA PLANT — SODA ASH PRODUCTION — BI CARBONATE NaCl/Na₂CO₃ ANALYSIS';
+  subtitleCell.font = { name: 'Calibri', size: 11.5, bold: true, color: { argb: 'FF0F2E5A' } };
+  subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(2).height = 24;
+
+  worksheet.getRow(3).height = 10;
+
+  // 3. Metadata
+  const savedDateStr = data.savedDateFormatted || formatDateForFilename(data.date);
+  const savedTimeStr = data.savedTimeFormatted || '';
+  const savedDateTimeDisplay = savedTimeStr ? `${savedDateStr} ${savedTimeStr} IST` : savedDateStr;
+
+  const addMeta = (rowNum, l1, v1, l2, v2) => {
+    worksheet.getCell(`A${rowNum}`).value = l1;
+    worksheet.getCell(`A${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`A${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`B${rowNum}`).value = v1;
+    worksheet.getCell(`B${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+    worksheet.getCell(`C${rowNum}`).value = l2;
+    worksheet.getCell(`C${rowNum}`).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    worksheet.getCell(`C${rowNum}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+
+    worksheet.getCell(`D${rowNum}`).value = v2;
+    worksheet.getCell(`D${rowNum}`).font = { name: 'Calibri', size: 10, bold: false, color: { argb: 'FF0F172A' } };
+
+    ['A', 'B', 'C', 'D'].forEach((col) => {
+      worksheet.getCell(`${col}${rowNum}`).border = metaBorder;
+    });
+    worksheet.getRow(rowNum).height = 20;
+  };
+
+  addMeta(4, 'Plant:', data.plant || 'SA Plant', 'Saved At:', savedDateTimeDisplay);
+  addMeta(5, 'Section:', 'Soda Ash Production', 'Analysis:', 'Bi Carbonate NaCl/Na₂CO₃');
+
+  // 4. Header Row
+  const headerRow = worksheet.getRow(7);
+  headerRow.values = [
+    '#',
+    'TIME',
+    'FILTER SELECTION',
+    'NaCl / Na₂CO₃ (%)',
+  ];
+  headerRow.height = 28;
+  ['A', 'B', 'C', 'D'].forEach((c, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2E5A' } };
+    cell.alignment = { horizontal: idx === 0 ? 'center' : idx === 3 ? 'center' : 'left', vertical: 'middle', indent: idx === 1 || idx === 2 ? 1 : 0 };
+    cell.border = thinBorder;
+  });
+
+  // 5. Data rows
+  const readings = Array.isArray(data.readings)
+    ? data.readings
+    : Array.isArray(data.data?.readings)
+    ? data.data.readings
+    : [];
+
+  let curRowNum = 8;
+  readings.forEach((r, idx) => {
+    const row = worksheet.getRow(curRowNum);
+    const nVal = parseFloat(r.naclNa2co3);
+    const valDisplay = (r.naclNa2co3 !== '' && r.naclNa2co3 !== null && r.naclNa2co3 !== undefined && !isNaN(nVal))
+      ? nVal
+      : (r.naclNa2co3 || '—');
+
+    row.values = [
+      idx + 1,
+      r.time || '—',
+      r.filter || '—',
+      valDisplay,
+    ];
+    row.height = 22;
+
+    for (let c = 1; c <= 4; c++) {
+      const cell = row.getCell(c);
+      cell.border = thinBorder;
+      if (c === 1) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      } else if (c === 2) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else if (c === 3) {
+        cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF334155' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      } else {
+        cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF0D9488' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (typeof cell.value === 'number') cell.numFmt = '0.00';
+      }
+    }
+    curRowNum++;
+  });
+
+  // Footer note
+  worksheet.mergeCells(`A${curRowNum}:D${curRowNum}`);
+  const footerCell = worksheet.getCell(`A${curRowNum}`);
+  footerCell.value = 'Generated automatically by SPIC / TFL Plant Management System (SA Plant Bi Carbonate Analysis)';
+  footerCell.font = { name: 'Calibri', size: 8.5, italic: true, color: { argb: 'FF94A3B8' } };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(curRowNum).height = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+
+  return {
+    filename,
+    buffer,
+    base64,
+  };
+};
+
 module.exports = {
   generatePureSaltAnalysisExcel,
   generatePureSaltExcel: generatePureSaltAnalysisExcel,
@@ -3274,6 +3440,7 @@ module.exports = {
   generateSAP413AnalysisExcel,
   generateSATK419AnalysisExcel,
   generateSAT401AnalysisExcel,
+  generateSABicarbonateAnalysisExcel,
   generatePlantExcel: generatePlantReportExcel,
   generatePlantReportExcel,
   generateReportsExcel,

@@ -454,6 +454,14 @@ const sendPlantAnalysisEmail = async ({
     (String(analysisType || '').toLowerCase().includes('t 401') && !String(analysisType || '').toLowerCase().includes('tk 401')) ||
     (String(analysisType || '').toLowerCase().includes('t401') && !String(analysisType || '').toLowerCase().includes('tk401'));
 
+  const isSABicarbonateAnalysis =
+    analysisType === 'Bi Carbonate NaCl/Na2CO3 Analysis' ||
+    analysisType === 'Bi Carbonate NaCl/Na₂CO₃ Analysis' ||
+    analysisType === 'Bi Carbonate Analysis' ||
+    analysisType === 'Bicarbonate Analysis' ||
+    (String(analysisType || '').toLowerCase().includes('bicarbonate') && !String(analysisType || '').toLowerCase().includes('moisture')) ||
+    (String(analysisType || '').toLowerCase().includes('bi carbonate') && !String(analysisType || '').toLowerCase().includes('moisture'));
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -916,6 +924,17 @@ TK 110 (Feed Tank):
           return `  ${s.label}: FNH3: ${formatVal(row.fnh3)}, CNH3: ${formatVal(row.cnh3)}, TCl: ${formatVal(row.tcl)}, PCl: ${formatVal(row.pcl)}`;
         }).join('\n');
       }).join('\n\n') + '\n\n';
+  } else if (isSABicarbonateAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    sieveTextSummary = `SA Plant Bi Carbonate NaCl/Na2CO3 Readings:\n` +
+      readings.map((r, i) => `#${i + 1} | Time: ${r.time || '—'} | Filter: ${r.filter || '—'} | NaCl/Na2CO3: ${formatVal(r.naclNa2co3)}%`).join('\n') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2103,6 +2122,48 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Tower: <strong>T 401 (Options A–F)</strong> | Frequency: <strong>Once in a Shift</strong>
         </div>
       </div>`;
+  } else if (isSABicarbonateAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const readings = Array.isArray(rawData.readings)
+      ? rawData.readings
+      : Array.isArray(rawData.data?.readings)
+      ? rawData.data.readings
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>SA Plant Soda Ash Production — <strong>Bi Carbonate NaCl/Na₂CO₃ Readings</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Time</th>
+              <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Filter Selection</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">NaCl / Na₂CO₃ (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${readings.map((r, i) => {
+              const rowBg = i % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              return `
+                <tr style="${rowBg}">
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #64748b;">${i + 1}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-family: monospace;">${r.time || '—'}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 600; color: #334155;">${r.filter || '—'}</td>
+                  <td style="padding: 5px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0d9488; font-family: monospace;">${formatVal(r.naclNa2co3)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Section: <strong>Soda Ash Production</strong> | Analysis: <strong>Bi Carbonate NaCl/Na₂CO₃</strong>
+        </div>
+      </div>`;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -2637,6 +2698,25 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSAT401AnalysisExcel } = require('./excelService');
       excelResult = await generateSAT401AnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'Bi Carbonate NaCl/Na2CO3 Analysis' ||
+      analysisType === 'Bi Carbonate NaCl/Na₂CO₃ Analysis' ||
+      analysisType === 'Bi Carbonate Analysis' ||
+      analysisType === 'Bicarbonate Analysis' ||
+      (cleanType.toLowerCase().includes('bicarbonate') && !cleanType.toLowerCase().includes('moisture')) ||
+      (cleanType.toLowerCase().includes('bi_carbonate') && !cleanType.toLowerCase().includes('moisture'))
+    ) {
+      const { generateSABicarbonateAnalysisExcel } = require('./excelService');
+      excelResult = await generateSABicarbonateAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
