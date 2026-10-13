@@ -80,11 +80,9 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             setData(buildEmptyData());
+            setReadings(DEFAULT_READINGS);
           } else if (record.shifts) {
             setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
@@ -94,9 +92,9 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
           } else if (record.data && record.data.readings) {
             setReadings(record.data.readings);
           } else if (Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
-            setData(record);
+            setReadings(record);
           } else {
-            setData(buildEmptyData());
+            setReadings(DEFAULT_READINGS);
           }
         }
       } catch (err) {
