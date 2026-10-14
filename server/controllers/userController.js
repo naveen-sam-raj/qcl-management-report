@@ -96,8 +96,22 @@ const createUser = async (req, res) => {
       targetCompanyAdmin = req.user;
     } else if (req.user.role === 'super_admin') {
       targetCompanyId = req.body.companyId;
+
+      // If companyId not directly passed, derive it from selected plant or default active company
+      if (!targetCompanyId && plantId) {
+        const plantObj = await Plant.findById(plantId);
+        if (plantObj && plantObj.company) {
+          targetCompanyId = plantObj.company;
+        }
+      }
+
+      // If still not found, check company assigned to super_admin or default to company
+      if (!targetCompanyId && (req.user.company?._id || req.user.company)) {
+        targetCompanyId = req.user.company?._id || req.user.company;
+      }
+
       if (!targetCompanyId) {
-        return res.status(400).json({ success: false, message: 'Please select a company for this user.' });
+        return res.status(400).json({ success: false, message: 'Please select a company or plant for this user.' });
       }
       targetCompanyAdmin = await User.findOne({ company: targetCompanyId, role: 'company_admin' });
     }
@@ -149,13 +163,16 @@ const createUser = async (req, res) => {
       });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = username.trim().toLowerCase();
+
     // Check unique email and username
-    const existingEmail = await User.findOne({ email: email.trim().toLowerCase() });
+    const existingEmail = await User.findOne({ email: cleanEmail });
     if (existingEmail) {
       return res.status(400).json({ success: false, message: 'Email address is already in use.' });
     }
 
-    const existingUsername = await User.findOne({ username: username.trim().toLowerCase() });
+    const existingUsername = await User.findOne({ username: cleanUsername });
     if (existingUsername) {
       return res.status(400).json({ success: false, message: 'Username is already taken.' });
     }
@@ -165,7 +182,7 @@ const createUser = async (req, res) => {
     if (plantId) {
       const plant = await Plant.findById(plantId);
       if (plant) {
-        if ((plant.company?._id || plant.company).toString() !== targetCompanyId.toString()) {
+        if (targetCompanyId && (plant.company?._id || plant.company).toString() !== targetCompanyId.toString()) {
           return res.status(400).json({
             success: false,
             message: 'Selected plant does not belong to the target company.',
@@ -256,7 +273,14 @@ const updateUser = async (req, res) => {
 
     const updates = {};
     if (name) updates.name = name.trim();
-    if (email) updates.email = email.trim().toLowerCase();
+    if (email) {
+      const cleanEmail = email.trim().toLowerCase();
+      const existingEmail = await User.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
+      if (existingEmail) {
+        return res.status(400).json({ success: false, message: 'Email address is already in use by another user.' });
+      }
+      updates.email = cleanEmail;
+    }
     if (mobile !== undefined) updates.mobile = mobile;
     if (plantId !== undefined) updates.plant = plantId || null;
     if (role) updates.role = role;

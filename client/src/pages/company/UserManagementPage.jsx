@@ -139,16 +139,18 @@ const UserManagementPage = () => {
       showToast('Password must be at least 6 characters', 'error');
       return;
     }
-    setSubmitting(true);
+    const selectedPlant = plants.find((p) => (p._id || p.id) === formData.plantId);
+    const targetCompanyId = selectedPlant?.company?._id || selectedPlant?.company || user?.company?._id || user?.company;
 
     const payload = {
-      name: formData.name,
-      email: formData.email,
-      username: formData.username,
+      name: formData.name.trim(),
+      email: formData.email.trim(),
+      username: formData.username.trim(),
       password: formData.password,
       confirmPassword: formData.confirmPassword,
       mobile: formData.mobile,
       plantId: formData.plantId,
+      companyId: targetCompanyId,
       role: formData.role || 'user',
       status: formData.status || 'active',
     };
@@ -164,32 +166,13 @@ const UserManagementPage = () => {
         return;
       }
     } catch (backendErr) {
-      if (backendErr.response?.data?.message) {
-        showToast(backendErr.response.data.message, 'error');
-        setSubmitting(false);
-        return;
-      }
+      const errorMsg = backendErr.response?.data?.message || backendErr.message || 'Failed to create user.';
+      showToast(errorMsg, 'error');
+      setSubmitting(false);
+      return;
+    } finally {
+      setSubmitting(false);
     }
-
-    // Fallback local update
-    const selectedPlant = plants.find((p) => p._id === formData.plantId);
-    const newUser = {
-      _id: 'user_' + Date.now(),
-      name: formData.name,
-      email: formData.email,
-      username: formData.username,
-      mobile: formData.mobile,
-      role: formData.role || 'user',
-      status: formData.status,
-      company: user?.company,
-      plant: selectedPlant ? { _id: selectedPlant._id, name: selectedPlant.name, code: selectedPlant.code } : null,
-      lastLogin: null,
-    };
-    setUsersList((prev) => [newUser, ...prev]);
-    showToast('User created successfully', 'success');
-    setIsCreateModalOpen(false);
-    setFormData({ name: '', email: '', username: '', password: '', confirmPassword: '', mobile: '', plantId: plants[0]?._id || '', role: 'user', status: 'active' });
-    setSubmitting(false);
   };
 
   // Edit User — Real Backend API Call
@@ -198,16 +181,16 @@ const UserManagementPage = () => {
     if (!activeUser) return;
     setSubmitting(true);
     try {
-      const res = await api.put(`/users/${activeUser._id}`, editFormData);
-      const updatedUser = res.data?.user || { ...activeUser, ...editFormData };
+      const selectedPlant = plants.find((p) => (p._id || p.id) === editFormData.plantId);
+      const updatePayload = {
+        ...editFormData,
+        name: editFormData.name?.trim(),
+        email: editFormData.email?.trim(),
+        companyId: selectedPlant?.company?._id || selectedPlant?.company || activeUser.company?._id || activeUser.company,
+      };
 
-      // Update fallback mock data if present
-      const mockIdx = MOCK_USERS.findIndex(
-        (u) => (u._id || u.id) === activeUser._id || u.username === activeUser.username
-      );
-      if (mockIdx !== -1) {
-        MOCK_USERS[mockIdx] = { ...MOCK_USERS[mockIdx], ...editFormData };
-      }
+      const res = await api.put(`/users/${activeUser._id}`, updatePayload);
+      const updatedUser = res.data?.user || { ...activeUser, ...updatePayload };
 
       setUsersList((prev) => prev.map((u) => (u._id === activeUser._id ? updatedUser : u)));
       showToast(res.data?.message || 'User profile updated successfully.', 'success');
@@ -215,10 +198,8 @@ const UserManagementPage = () => {
       setActiveUser(null);
     } catch (err) {
       console.error('Edit user error:', err);
-      setUsersList((prev) => prev.map((u) => (u._id === activeUser._id ? { ...u, ...editFormData } : u)));
-      showToast(err.response?.data?.message || 'Failed to update user profile.', 'error');
-      setIsEditModalOpen(false);
-      setActiveUser(null);
+      const errorMsg = err.response?.data?.message || err.message || 'Failed to update user profile.';
+      showToast(errorMsg, 'error');
     } finally {
       setSubmitting(false);
     }
