@@ -9,16 +9,23 @@ import {
 } from '../../services/analysisValidation';
 import {
   ArrowLeft,
-  Calendar,
-  Save,
   RotateCcw,
-  CheckCircle2,
   AlertCircle,
   ChevronRight,
   Gauge,
   Database,
   FlaskConical,
 } from 'lucide-react';
+import {
+  getTodayAsiaKolkata,
+  formatDateDisplay,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  retryAnalysisEmail,
+} from '../../utils/co2AnalysisHelper';
 
 // ─── BL1204/BL1203 Configuration ──────────────────────────────────────────────
 // Plant: CO2 Plant ONLY
@@ -77,28 +84,7 @@ const buildEmptyData = () =>
     SHIFT_ROWS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
 
-// Typical laboratory readings for BL1204/BL1203
-const buildDefaultData = () => ({
-  shift1: { co2: '15.0', o2: '6.0', co: '1000' },
-  shift2: { co2: '', o2: '', co: '' },
-  shift3: { co2: '', o2: '', co: '' },
-});
-
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
-
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
 
 // ─── Row styles by Shift grouping matching TK205 theme ─────────────────────────
 const getRowStyles = (shiftId) => {
@@ -128,93 +114,189 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States ──
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  // ── States (Locked Date in Asia/Kolkata) ──
+  const [date] = useState(() => getTodayAsiaKolkata());
   const [data, setData] = useState(buildEmptyData());
+  const [originalData, setOriginalData] = useState(null);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [dateError, setDateError] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
+  const [recordId, setRecordId] = useState(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [lockedShifts, setLockedShifts] = useState({});
+  const [editedFields, setEditedFields] = useState({});
 
-  // Fetch existing data when date changes
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
+
+  // Sequential shift workflow disabled check
+  const isShiftDisabled = useCallback(
+    (shiftKey) => {
+      if (isViewOnly) return true;
+      if (shiftKey === 'shift1') {
+        return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+      }
+      if (shiftKey === 'shift2') {
+        if (!lockedShifts.shift1Saved) return true;
+        return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+      }
+      if (shiftKey === 'shift3') {
+        if (!lockedShifts.shift2Saved) return true;
+        if (lockedShifts.shift3) return true;
+        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+        return false;
+      }
+      return true;
+    },
+    [isViewOnly, lockedShifts]
+  );
+
+  // Get status for shift badge: NEW, EDITABLE, WAITING, LOCKED
+  const getShiftStatus = useCallback(
+    (shiftKey) => {
+      if (shiftKey === 'shift1') {
+        if (lockedShifts.shift1 || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        return 'NEW';
+      }
+      if (shiftKey === 'shift2') {
+        if (lockedShifts.shift2 || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        return 'WAITING';
+      }
+      if (shiftKey === 'shift3') {
+        if (lockedShifts.shift3 || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
+          return 'LOCKED';
+        if (lockedShifts.shift3Saved) return 'EDITABLE';
+        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        return 'WAITING';
+      }
+      return 'WAITING';
+    },
+    [lockedShifts]
+  );
+
+  // Fetch existing data for current date
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/bl1204-analysis?date=${date}`);
+        const response = await api.get(`/api/bl1204-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
-          if (!record) {
-             // Leave default
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else if (record.data && record.data.rows) {
-            setData(record.data.rows);
+
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+
+          if (record) {
+            const fetchedRows =
+              record.rows || record.shifts || record.readings || record.data?.rows || record.data;
+            if (fetchedRows && typeof fetchedRows === 'object') {
+              const populated = buildEmptyData();
+              SHIFT_ROWS.forEach((shift) => {
+                if (fetchedRows[shift.key]) {
+                  PARAMETERS.forEach((p) => {
+                    const val = fetchedRows[shift.key][p.key];
+                    populated[shift.key][p.key] =
+                      val !== null && val !== undefined ? String(val) : '';
+                  });
+                }
+              });
+              setData(populated);
+              setOriginalData(JSON.parse(JSON.stringify(populated)));
+            } else {
+              setData(buildEmptyData());
+              setOriginalData(null);
+            }
+
+            setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
+            setEditedFields(record.editedFields || record.data?.editedFields || {});
           } else {
-            // Leave default
+            setData(buildEmptyData());
+            setOriginalData(null);
+            setLockedShifts({});
+            setEditedFields({});
           }
         }
       } catch (err) {
+        if (!active) return;
         console.warn('Could not fetch existing data', err);
+        setData(buildEmptyData());
+        setOriginalData(null);
+        setLockedShifts({});
+        setEditedFields({});
       }
     };
     fetchExistingData();
+
+    return () => {
+      active = false;
+    };
   }, [date]);
 
+  // Real-time input change
+  const handleChange = useCallback(
+    (rowKey, paramKey, value) => {
+      if (!isValidDecimal(value)) return;
+      if (isShiftDisabled(rowKey)) return;
 
-  // ── Real-time input change ──
-  const handleChange = useCallback((rowKey, paramKey, value) => {
-    if (!isValidDecimal(value)) return;
+      setData((prev) => ({
+        ...prev,
+        [rowKey]: {
+          ...(prev[rowKey] || {}),
+          [paramKey]: value,
+        },
+      }));
 
-    setData((prev) => ({
-      ...prev,
-      [rowKey]: {
-        ...(prev[rowKey] || {}),
-        [paramKey]: value,
-      },
-    }));
+      // Clear cell error
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`${rowKey}_${paramKey}`];
+        return next;
+      });
+      setSaveSuccess(false);
+    },
+    [isShiftDisabled]
+  );
 
-    // Clear cell error
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[`${rowKey}_${paramKey}`];
-      return next;
-    });
-    setSaveSuccess(false);
-  }, []);
-
-  // ── Reset form ──
+  // Reset form
   const handleReset = useCallback(() => {
-    setData(buildEmptyData());
+    if (originalData) {
+      setData(JSON.parse(JSON.stringify(originalData)));
+    } else {
+      setData(buildEmptyData());
+    }
     setErrors({});
-    setDateError(false);
     setSaveSuccess(false);
-    showToast?.('BL1204/BL1203 analysis form cleared successfully.', 'info');
-  }, [showToast]);
+    showToast?.('BL1204/BL1203 analysis form reset.', 'info');
+  }, [originalData, showToast]);
 
-  // ── Validation ──
+  // Validation
   const validateForm = useCallback(() => {
     let isValid = true;
     const newErrors = {};
-
-    if (!date) {
-      setDateError(true);
-      isValid = false;
-    } else {
-      setDateError(false);
-    }
 
     SHIFT_ROWS.forEach((row) => {
       PARAMETERS.forEach((p) => {
@@ -231,64 +313,231 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
 
     setErrors(newErrors);
     return isValid;
-  }, [date, data]);
+  }, [data]);
 
-  // ── Save / Submit ──
-  const handleSave = async () => {
+  const isShiftDiff = (oldShift, newShift) => {
+    if (!oldShift && newShift) return true;
+    if (oldShift && !newShift) return false;
+    return PARAMETERS.some((p) => {
+      let oldVal = oldShift?.[p.key] ?? null;
+      let newVal = newShift?.[p.key] ?? null;
+      if (newVal === '') newVal = null;
+      if (oldVal !== null && newVal !== null && !isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
+        return Number(oldVal) !== Number(newVal);
+      }
+      return String(oldVal) !== String(newVal);
+    });
+  };
+
+  // Trigger Save / Open confirmation modal
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     if (!validateForm()) {
       showToast?.('Please correct highlighted errors before saving.', 'error');
       return;
     }
 
-    // Check if at least one cell has value
-    const hasData = SHIFT_ROWS.some((row) =>
-      PARAMETERS.some((p) => {
-        const val = data[row.key]?.[p.key];
-        return val !== '' && val !== null && val !== undefined;
-      })
-    );
+    const shiftsToSave = [];
+    let isFinalEdit = false;
 
-    if (!hasData) {
-      showToast?.('Please enter at least one measurement value.', 'warning');
+    SHIFT_ROWS.forEach((shift) => {
+      if (isShiftDisabled(shift.key)) return;
+
+      const currentShiftData = data[shift.key];
+      const hasAnyValue =
+        currentShiftData &&
+        Object.values(currentShiftData).some((v) => v !== '' && v !== null && v !== undefined);
+      const oldShiftData = originalData ? originalData[shift.key] : null;
+      const hasDiff = isShiftDiff(oldShiftData, currentShiftData);
+
+      if (hasAnyValue && hasDiff) {
+        shiftsToSave.push({
+          key: shift.key,
+          label: shift.label,
+          time: shift.time,
+        });
+
+        if (
+          shift.key === 'shift3' &&
+          lockedShifts.shift3Saved &&
+          (lockedShifts.shift3Edits || 0) === 0
+        ) {
+          isFinalEdit = true;
+        }
+      }
+    });
+
+    if (shiftsToSave.length === 0) {
+      showToast?.('No new or modified shift data found to save.', 'info');
       return;
     }
 
+    if (shiftsToSave.length > 1) {
+      showToast?.(
+        'Only one shift can be saved at a time. Please save changes shift-by-shift.',
+        'warning'
+      );
+      return;
+    }
+
+    const shiftToSave = shiftsToSave[0];
+    const summaryItems = PARAMETERS.map((p) => ({
+      label: p.label,
+      value: data[shiftToSave.key]?.[p.key] || '—',
+      unit: p.unit,
+    })).filter((item) => item.value !== '—');
+
+    setConfirmData({
+      shift: shiftToSave,
+      isFinalEdit,
+      summaryItems,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // Perform actual API save
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
     setSaveSuccess(false);
+    setShowConfirmModal(false);
+
+    const shiftBeingSaved = confirmData?.shift;
+    const payload = {
+      date,
+      plant: 'CO2',
+      analysisType: 'BL1204/BL1203 Analysis',
+      tank: 'BL1204/BL1203',
+      unit: 'BL1204/BL1203',
+      frequency: 'Once in a shift',
+      shift: shiftBeingSaved ? shiftBeingSaved.label : 'I SHIFT',
+      rows: Object.fromEntries(
+        SHIFT_ROWS.map((s) => [
+          s.key,
+          Object.fromEntries(
+            PARAMETERS.map((p) => {
+              const val = data[s.key]?.[p.key];
+              return [
+                p.key,
+                val !== '' && val !== null && val !== undefined ? parseFloat(val) : null,
+              ];
+            })
+          ),
+        ])
+      ),
+      submittedBy: user?.name || 'Plant Operator',
+      submittedAt: new Date().toISOString(),
+    };
 
     try {
-      const payload = {
-        date,
-        plant: 'CO2',
-        analysisType: 'BL1204/BL1203 Analysis',
-        tank: 'BL1204/BL1203',
-        unit: 'BL1204/BL1203',
-        frequency: 'Once in a shift',
-        rows: data,
-        parameters: data.shift1 || {},
-        submittedBy: user?.name || 'Plant Operator',
-        submittedAt: new Date().toISOString(),
-      };
-
       const response = await api.post('/api/bl1204-analysis', payload);
 
+      if (!response?.data?.success) {
+        showToast?.(
+          response.data?.message || 'Unable to save BL1204/BL1203 data. Please try again.',
+          'error'
+        );
+        setSavePhase('save_failed');
+        return;
+      }
+
       setSaveSuccess(true);
-      showToast?.(response.data?.message || 'BL1204/BL1203 Analysis data saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 5000);
+      const savedDoc = response.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      if (savedDoc?.lockedShifts) {
+        setLockedShifts(savedDoc.lockedShifts);
+      }
+      if (savedDoc?.editedFields) {
+        setEditedFields(savedDoc.editedFields);
+      }
+      if (savedDoc?.rows) {
+        const synced = buildEmptyData();
+        SHIFT_ROWS.forEach((s) => {
+          if (savedDoc.rows[s.key]) {
+            PARAMETERS.forEach((p) => {
+              const val = savedDoc.rows[s.key][p.key];
+              synced[s.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+            });
+          }
+        });
+        setData(synced);
+        setOriginalData(JSON.parse(JSON.stringify(synced)));
+      }
+
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const emailPending = response.data?.emailPending;
+      const statusFromApi = response.data?.emailStatus;
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+        showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (emailPending || statusFromApi === 'pending') {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast?.('Saved — Email Dispatching 🚀', 'info');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
+        showToast?.(
+          'Data saved to database. Email delivery failed: ' +
+            (emailRes?.error || 'Server error'),
+          'warning'
+        );
+      }
     } catch (err) {
-      const msg =
-        err.response?.data?.message ||
-        err.response?.data?.errors?.[0] ||
-        'Failed to save BL1204/BL1203 Analysis data.';
-      showToast?.(msg, 'error');
+      setSavePhase('save_failed');
+      console.error('[BL1204Analysis] Save failed:', err);
+      const serverMessage = err.response?.data?.message || err.message;
+      showToast?.('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  const handleRetryEmail = async () => {
+    if (!recordId) {
+      showToast?.('Cannot retry email: Record ID is not available.', 'error');
+      return;
+    }
+    setSaving(true);
+    const result = await retryAnalysisEmail({
+      recordId,
+      endpoint: '/api/bl1204-analysis',
+    });
+    setSaving(false);
+
+    if (result.success) {
+      setSavePhase('completed');
+      setEmailStatusDetail('Email delivered successfully on retry ✓');
+      showToast?.(result.message, 'success');
+    } else {
+      setSavePhase('email_failed');
+      setEmailStatusDetail(result.error);
+      showToast?.(result.message, 'error');
+    }
+  };
+
+  const isEntireFormLocked =
+    isViewOnly ||
+    (Boolean(lockedShifts.shift1 || lockedShifts.shift2Saved) &&
+      Boolean(lockedShifts.shift2 || lockedShifts.shift3Saved) &&
+      Boolean(
+        lockedShifts.shift3 ||
+          (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)
+      ));
+
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb Header (Exact TK205 structure & theme) ──────────────── */}
+      {/* ── Breadcrumb Header ──────────────── */}
       <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Left: Back + Titles */}
@@ -319,109 +568,53 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
             </div>
           </div>
 
-          {/* Right: Date Section + Action Buttons */}
+          {/* Right: Read-Only Date Badge + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <label
-                htmlFor="bl1204-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="bl1204-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setDateError(false);
-                    setSaveSuccess(false);
-                  }}
-                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
-                    dateError
-                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
-                      : 'border-slate-300 hover:border-slate-400'
-                  }`}
-                />
-              </div>
-              {date && (
-                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-              {dateError && (
-                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                  <AlertCircle className="w-3 h-3" /> Required
-                </span>
-              )}
-            </div>
+            <LockedDateDisplay date={date} id="bl1204-date-display" />
 
             <div className="flex items-center gap-2 shrink-0">
               <button
                 id="btn-bl1204-reset"
                 onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-                title="Clear all fields"
+                disabled={saving || isEntireFormLocked}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
+                title="Reset modifications"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset</span>
               </button>
 
-              <button
+              <StatusSaveButton
                 id="btn-bl1204-save"
-                onClick={handleSave}
-                disabled={saving}
-                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
-                  saveSuccess
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
-                } disabled:opacity-60 disabled:cursor-not-allowed`}
-                title="Save BL1204/BL1203 data"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : saveSuccess ? (
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save / Submit'}</span>
-              </button>
+                saving={saving}
+                isLocked={isEntireFormLocked}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                disabled={isEntireFormLocked}
+                title="Save Shift Data"
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Success Banner (Matching TK205) ─────────────────────────────────── */}
-      {saveSuccess && (
-        <div
-          id="bl1204-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              BL1204/BL1203 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
-          </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {/* ── Status Banner ─────────────────────────────────── */}
+      <SaveStatusBanner
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="BL1204/BL1203 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
-      {/* ── Main Analysis Table Card (Matching TK205) ────────────────────────── */}
+      {/* ── Main Analysis Table Card ────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {/* Table Subheader Bar */}
         <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -445,11 +638,14 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-sm">
-            {/* Column headers: TIME | CO2 | O2 | CO */}
+            {/* Column headers: TIME | STATUS | CO2 | O2 | CO */}
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
                 <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-44 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
-                  TIME
+                  TIME / SHIFT
+                </th>
+                <th className="px-3 py-3 text-center text-xs font-extrabold uppercase tracking-wider w-28 bg-slate-900 text-slate-100 border-r border-slate-800 shrink-0">
+                  STATUS
                 </th>
                 {PARAMETERS.map((p, idx) => {
                   const limit = getCellLimit('co2', 'bl1204-bl1203', 'shift1', p.key);
@@ -460,9 +656,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                         idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
                       } ${p.colClass}`}
                     >
-                      <div className="font-extrabold text-blue-300 text-xs">
-                        {p.label}
-                      </div>
+                      <div className="font-extrabold text-blue-300 text-xs">{p.label}</div>
                       <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
                         {p.formula}
                       </div>
@@ -481,11 +675,11 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
             <tbody className="divide-y divide-slate-200">
               {SHIFT_ROWS.map((row) => {
                 const styles = getRowStyles(row.shiftId);
+                const disabled = isShiftDisabled(row.key);
+                const shiftStatus = getShiftStatus(row.key);
+
                 return (
-                  <tr
-                    key={row.key}
-                    className={`transition-colors duration-100 ${styles.row}`}
-                  >
+                  <tr key={row.key} className={`transition-colors duration-100 ${styles.row}`}>
                     {/* Time & Shift label */}
                     <td className="px-5 py-3 align-middle border-r border-slate-100">
                       <div className="flex items-center gap-2.5">
@@ -498,6 +692,11 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                       </div>
                     </td>
 
+                    {/* Status badge */}
+                    <td className="px-3 py-3 align-middle border-r border-slate-100 text-center">
+                      <RecordStatusBadge status={shiftStatus} />
+                    </td>
+
                     {/* Parameter input cells */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
@@ -508,6 +707,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                       const isOutOfLimit = validation.isOutOfLimit;
                       const isNormal = validation.isNormal;
                       const isFormatError = !!errors[fieldKey];
+                      const isFieldEdited = Boolean(editedFields[fieldKey]);
 
                       return (
                         <td
@@ -522,9 +722,8 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                                 inputMode="decimal"
                                 value={cellVal}
                                 placeholder={param.placeholder}
-                                onChange={(e) =>
-                                  handleChange(row.key, param.key, e.target.value)
-                                }
+                                disabled={disabled}
+                                onChange={(e) => handleChange(row.key, param.key, e.target.value)}
                                 title={
                                   limit
                                     ? isOutOfLimit
@@ -535,7 +734,9 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                                     : ''
                                 }
                                 className={`w-full text-center font-mono text-sm font-bold py-1.5 px-2.5 rounded-lg border transition shadow-2xs focus:outline-none ${
-                                  isOutOfLimit
+                                  disabled
+                                    ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed select-none'
+                                    : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
                                     : isFormatError
                                     ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
@@ -545,6 +746,17 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                                 }`}
                                 aria-label={`${param.label} at ${row.time}`}
                               />
+
+                              {/* EDITED badge */}
+                              {isFieldEdited && (
+                                <span
+                                  className="absolute -top-2 -left-2 bg-amber-500 text-white font-extrabold text-[9px] px-1.5 py-0.2 rounded-full shadow-xs"
+                                  title="Field modified in permitted edit"
+                                >
+                                  EDITED
+                                </span>
+                              )}
+
                               {isOutOfLimit && (
                                 <span
                                   className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
@@ -580,7 +792,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                                 className="text-[10px] text-emerald-600 font-bold mt-1 tracking-tight flex items-center gap-0.5 animate-fadeIn"
                                 title={`Normal: ${cellVal} ${limit.unit} (${limit.formattedRange})`}
                               >
-                                <CheckCircle2 className="w-3 h-3" /> Normal
+                                Normal
                               </span>
                             )}
 
@@ -604,12 +816,13 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
           </table>
         </div>
 
-        {/* Table footer info matching TK205 */}
+        {/* Table footer info */}
         <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>BL1204/BL1203</strong> (CO2, O2, CO). Numeric values only. Boundary values are considered Normal.
+              Values for <strong>BL1204/BL1203</strong> (CO2, O2, CO). Sequential shift workflow
+              enforced.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">
@@ -617,6 +830,19 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <SaveConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        analysisName="BL1204/BL1203 Analysis"
+        date={date}
+        shiftOrTime={confirmData?.shift?.label || 'Shift'}
+        summaryItems={confirmData?.summaryItems || []}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };
