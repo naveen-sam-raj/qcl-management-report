@@ -23,6 +23,14 @@ import {
   validateCellValue,
   OFFSET_DM_WATER_LIMITS,
 } from '../../services/analysisValidation';
+import {
+  getTodayAsiaKolkata,
+  formatDateDisplay,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  EditedBadge,
+  retryAnalysisEmail,
+} from '../../utils/offsetAnalysisHelper';
 
 // ─── Centralized Limit Configs for Offset Plant → DM Water (Frequency: Day) ───
 const PH_LIMIT = OFFSET_DM_WATER_LIMITS.ph;
@@ -74,51 +82,64 @@ const isValidInput = (val, field) => {
   return /^-?\d*\.?\d*$/.test(val);
 };
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
-
 const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  // Default date matching laboratory reference
-  const [date, setDate] = useState('2026-09-13');
+  // Date strictly initialized to today in Asia/Kolkata
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [readings, setReadings] = useState(DEFAULT_ROWS);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [recordId, setRecordId] = useState(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [editedFields, setEditedFields] = useState({});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
 
   // Fetch existing data when date changes
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/dm-water-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+          if (record?.editedFields) {
+            setEditedFields(record.editedFields);
+          } else {
+            setEditedFields({});
+          }
           
           if (!record) {
              // Leave default
           } else if (record.shifts) {
             setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
@@ -127,15 +148,23 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             setReadings(record);
           } else if (record.data && record.data.readings) {
             setReadings(record.data.readings);
-          } else {
-            // Leave default
           }
+        } else {
+          setEditedFields({});
+          setRecordId(null);
         }
       } catch (err) {
+        if (!active) return;
         console.warn('Could not fetch existing data', err);
+        setEditedFields({});
+        setRecordId(null);
       }
     };
     fetchExistingData();
+
+    return () => {
+      active = false;
+    };
   }, [date]);
 
 
@@ -194,8 +223,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   // ── Reset ──
   const handleReset = () => {
     setReadings(DEFAULT_ROWS);
-    setDate('2026-09-13');
+    setDate(getTodayAsiaKolkata());
     setErrors({});
+    setSaveSuccess(false);
     showToast?.('Values reset to laboratory default readings.', 'info');
   };
 
@@ -226,8 +256,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     return !hasError;
   };
 
-  // ── Save ──
-  const handleSave = async () => {
+  // ── Save Click (Opens Confirmation Modal) ──
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     if (!validate()) {
       showToast?.('Please correct invalid numeric entries.', 'error');
       return;
@@ -242,7 +273,28 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
+    // Build summary items
+    const summaryItems = [];
+    readings.forEach((r) => {
+      if (r.ph) summaryItems.push({ label: `${r.unit} pH`, value: r.ph });
+      if (r.cond) summaryItems.push({ label: `${r.unit} Cond`, value: r.cond });
+      if (r.th) summaryItems.push({ label: `${r.unit} TH`, value: r.th });
+      if (r.alk) summaryItems.push({ label: `${r.unit} Alk`, value: r.alk });
+      if (r.sio2) summaryItems.push({ label: `${r.unit} SiO₂`, value: r.sio2 });
+    });
+
+    setConfirmData({
+      summaryItems,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Confirm Save (Submits to Backend) ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
+    setShowConfirmModal(false);
 
     const payload = {
       date,
@@ -258,16 +310,51 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
     try {
       const response = await api.post('/api/dm-water-analysis', payload);
-      setSaving(false);
       setSaveSuccess(true);
-      showToast?.(response.data?.message || 'DM Water Analysis saved successfully!', 'success');
-      setTimeout(() => setSaveSuccess(false), 5000);
+      const savedDoc = response.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      if (savedDoc?.editedFields) {
+        setEditedFields(savedDoc.editedFields);
+      }
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+
+      const emailStatus = response.data?.emailStatus;
+      if (emailStatus === 'sent' || response.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Delivered to SMTP server ✓');
+        showToast?.('Saved & Emailed Successfully ✓', 'success');
+      } else if (emailStatus === 'pending' || response.data?.emailPending) {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast?.('Saved — Email Dispatching 🚀', 'info');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (response.data?.emailError || 'Server error'), 'warning');
+      }
     } catch (err) {
-      setSaving(false);
+      setSavePhase('idle');
       console.error('[DMWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const handleRetryEmail = () => {
+    retryAnalysisEmail({
+      endpoint: '/api/dm-water-analysis',
+      recordId,
+      setSavePhase,
+      setEmailStatusDetail,
+      showToast,
+      setSaving,
+    });
   };
 
   return (
@@ -306,43 +393,70 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <button
               id="btn-dm-reset"
               onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
               title="Reset to default reference values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
             </button>
 
-            <button
-              id="btn-dm-save"
-              onClick={handleSave}
-              disabled={saving}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
-                saveSuccess
-                  ? 'bg-emerald-600 hover:bg-emerald-700'
-                  : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Analysis</span>
-                </>
-              )}
-            </button>
+            {!isViewOnly ? (
+              <button
+                id="btn-dm-save"
+                onClick={handleSaveClick}
+                disabled={saving}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
+                  savePhase === 'completed'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : savePhase === 'email_failed'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : savePhase === 'completed' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Saved & Emailed ✓</span>
+                  </>
+                ) : savePhase === 'email_failed' ? (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Saved — Email Failed</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save Analysis</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
+                Read-Only
+              </span>
+            )}
           </div>
         </div>
       </div>
+
+      {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
+      <SaveStatusBanner
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="DM Water Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSaveSuccess(false)}
+        saving={saving}
+      />
 
       {/* ── Table Container ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -796,6 +910,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 ) : null
                               )}
                             </div>
+                            <EditedBadge isEdited={editedFields[`${row.id}_sio2`] || editedFields[`${row.unit}_sio2`]} />
                             {errors[`${row.id}_sio2`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_sio2`]}
@@ -839,6 +954,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Save Confirmation Modal ── */}
+      <SaveConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        analysisName="DM Water Analysis"
+        date={date}
+        shiftOrTime="Daily Frequency"
+        summaryItems={confirmData?.summaryItems || []}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

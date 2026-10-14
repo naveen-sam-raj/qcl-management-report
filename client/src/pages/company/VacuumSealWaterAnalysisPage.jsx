@@ -1,5 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
+import {
+  getTodayAsiaKolkata,
+  formatDateDisplay,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  EditedBadge,
+  retryAnalysisEmail,
+} from '../../utils/offsetAnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -16,9 +24,10 @@ import {
   Trash2,
   Clock,
   Gauge,
+  Lock,
 } from 'lucide-react';
 
-// Default initial readings matching the user's legacy screenshot
+// Default initial readings matching laboratory shifts (07:00, 15:00, 23:00)
 const DEFAULT_READINGS = [
   { id: '1', time: '07:00', fnh3: '1530', cnh3: '0', ca: 'Nil' },
   { id: '2', time: '15:00', fnh3: '', cnh3: '', ca: '' },
@@ -27,73 +36,123 @@ const DEFAULT_READINGS = [
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
-
 const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState('2026-09-11');
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [readings, setReadings] = useState(DEFAULT_READINGS);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [recordId, setRecordId] = useState(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [lockedShifts, setLockedShifts] = useState({
+    shift1Saved: false,
+    shift2Saved: false,
+    shift3Saved: false,
+    shift1Locked: false,
+    shift2Locked: false,
+    shift3Locked: false,
+    shift3Edits: 0,
+  });
+  const [editedFields, setEditedFields] = useState({});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
+
+  // Sequential shift permissions
+  const isRowDisabled = useCallback((row, idx) => {
+    if (isViewOnly) return true;
+    const time = String(row.time || '');
+    if (idx === 0 || time === '07:00') {
+      return Boolean(lockedShifts.shift1Locked || lockedShifts.shift2Saved);
+    }
+    if (idx === 1 || time === '15:00') {
+      if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
+      return Boolean(lockedShifts.shift2Locked || lockedShifts.shift3Saved);
+    }
+    if (idx === 2 || time === '23:00') {
+      if (!lockedShifts.shift2Saved) return true; // Waiting for Shift 2
+      if (lockedShifts.shift3Locked) return true;
+      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 2) return true;
+      return false;
+    }
+    return false;
+  }, [isViewOnly, lockedShifts]);
 
   // Fetch existing data when date changes
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/vacuum-seal-water?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+          if (record?.lockedShifts) {
+            setLockedShifts(record.lockedShifts);
+          }
+          if (record?.editedFields) {
+            setEditedFields(record.editedFields);
+          } else {
+            setEditedFields({});
+          }
+
           if (!record) {
              // Leave default
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
-          } else if (record.data && record.data.readings) {
-            setReadings(record.data.readings);
-          } else {
-            // Leave default
           }
+        } else {
+          setEditedFields({});
+          setRecordId(null);
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing Vacuum Seal Water data', err);
+        setEditedFields({});
+        setRecordId(null);
       }
     };
     fetchExistingData();
-  }, [date]);
 
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   // ── Handle reading cell change ──
   const handleCellChange = useCallback((id, field, value) => {
-    if (field !== 'time' && !isValidDecimal(value)) return;
+    if (field !== 'time' && field !== 'ca' && !isValidDecimal(value)) return;
 
     setReadings((prev) =>
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
@@ -117,6 +176,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
         time: '11:00',
         fnh3: '',
         cnh3: '',
+        ca: 'Nil',
       },
     ]);
   };
@@ -137,8 +197,8 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
     showToast?.('Values reset to defaults.', 'info');
   };
 
-  // ── Save handler ──
-  const handleSave = async () => {
+  // ── Save flow with confirmation modal ──
+  const initiateSave = () => {
     const newErrors = {};
 
     readings.forEach((r) => {
@@ -155,47 +215,118 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
-    setSaving(true);
-    try {
-      const payload = {
-        date,
-        plant: 'OFFSET',
-        unit: 'Vaccum seal water',
-        readings,
-        submittedBy: user?.name || 'Shift Chemist',
-      };
+    const payload = {
+      date,
+      plant: 'OFFSET',
+      unit: 'Vaccum seal water',
+      readings,
+      submittedBy: user?.name || 'Shift Chemist',
+    };
 
-      const res = await api.post('/api/vacuum-seal-water', payload);
+    setConfirmData(payload);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (!confirmData) return;
+    setSaving(true);
+    setSavePhase('saving');
+
+    try {
+      const res = await api.post('/vacuum-seal-water', confirmData);
 
       if (res.data?.success) {
-        showToast?.('Vacuum Seal Water Analysis saved successfully!', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        setSaveSuccess(true);
+        const record = res.data.data;
+        if (record?._id || record?.id) {
+          setRecordId(record._id || record.id);
+        }
+        if (record?.lockedShifts) {
+          setLockedShifts(record.lockedShifts);
+        }
+        if (record?.editedFields) {
+          setEditedFields(record.editedFields);
+        }
+
+        const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
+        const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
+        if (operatorEmail) setRecipientEmail(operatorEmail);
+
+        if (emailSuccess) {
+          setSavePhase('completed');
+          showToast?.(`Vacuum Seal Water Analysis saved & notification sent to ${operatorEmail || 'operator'}!`, 'success');
+        } else if (res.data.emailStatus === 'failed') {
+          setSavePhase('email_failed');
+          setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
+          showToast?.('Vacuum Seal Water Analysis saved to MongoDB. Email dispatch failed.', 'warning');
+        } else {
+          setSavePhase('email_pending');
+          showToast?.('Vacuum Seal Water Analysis saved to MongoDB. Email dispatch pending.', 'info');
+        }
       } else {
-        showToast?.(res.data?.message || 'Vacuum seal water data saved.', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        showToast?.(res.data?.message || 'Error saving Vacuum Seal Water data.', 'error');
+        setSavePhase('idle');
       }
     } catch (err) {
-      console.warn('API save error, using local fallback:', err);
-      showToast?.('Saved to local session successfully!', 'success');
-      setLastSaved(new Date().toLocaleTimeString());
+      console.error('API save error:', err);
+      const errMsg = err.response?.data?.message || 'Failed to save Vacuum Seal Water Analysis to database.';
+      showToast?.(errMsg, 'error');
+      setSavePhase('idle');
     } finally {
       setSaving(false);
+      setShowConfirmModal(false);
     }
   };
 
+  const handleRetryEmail = () => {
+    retryAnalysisEmail({
+      endpoint: '/vacuum-seal-water',
+      recordId,
+      setSavePhase,
+      setEmailStatusDetail,
+      showToast,
+      setSaving,
+    });
+  };
+
+  const summaryItems = useMemo(() => {
+    return [
+      { label: 'Time Slots Recorded', value: readings.length },
+      { label: 'Latest Slot Time', value: readings[readings.length - 1]?.time || '—' },
+      { label: 'Latest FNH3', value: readings[readings.length - 1]?.fnh3 ? `${readings[readings.length - 1].fnh3} ppm` : '—' },
+      { label: 'Latest CNH3', value: readings[readings.length - 1]?.cnh3 ? `${readings[readings.length - 1].cnh3} ppm` : '—' },
+    ];
+  }, [readings]);
+
   return (
     <div className="space-y-5 animate-fadeIn">
+      {/* ── SAVE STATUS BANNER ── */}
+      <SaveStatusBanner
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Vacuum Seal Water Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
+
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Back</span>
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -217,51 +348,9 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
 
-        {/* Right: Date Section + Action Buttons */}
-        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
-          )}
-          {/* Integrated Date Section */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-            <label
-              htmlFor="vsw-date-input"
-              className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-            >
-              <span>Date:</span>
-              <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="vsw-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="pl-7 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-                required
-              />
-            </div>
-            {date && (
-              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                {formatDateDisplay(date)}
-              </span>
-            )}
-          </div>
-
-          {/* Action Buttons: Add Time Slot, Reset & Save */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleAddRow}
-              className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Time Slot</span>
-            </button>
-
+        {/* Right: Action Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          {!isViewOnly && (
             <button
               onClick={handleReset}
               disabled={saving}
@@ -270,11 +359,13 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Reset
             </button>
+          )}
 
+          {!isViewOnly && (
             <button
-              onClick={handleSave}
+              onClick={initiateSave}
               disabled={saving}
-              className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
+              className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
             >
               {saving ? (
                 <>
@@ -288,12 +379,62 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 </>
               )}
             </button>
-          </div>
+          )}
         </div>
       </div>
 
       {/* ── MAIN CONTENT: Vacuum Seal Water Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
+        {/* Table Top Controls with Date */}
+        <div className="px-5 py-2.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-bold text-slate-900 uppercase">
+                Vacuum Seal Water Shift Measurements
+              </h2>
+            </div>
+
+            {/* Date Input inside Table Header */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="vsw-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="vsw-date-input"
+                  type="date"
+                  value={date}
+                  max={getTodayAsiaKolkata()}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
+                  required
+                />
+              </div>
+              {date && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {!isViewOnly && (
+            <button
+              onClick={handleAddRow}
+              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Time Slot
+            </button>
+          )}
+        </div>
+
         <div className="overflow-x-auto w-full table-responsive-container">
           <table className="w-full text-left border-collapse min-w-[750px] xl:min-w-full">
             <thead>
@@ -302,7 +443,7 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 <th className="py-3 px-4 w-36 text-center border-r border-slate-700">
                   <div className="flex items-center justify-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-sky-400" />
-                    TIME
+                    TIME / SHIFT
                   </div>
                 </th>
                 <th className="py-3 px-5 text-center border-r border-slate-700">
@@ -317,7 +458,10 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                   <div>Ca</div>
                   <div className="text-[10px] font-normal text-teal-300 normal-case">Limit: NIL</div>
                 </th>
-                <th className="py-3 px-2 w-16 text-center">ACTION</th>
+                <th className="py-3 px-4 text-center border-r border-slate-700">STATUS</th>
+                {!isViewOnly && (
+                  <th className="py-3 px-2 w-16 text-center">ACTION</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -329,44 +473,114 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 const isCaNil = row.ca !== undefined && ['nil', 'n', 'ni', 'none', '-'].includes(String(row.ca).toLowerCase().trim());
                 const caValid = caLimit && row.ca !== '' ? (isCaNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
 
+                const disabled = isRowDisabled(row, idx);
+
+                // Field-level edit detection
+                const isFnh3Edited = Boolean(
+                  editedFields[`${row.id}_fnh3`] ||
+                  editedFields[`${row.time}_fnh3`] ||
+                  (idx === 0 && editedFields['1_fnh3']) ||
+                  (idx === 1 && editedFields['2_fnh3']) ||
+                  (idx === 2 && editedFields['3_fnh3'])
+                );
+
+                const isCnh3Edited = Boolean(
+                  editedFields[`${row.id}_cnh3`] ||
+                  editedFields[`${row.time}_cnh3`] ||
+                  (idx === 0 && editedFields['1_cnh3']) ||
+                  (idx === 1 && editedFields['2_cnh3']) ||
+                  (idx === 2 && editedFields['3_cnh3'])
+                );
+
+                const isCaEdited = Boolean(
+                  editedFields[`${row.id}_ca`] ||
+                  editedFields[`${row.time}_ca`] ||
+                  (idx === 0 && editedFields['1_ca']) ||
+                  (idx === 1 && editedFields['2_ca']) ||
+                  (idx === 2 && editedFields['3_ca'])
+                );
+
+                // Shift Status Badge
+                let shiftBadge = null;
+                const time = String(row.time || '');
+                if (idx === 0 || time === '07:00') {
+                  if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300"><Lock className="w-3 h-3" /> LOCKED</span>;
+                  } else if (lockedShifts.shift1Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">EDITABLE</span>;
+                  } else {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">NEW</span>;
+                  }
+                } else if (idx === 1 || time === '15:00') {
+                  if (!lockedShifts.shift1Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">WAITING</span>;
+                  } else if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300"><Lock className="w-3 h-3" /> LOCKED</span>;
+                  } else if (lockedShifts.shift2Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">EDITABLE</span>;
+                  } else {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">NEW</span>;
+                  }
+                } else if (idx === 2 || time === '23:00') {
+                  if (!lockedShifts.shift2Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">WAITING</span>;
+                  } else if (lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 2)) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300"><Lock className="w-3 h-3" /> LOCKED</span>;
+                  } else if (lockedShifts.shift3Saved) {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">EDITABLE ({2 - (lockedShifts.shift3Edits || 0)} left)</span>;
+                  } else {
+                    shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">NEW</span>;
+                  }
+                }
+
                 return (
-                <tr
-                  key={row.id}
-                  className="hover:bg-sky-50/30 transition-colors"
-                >
-                  {/* Row index */}
-                  <td className="py-3 px-3 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
-                    {idx + 1}
-                  </td>
+                  <tr
+                    key={row.id}
+                    className={`transition-colors ${disabled ? 'bg-slate-50/60' : 'hover:bg-sky-50/30'}`}
+                  >
+                    {/* Row index */}
+                    <td className="py-3 px-3 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
+                      {idx + 1}
+                    </td>
 
-                  {/* TIME */}
-                  <td className="py-3 px-3 text-center border-r border-slate-100 bg-slate-50/30">
-                    <input
-                      type="text"
-                      value={row.time}
-                      onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                      placeholder="HH:mm"
-                      className="w-full text-center font-mono font-bold text-sm bg-white border border-slate-200 rounded-md py-1.5 px-2 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs"
-                    />
-                  </td>
+                    {/* TIME */}
+                    <td className="py-3 px-3 text-center border-r border-slate-100 bg-slate-50/30">
+                      <input
+                        type="text"
+                        value={row.time}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
+                        placeholder="HH:mm"
+                        className={`w-full text-center font-mono font-bold text-sm rounded-md py-1.5 px-2 transition shadow-2xs ${
+                          disabled
+                            ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'
+                            : 'bg-white border border-slate-200 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100'
+                        }`}
+                      />
+                    </td>
 
-                  {/* FNH3 */}
-                  <td className="py-3 px-4 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.fnh3}
-                      onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                        errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50 text-red-900'
-                          : row.fnh3 !== '' && row.fnh3 !== '0'
-                          ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  
+                    {/* FNH3 */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.fnh3}
+                          disabled={disabled}
+                          onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
+                          placeholder="0"
+                          className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
+                            disabled
+                              ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                              : errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
+                              ? 'border-red-500 bg-red-50 text-red-900'
+                              : row.fnh3 !== '' && row.fnh3 !== '0'
+                              ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
+                              : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                          }`}
+                        />
+                      </div>
+                      <EditedBadge isEdited={isFnh3Edited} />
                       {fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           {fnh3Limit.formattedLabel || `Limit: ${fnh3Limit.min}-${fnh3Limit.max}`}
@@ -379,38 +593,51 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                  {/* CNH3 */}
-                  <td className="py-3 px-4 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.cnh3}
-                      onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                        errors[`${row.id}_cnh3`]
-                          ? 'border-red-500 bg-red-50 text-red-900'
-                          : row.cnh3 !== '' && row.cnh3 !== '0'
-                          ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  </td>
-                  {/* Ca */}
-                  <td className="py-3 px-4 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      value={row.ca !== undefined ? row.ca : ''}
-                      onChange={(e) => handleCellChange(row.id, 'ca', e.target.value)}
-                      placeholder="Nil"
-                      className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
-                        errors[`${row.id}_ca`] || caValid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50 text-red-900'
-                          : row.ca !== undefined && row.ca !== ''
-                          ? 'border-teal-300 bg-teal-50/30 font-bold text-teal-950 focus:border-teal-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
+                    {/* CNH3 */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.cnh3}
+                          disabled={disabled}
+                          onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
+                          placeholder="0"
+                          className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
+                            disabled
+                              ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                              : errors[`${row.id}_cnh3`]
+                              ? 'border-red-500 bg-red-50 text-red-900'
+                              : row.cnh3 !== '' && row.cnh3 !== '0'
+                              ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
+                              : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                          }`}
+                        />
+                      </div>
+                      <EditedBadge isEdited={isCnh3Edited} />
+                    </td>
+
+                    {/* Ca */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={row.ca !== undefined ? row.ca : ''}
+                          disabled={disabled}
+                          onChange={(e) => handleCellChange(row.id, 'ca', e.target.value)}
+                          placeholder="Nil"
+                          className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
+                            disabled
+                              ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                              : errors[`${row.id}_ca`] || caValid.isOutOfLimit
+                              ? 'border-red-500 bg-red-50 text-red-900'
+                              : row.ca !== undefined && row.ca !== ''
+                              ? 'border-teal-300 bg-teal-50/30 font-bold text-teal-950 focus:border-teal-600'
+                              : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                          }`}
+                        />
+                      </div>
+                      <EditedBadge isEdited={isCaEdited} />
                       {caValid.isOutOfLimit && !errors[`${row.id}_ca`] && caLimit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           Limit: NIL
@@ -421,21 +648,29 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                           NIL
                         </div>
                       )}
-                  </td>
+                    </td>
 
-                  {/* ACTION */}
-                  <td className="py-3 px-2 text-center">
-                    <button
-                      onClick={() => handleRemoveRow(row.id)}
-                      disabled={readings.length <= 1}
-                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent"
-                      title="Delete row"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ); })}
+                    {/* STATUS */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
+                      {shiftBadge || <span className="text-xs text-slate-400">—</span>}
+                    </td>
+
+                    {/* ACTION */}
+                    {!isViewOnly && (
+                      <td className="py-3 px-2 text-center">
+                        <button
+                          onClick={() => handleRemoveRow(row.id)}
+                          disabled={readings.length <= 1 || disabled}
+                          className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                          title="Delete row"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -443,13 +678,15 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
         {/* Table Footer */}
         <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddRow}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5 text-blue-600" />
-              Add Another Time Slot
-            </button>
+            {!isViewOnly && (
+              <button
+                onClick={handleAddRow}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-600" />
+                Add Another Time Slot
+              </button>
+            )}
             <span className="text-slate-500 font-medium">
               {readings.length} {readings.length === 1 ? 'slot' : 'slots'} recorded
             </span>
@@ -460,6 +697,19 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── SAVE CONFIRMATION MODAL ── */}
+      <SaveConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        analysisName="Vacuum Seal Water Analysis"
+        date={date}
+        shiftOrTime={readings.length ? `${readings.length} Slots` : 'Daily'}
+        summaryItems={summaryItems}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

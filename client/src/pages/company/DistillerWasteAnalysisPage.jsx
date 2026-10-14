@@ -1,5 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
+import {
+  getTodayAsiaKolkata,
+  formatDateDisplay,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  EditedBadge,
+  retryAnalysisEmail,
+} from '../../utils/offsetAnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -30,69 +38,87 @@ const DEFAULT_READINGS = [
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
-
 const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState('2026-09-13');
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [readings, setReadings] = useState(DEFAULT_READINGS);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [recordId, setRecordId] = useState(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [editedFields, setEditedFields] = useState({});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
 
   // Fetch existing data when date changes
   useEffect(() => {
     if (!date) return;
+    let active = true;
+
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/distiller-waste-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+          if (record?.editedFields) {
+            setEditedFields(record.editedFields);
+          } else {
+            setEditedFields({});
+          }
+
           if (!record) {
              // Leave default
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
             setReadings(record.readings);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
-          } else if (record.data && record.data.readings) {
-            setReadings(record.data.readings);
-          } else {
-            // Leave default
           }
+        } else {
+          setEditedFields({});
+          setRecordId(null);
         }
       } catch (err) {
-        console.warn('Could not fetch existing data', err);
+        if (!active) return;
+        console.warn('Could not fetch existing Distiller Waste data', err);
+        setEditedFields({});
+        setRecordId(null);
       }
     };
     fetchExistingData();
-  }, [date]);
 
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {
@@ -157,8 +183,8 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
     showToast?.('Values reset to defaults.', 'info');
   };
 
-  // ── Save handler ──
-  const handleSave = async () => {
+  // ── Save flow with confirmation modal ──
+  const initiateSave = () => {
     const newErrors = {};
     const numericFields = ['exCao', 'fnh3', 'cnh3', 'tnh3', 'nahco3'];
 
@@ -176,47 +202,114 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
-    setSaving(true);
-    try {
-      const payload = {
-        date,
-        plant: 'OFFSET',
-        unit: 'Distiller waste',
-        readings,
-        submittedBy: user?.name || 'Shift Chemist',
-      };
+    const payload = {
+      date,
+      plant: 'OFFSET',
+      unit: 'Distiller waste',
+      readings,
+      submittedBy: user?.name || 'Shift Chemist',
+    };
 
-      const res = await api.post('/api/distiller-waste-analysis', payload);
+    setConfirmData(payload);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (!confirmData) return;
+    setSaving(true);
+    setSavePhase('saving');
+
+    try {
+      const res = await api.post('/distiller-waste-analysis', confirmData);
 
       if (res.data?.success) {
-        showToast?.('Distiller Waste Water Analysis saved successfully!', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        setSaveSuccess(true);
+        const record = res.data.data;
+        if (record?._id || record?.id) {
+          setRecordId(record._id || record.id);
+        }
+        if (record?.editedFields) {
+          setEditedFields(record.editedFields);
+        }
+
+        const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
+        const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
+        if (operatorEmail) setRecipientEmail(operatorEmail);
+
+        if (emailSuccess) {
+          setSavePhase('completed');
+          showToast?.(`Distiller Waste Analysis saved & notification sent to ${operatorEmail || 'operator'}!`, 'success');
+        } else if (res.data.emailStatus === 'failed') {
+          setSavePhase('email_failed');
+          setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
+          showToast?.('Distiller Waste Analysis saved to MongoDB. Email dispatch failed.', 'warning');
+        } else {
+          setSavePhase('email_pending');
+          showToast?.('Distiller Waste Analysis saved to MongoDB. Email dispatch pending.', 'info');
+        }
       } else {
-        showToast?.(res.data?.message || 'Distiller waste data saved.', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        showToast?.(res.data?.message || 'Error saving Distiller Waste data.', 'error');
+        setSavePhase('idle');
       }
     } catch (err) {
-      console.warn('API save error, using local fallback:', err);
-      showToast?.('Saved to local session successfully!', 'success');
-      setLastSaved(new Date().toLocaleTimeString());
+      console.error('API save error:', err);
+      const errMsg = err.response?.data?.message || 'Failed to save Distiller Waste Analysis to database.';
+      showToast?.(errMsg, 'error');
+      setSavePhase('idle');
     } finally {
       setSaving(false);
+      setShowConfirmModal(false);
     }
   };
 
+  const handleRetryEmail = () => {
+    retryAnalysisEmail({
+      endpoint: '/distiller-waste-analysis',
+      recordId,
+      setSavePhase,
+      setEmailStatusDetail,
+      showToast,
+      setSaving,
+    });
+  };
+
+  const summaryItems = useMemo(() => {
+    return [
+      { label: 'Time Slots Recorded', value: readings.length },
+      { label: 'Latest Time Slot', value: readings[readings.length - 1]?.time || '—' },
+      { label: 'Latest TNH3', value: readings[readings.length - 1]?.tnh3 ? `${readings[readings.length - 1].tnh3} ppm` : '—' },
+    ];
+  }, [readings]);
+
   return (
     <div className="space-y-5 animate-fadeIn">
+      {/* ── SAVE STATUS BANNER ── */}
+      <SaveStatusBanner
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Distiller Waste Water Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
+
       {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Back</span>
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-500">
@@ -240,39 +333,36 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
 
         {/* Action Buttons: Reset & Save */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
+          {!isViewOnly && (
+            <button
+              onClick={handleReset}
+              disabled={saving}
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
+            </button>
           )}
 
-          <button
-            onClick={handleReset}
-            disabled={saving}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
-
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                Save Distiller Data
-              </>
-            )}
-          </button>
+          {!isViewOnly && (
+            <button
+              onClick={initiateSave}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  Save Distiller Data
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -301,6 +391,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                   id="distiller-date-input"
                   type="date"
                   value={date}
+                  max={getTodayAsiaKolkata()}
                   onChange={(e) => setDate(e.target.value)}
                   className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
                   required
@@ -315,13 +406,15 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
             </div>
           </div>
 
-          <button
-            onClick={handleAddRow}
-            className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Time Slot
-          </button>
+          {!isViewOnly && (
+            <button
+              onClick={handleAddRow}
+              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Time Slot
+            </button>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -355,7 +448,9 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                   <div>NaHCO₃</div>
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
-                <th className="py-3 px-2 w-14 text-center">ACTION</th>
+                {!isViewOnly && (
+                  <th className="py-3 px-2 w-14 text-center">ACTION</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -372,44 +467,55 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                 const tnh3Limit = getCellLimit('offset', 'distiller-waste', '1 Hrs Once', 'tnh3');
                 const tnh3Valid = tnh3Limit && row.tnh3 !== '' ? validateCellValue(row.tnh3, tnh3Limit) : { isOutOfLimit: false };
 
+                const slotId = row.id || row.time || String(idx);
+                const isExCaoEdited = Boolean(editedFields[`${slotId}_exCao`] || editedFields[`${row.time}_exCao`]);
+                const isFnh3Edited = Boolean(editedFields[`${slotId}_fnh3`] || editedFields[`${row.time}_fnh3`]);
+                const isCnh3Edited = Boolean(editedFields[`${slotId}_cnh3`] || editedFields[`${row.time}_cnh3`]);
+                const isTnh3Edited = Boolean(editedFields[`${slotId}_tnh3`] || editedFields[`${row.time}_tnh3`]);
+                const isNahco3Edited = Boolean(editedFields[`${slotId}_nahco3`] || editedFields[`${row.time}_nahco3`]);
+
                 return (
-                <tr
-                  key={row.id}
-                  className="hover:bg-violet-50/30 transition-colors"
-                >
-                  {/* Row index */}
-                  <td className="py-2.5 px-3 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
-                    {idx + 1}
-                  </td>
+                  <tr
+                    key={row.id}
+                    className="hover:bg-violet-50/30 transition-colors"
+                  >
+                    {/* Row index */}
+                    <td className="py-2.5 px-3 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
+                      {idx + 1}
+                    </td>
 
-                  {/* TIME */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/30">
-                    <input
-                      type="text"
-                      value={row.time}
-                      onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                      placeholder="HH:mm"
-                      className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-md py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs"
-                    />
-                  </td>
+                    {/* TIME */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/30">
+                      <input
+                        type="text"
+                        value={row.time}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
+                        placeholder="HH:mm"
+                        className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-md py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      />
+                    </td>
 
-                  {/* ExCao */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.exCao}
-                      onChange={(e) => handleCellChange(row.id, 'exCao', e.target.value)}
-                      placeholder="00.00"
-                      className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_exCao`] || exCaoValid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50'
-                          : row.exCao !== '' && row.exCao !== '00.00' && row.exCao !== '0'
-                          ? 'border-amber-300 bg-amber-50/30 font-bold text-amber-950 focus:border-amber-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  
+                    {/* ExCao */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.exCao}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'exCao', e.target.value)}
+                        placeholder="00.00"
+                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
+                          isViewOnly
+                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                            : errors[`${row.id}_exCao`] || exCaoValid.isOutOfLimit
+                            ? 'border-red-500 bg-red-50'
+                            : row.exCao !== '' && row.exCao !== '00.00' && row.exCao !== '0'
+                            ? 'border-amber-300 bg-amber-50/30 font-bold text-amber-950 focus:border-amber-600'
+                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                        }`}
+                      />
+                      <EditedBadge isEdited={isExCaoEdited} />
                       {exCaoValid.isOutOfLimit && !errors[`${row.id}_exCao`] && exCaoLimit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           {exCaoLimit.formattedLabel || `Limit: ${exCaoLimit.min}-${exCaoLimit.max}`}
@@ -422,23 +528,26 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                  {/* FNH3 */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.fnh3}
-                      onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50'
-                          : row.fnh3 !== '' && row.fnh3 !== '0'
-                          ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  
+                    {/* FNH3 */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.fnh3}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
+                        placeholder="0"
+                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
+                          isViewOnly
+                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                            : errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
+                            ? 'border-red-500 bg-red-50'
+                            : row.fnh3 !== '' && row.fnh3 !== '0'
+                            ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
+                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                        }`}
+                      />
+                      <EditedBadge isEdited={isFnh3Edited} />
                       {fnh3Valid.isOutOfLimit && !errors[`${row.id}_fnh3`] && fnh3Limit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           {fnh3Limit.formattedLabel || `Limit: ${fnh3Limit.min}-${fnh3Limit.max}`}
@@ -451,23 +560,26 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                  {/* CNH3 */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.cnh3}
-                      onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_cnh3`] || cnh3Valid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50'
-                          : row.cnh3 !== '' && row.cnh3 !== '0'
-                          ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  
+                    {/* CNH3 */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.cnh3}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
+                        placeholder="0"
+                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
+                          isViewOnly
+                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                            : errors[`${row.id}_cnh3`] || cnh3Valid.isOutOfLimit
+                            ? 'border-red-500 bg-red-50'
+                            : row.cnh3 !== '' && row.cnh3 !== '0'
+                            ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
+                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                        }`}
+                      />
+                      <EditedBadge isEdited={isCnh3Edited} />
                       {cnh3Valid.isOutOfLimit && !errors[`${row.id}_cnh3`] && cnh3Limit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           {cnh3Limit.formattedLabel || `Limit: ${cnh3Limit.min}-${cnh3Limit.max}`}
@@ -480,23 +592,26 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                  {/* TNH3 (Total NH3) */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/40">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.tnh3}
-                      onChange={(e) => handleCellChange(row.id, 'tnh3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_tnh3`] || tnh3Valid.isOutOfLimit
-                          ? 'border-red-500 bg-red-50'
-                          : row.tnh3 !== '' && row.tnh3 !== '0'
-                          ? 'border-emerald-300 bg-emerald-50/40 font-black text-emerald-950 focus:border-emerald-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  
+                    {/* TNH3 (Total NH3) */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/40">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.tnh3}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'tnh3', e.target.value)}
+                        placeholder="0"
+                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
+                          isViewOnly
+                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                            : errors[`${row.id}_tnh3`] || tnh3Valid.isOutOfLimit
+                            ? 'border-red-500 bg-red-50'
+                            : row.tnh3 !== '' && row.tnh3 !== '0'
+                            ? 'border-emerald-300 bg-emerald-50/40 font-black text-emerald-950 focus:border-emerald-600'
+                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                        }`}
+                      />
+                      <EditedBadge isEdited={isTnh3Edited} />
                       {tnh3Valid.isOutOfLimit && !errors[`${row.id}_tnh3`] && tnh3Limit && (
                         <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
                           {tnh3Limit.formattedLabel || `Limit: ${tnh3Limit.min}-${tnh3Limit.max}`}
@@ -509,37 +624,44 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                  {/* NaHCO3 */}
-                  <td className="py-2.5 px-2 text-center border-r border-slate-100">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.nahco3}
-                      onChange={(e) => handleCellChange(row.id, 'nahco3', e.target.value)}
-                      placeholder="0"
-                      className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                        errors[`${row.id}_nahco3`]
-                          ? 'border-red-500 bg-red-50'
-                          : row.nahco3 !== '' && row.nahco3 !== '0'
-                          ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600'
-                          : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                      }`}
-                    />
-                  </td>
+                    {/* NaHCO3 */}
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.nahco3}
+                        disabled={isViewOnly}
+                        onChange={(e) => handleCellChange(row.id, 'nahco3', e.target.value)}
+                        placeholder="0"
+                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
+                          isViewOnly
+                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                            : errors[`${row.id}_nahco3`]
+                            ? 'border-red-500 bg-red-50'
+                            : row.nahco3 !== '' && row.nahco3 !== '0'
+                            ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600'
+                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                        }`}
+                      />
+                      <EditedBadge isEdited={isNahco3Edited} />
+                    </td>
 
-                  {/* ACTION */}
-                  <td className="py-2.5 px-2 text-center">
-                    <button
-                      onClick={() => handleRemoveRow(row.id)}
-                      disabled={readings.length <= 1}
-                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent"
-                      title="Delete row"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ); })}
+                    {/* ACTION */}
+                    {!isViewOnly && (
+                      <td className="py-2.5 px-2 text-center">
+                        <button
+                          onClick={() => handleRemoveRow(row.id)}
+                          disabled={readings.length <= 1}
+                          className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                          title="Delete row"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -547,13 +669,15 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         {/* Table Footer */}
         <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddRow}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5 text-blue-600" />
-              Add Another Time Slot
-            </button>
+            {!isViewOnly && (
+              <button
+                onClick={handleAddRow}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-600" />
+                Add Another Time Slot
+              </button>
+            )}
             <span className="text-slate-500 font-medium">
               {readings.length} {readings.length === 1 ? 'slot' : 'slots'} recorded
             </span>
@@ -564,6 +688,19 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── SAVE CONFIRMATION MODAL ── */}
+      <SaveConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        analysisName="Distiller Waste Water Analysis"
+        date={date}
+        shiftOrTime={readings.length ? `${readings.length} Slots (Hourly)` : 'Hourly'}
+        summaryItems={summaryItems}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

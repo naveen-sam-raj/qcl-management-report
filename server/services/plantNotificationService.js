@@ -51,21 +51,32 @@ const ANALYSIS_PLANT_MAPPING = {
   't 501': 'SA',
   'gas conc': 'SA',
 
-  // OFFSITE Plant
+  // OFFSITE / OFFSET Plant
   'dm water': 'OFFSITE',
+  'anion unit': 'OFFSITE',
   'boiler': 'OFFSITE',
+  'boiler feed': 'OFFSITE',
   'bfw': 'OFFSITE',
   'super heated steam': 'OFFSITE',
+  'shs': 'OFFSITE',
   'raw water': 'OFFSITE',
   'cbd': 'OFFSITE',
   'bottom ash': 'OFFSITE',
   'fly ash': 'OFFSITE',
   'distiller waste': 'OFFSITE',
+  'distiller': 'OFFSITE',
   'vacuum seal water': 'OFFSITE',
   'vaccum seal water': 'OFFSITE',
+  'vacuum seal': 'OFFSITE',
+  'vaccum seal': 'OFFSITE',
   'sewer water': 'OFFSITE',
   'sewar water': 'OFFSITE',
   'cooling water': 'OFFSITE',
+  'cooling water 200#': 'OFFSITE',
+  'cooling water/200#': 'OFFSITE',
+  'cooling water / 200#': 'OFFSITE',
+  'c.w water': 'OFFSITE',
+  'cw water': 'OFFSITE',
 
   // CO2 Plant
   'bl1204': 'CO2',
@@ -510,6 +521,57 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'Gas Conc Analysis' ||
     (String(analysisType || '').toLowerCase().includes('gas') && String(analysisType || '').toLowerCase().includes('conc')) ||
     String(analysisType || '').toLowerCase().includes('gas_conc');
+
+  const isOffsetDMWater =
+    analysisType === 'DM Water Analysis' ||
+    analysisType === 'Analysis For DM Water / Anion unit' ||
+    String(analysisType || '').toLowerCase().includes('dm water') ||
+    String(analysisType || '').toLowerCase().includes('anion unit');
+
+  const isOffsetBFW =
+    analysisType === 'Boiler Feed Water / Super Heated Steam Analysis' ||
+    analysisType === 'Boiler Feed Water (BFW) Analysis' ||
+    String(analysisType || '').toLowerCase().includes('boiler feed') ||
+    String(analysisType || '').toLowerCase().includes('bfw') ||
+    String(analysisType || '').toLowerCase().includes('super heated steam') ||
+    String(analysisType || '').toLowerCase().includes('shs');
+
+  const isOffsetRawWater =
+    analysisType === 'Raw Water Analysis' ||
+    String(analysisType || '').toLowerCase().includes('raw water');
+
+  const isOffsetCBD =
+    analysisType === 'CBD Analysis' ||
+    String(analysisType || '').toLowerCase().includes('cbd');
+
+  const isOffsetBottomAsh =
+    analysisType === 'Bottom Ash Analysis' ||
+    String(analysisType || '').toLowerCase().includes('bottom ash');
+
+  const isOffsetFlyAsh =
+    analysisType === 'Fly Ash Analysis' ||
+    String(analysisType || '').toLowerCase().includes('fly ash');
+
+  const isOffsetDistillerWaste =
+    analysisType === 'Distiller Waste Analysis' ||
+    String(analysisType || '').toLowerCase().includes('distiller');
+
+  const isOffsetVacuumSealWater =
+    analysisType === 'Vacuum Seal Water Analysis' ||
+    String(analysisType || '').toLowerCase().includes('vacuum seal') ||
+    String(analysisType || '').toLowerCase().includes('vaccum seal');
+
+  const isOffsetSewerWater =
+    analysisType === 'Sewer Water Analysis' ||
+    String(analysisType || '').toLowerCase().includes('sewer water') ||
+    String(analysisType || '').toLowerCase().includes('sewar water');
+
+  const isOffsetCoolingWater =
+    analysisType === 'Cooling Water Analysis' ||
+    analysisType === 'Cooling Water (C.W Water) Analysis' ||
+    String(analysisType || '').toLowerCase().includes('cooling water') ||
+    String(analysisType || '').toLowerCase().includes('c.w water') ||
+    String(analysisType || '').toLowerCase().includes('cw water');
 
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
@@ -1230,6 +1292,61 @@ Pure Salt Sieve Analysis Fractions (${shiftDisplay}):
 - BSS 60: ${p60Val}
 - BSS 100: ${p100Val}
 - -100: ${m100Val}
+`;
+  } else if (isOffsetCBD) {
+    const rawData = savedRecord?.data?.shifts || savedRecord?.shifts || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `CBD Analysis Parameters:
+- I SHIFT: pH: ${formatVal(rawData.iShift?.ph)}, PO4: ${formatVal(rawData.iShift?.po4)}, Na2SO3: ${formatVal(rawData.iShift?.na2so3)}, T.Alk: ${formatVal(rawData.iShift?.talk)}, T.Fe: ${formatVal(rawData.iShift?.tfe)}, SiO2: ${formatVal(rawData.iShift?.sio2)}, SS: ${formatVal(rawData.iShift?.ss)}, TDS: ${formatVal(rawData.iShift?.tds)}
+- II SHIFT: pH: ${formatVal(rawData.iiShift?.ph)}, PO4: ${formatVal(rawData.iiShift?.po4)}, Na2SO3: ${formatVal(rawData.iiShift?.na2so3)}, T.Alk: ${formatVal(rawData.iiShift?.talk)}, T.Fe: ${formatVal(rawData.iiShift?.tfe)}, SiO2: ${formatVal(rawData.iiShift?.sio2)}, SS: ${formatVal(rawData.iiShift?.ss)}, TDS: ${formatVal(rawData.iiShift?.tds)}
+- III SHIFT: pH: ${formatVal(rawData.iiiShift?.ph)}, PO4: ${formatVal(rawData.iiiShift?.po4)}, Na2SO3: ${formatVal(rawData.iiiShift?.na2so3)}, T.Alk: ${formatVal(rawData.iiiShift?.talk)}, T.Fe: ${formatVal(rawData.iiiShift?.tfe)}, SiO2: ${formatVal(rawData.iiiShift?.sio2)}, SS: ${formatVal(rawData.iiiShift?.ss)}, TDS: ${formatVal(rawData.iiiShift?.tds)}
+`;
+  } else if (isOffsetBottomAsh) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Bottom Ash Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: Combustible %: ${formatVal(r.combustible)}, GCV: ${formatVal(r.gcv)}, Moisture %: ${formatVal(r.moisture)}`).join('\n') + '\n';
+  } else if (isOffsetFlyAsh) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Fly Ash Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: Combustible %: ${formatVal(r.combustible)}, GCV: ${formatVal(r.gcv)}`).join('\n') + '\n';
+  } else if (isOffsetDistillerWaste) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Distiller Waste Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: Ex.CaO: ${formatVal(r.exCao)}, FNH3: ${formatVal(r.fnh3)}, CNH3: ${formatVal(r.cnh3)}, TNH3: ${formatVal(r.tnh3)}, NaHCO3: ${formatVal(r.nahco3)}`).join('\n') + '\n';
+  } else if (isOffsetVacuumSealWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Vacuum Seal Water Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: FNH3: ${formatVal(r.fnh3)}, CNH3: ${formatVal(r.cnh3)}, Ca: ${formatVal(r.ca)}`).join('\n') + '\n';
+  } else if (isOffsetSewerWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Sewer Water Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: Sec 200 (FNH3: ${formatVal(r.sec200?.fnh3)}, CNH3: ${formatVal(r.sec200?.cnh3)}) | Sec 400 (FNH3: ${formatVal(r.sec400?.fnh3)}, CNH3: ${formatVal(r.sec400?.cnh3)}, HCO3: ${formatVal(r.sec400?.hco3)}) | Final Outlet (FNH3: ${formatVal(r.finalOutlet?.fnh3)}, CNH3: ${formatVal(r.finalOutlet?.cnh3)}, HCO3: ${formatVal(r.finalOutlet?.hco3)}, PCL: ${formatVal(r.finalOutlet?.pcl)})`).join('\n') + '\n';
+  } else if (isOffsetCoolingWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Cooling Water Analysis Readings:
+` + rawData.map((r, i) => `- ${r.time || `Slot ${i+1}`}: pH: ${formatVal(r.ph)}, FRC: ${formatVal(r.frc)}, O-PO4: ${formatVal(r.opo4)}, Cl: ${formatVal(r.cl)}${r.turbidity !== undefined ? `, Turbidity: ${formatVal(r.turbidity)}, TDS: ${formatVal(r.tds)}, Fe: ${formatVal(r.fe)}, SiO2: ${formatVal(r.sio2)}, ALK: ${formatVal(r.alk)}, SO4: ${formatVal(r.so4)}, TH: ${formatVal(r.th)}, CaH: ${formatVal(r.cah)}, MgH: ${formatVal(r.mgh)}, Amm.N: ${formatVal(r.ammn)}` : ''}`).join('\n') + '\n';
+  } else if (isOffsetDMWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `DM Water Analysis Readings:
+` + rawData.map((r, i) => `- ${r.unit || `Sample ${i+1}`} (${r.time || '—'}): pH: ${formatVal(r.ph)}, Cond: ${formatVal(r.cond)}, TH: ${formatVal(r.th)}, Alk: ${formatVal(r.alk)}, SiO2: ${formatVal(r.sio2)}`).join('\n') + '\n';
+  } else if (isOffsetBFW) {
+    const rawData = Array.isArray(savedRecord?.data?.readings) ? savedRecord.data.readings : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Boiler Feed Water / SHS Analysis Readings:
+` + rawData.map((r, i) => `- ${r.stream || `Stream ${i+1}`} (${r.time || '15:00'}): pH: ${formatVal(r.ph)}, Cond: ${formatVal(r.cond)}, TH: ${formatVal(r.th)}, Alk: ${formatVal(r.alk || r.tAlk)}, SiO2: ${formatVal(r.sio2)}`).join('\n') + '\n';
+  } else if (isOffsetRawWater) {
+    const rawData = savedRecord?.data?.parameters || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    sieveTextSummary = `Raw Water Analysis Parameters (08:00 Sample):
+- Physical/Solids: pH: ${formatVal(rawData.ph)}, Cond: ${formatVal(rawData.cond)}, Turbidity: ${formatVal(rawData.turbidity)}, TDS: ${formatVal(rawData.tds)}, Free Cl2: ${formatVal(rawData.freeCl2)}, Fe: ${formatVal(rawData.fe)}, SiO2: ${formatVal(rawData.sio2)}
+- Hardness/Anions: M.Alk: ${formatVal(rawData.mAlk)}, TH: ${formatVal(rawData.th)}, Ca-H: ${formatVal(rawData.caH)}, Mg-H: ${formatVal(rawData.mgH)}, Cl: ${formatVal(rawData.cl)}, SO4: ${formatVal(rawData.so4)}, EMA: ${formatVal(rawData.ema)}
 `;
   }
 
@@ -3275,11 +3392,21 @@ const executeSaveAndEmailWorkflow = async ({
   if (!savedRecord) {
     try {
       // First, try to find the record that was just saved by the route handler
-      const existingRecord = await PlantAnalysisRecord.findOne({
-        plantCode: { $in: [plantCode, plantCode + ' Plant', plantCode + ' PLANT'] },
+      const plantCodeVariations = [
+        plantCode,
+        plantCode + ' Plant',
+        plantCode + ' PLANT',
+        ...(plantCode === 'OFFSITE' || plantCode === 'OFFSET' ? ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] : [])
+      ];
+      const lookupQuery = {
+        plantCode: { $in: plantCodeVariations },
         analysisType: resolvedAnalysisType,
-        date: targetDate
-      }).sort({ createdAt: -1 });
+        date: targetDate,
+      };
+      if (targetUnit) {
+        lookupQuery.unit = targetUnit;
+      }
+      const existingRecord = await PlantAnalysisRecord.findOne(lookupQuery).sort({ createdAt: -1 });
 
       if (existingRecord) {
         savedRecord = existingRecord;

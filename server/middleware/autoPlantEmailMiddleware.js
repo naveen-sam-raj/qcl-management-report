@@ -131,6 +131,20 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/lsa-bagging-analysis') ||
     url.includes('/lsa-bagging-sieve') ||
     url.includes('/lsa-sieve') ||
+    url.includes('/gas-conc') ||
+    url.includes('/gas-concentration') ||
+    url.includes('/dm-water') ||
+    url.includes('/bfw-analysis') ||
+    url.includes('/raw-water') ||
+    url.includes('/cbd-analysis') ||
+    url.includes('/bottom-ash') ||
+    url.includes('/fly-ash') ||
+    url.includes('/distiller-waste') ||
+    url.includes('/vacuum-seal') ||
+    url.includes('/vaccum-seal') ||
+    url.includes('/sewer-water') ||
+    url.includes('/sewar-water') ||
+    url.includes('/cooling-water') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {

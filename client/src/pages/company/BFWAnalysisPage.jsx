@@ -22,6 +22,14 @@ import {
   OFFSET_BFW_LIMITS,
   OFFSET_SHS_LIMITS,
 } from '../../services/analysisValidation';
+import {
+  getTodayAsiaKolkata,
+  formatDateDisplay,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  EditedBadge,
+  retryAnalysisEmail,
+} from '../../utils/offsetAnalysisHelper';
 
 // Default initial readings matching laboratory reference (Date: 13/09/2026)
 const DEFAULT_BFW_READINGS = [
@@ -67,37 +75,31 @@ const isValidInput = (val, field) => {
   return /^-?\d*\.?\d*$/.test(val);
 };
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
-
 const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
+  const isViewOnly = user?.role === 'user';
+  const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── Active Selected Option (BFW or SHS - Separate Selectable Options) ──
   const [selectedOption, setSelectedOption] = useState('bfw'); // 'bfw' | 'shs'
 
   // ── States ──
-  const [date, setDate] = useState('2026-09-13');
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [bfwReadings, setBfwReadings] = useState(DEFAULT_BFW_READINGS);
   const [shsReadings, setShsReadings] = useState(DEFAULT_SHS_READINGS);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [recordId, setRecordId] = useState(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [editedFields, setEditedFields] = useState({});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
 
   // Active configuration based on selected option
   const isBfwSelected = selectedOption === 'bfw';
@@ -105,6 +107,67 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const activeOptionLabel = isBfwSelected ? 'Boiler Feed Water (BFW)' : 'Super Heated Steam (SHS)';
   const activeReadings = isBfwSelected ? bfwReadings : shsReadings;
   const setActiveReadings = isBfwSelected ? setBfwReadings : setShsReadings;
+
+  // Fetch existing data when date changes
+  useEffect(() => {
+    if (!date) return;
+    let active = true;
+
+    const fetchExistingData = async () => {
+      try {
+        const response = await api.get(`/bfw-analysis?date=${date}`);
+        if (!active) return;
+
+        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
+          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
+        }
+        if (response.data?.emailStatus) {
+          if (response.data.emailStatus === 'sent') setSavePhase('completed');
+          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+          else setSavePhase('email_pending');
+        }
+
+        if (response.data && response.data.success && response.data.data) {
+          const payloadData = response.data.data;
+          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
+          if (record && (record._id || record.id)) {
+            setRecordId(record._id || record.id);
+          }
+          if (record?.editedFields) {
+            setEditedFields(record.editedFields);
+          } else {
+            setEditedFields({});
+          }
+
+          const rawReadings = record.readings || record.data?.readings || record.shifts || [];
+          if (Array.isArray(rawReadings) && rawReadings.length > 0) {
+            const bfw = rawReadings.filter((r) =>
+              String(r.stream || '').toLowerCase().includes('boiler') || String(r.stream || '').toLowerCase().includes('bfw')
+            );
+            const shs = rawReadings.filter((r) =>
+              String(r.stream || '').toLowerCase().includes('super') || String(r.stream || '').toLowerCase().includes('shs')
+            );
+
+            if (bfw.length > 0) setBfwReadings(bfw);
+            if (shs.length > 0) setShsReadings(shs);
+          }
+        } else {
+          setEditedFields({});
+          setRecordId(null);
+        }
+      } catch (err) {
+        if (!active) return;
+        console.warn('Could not fetch existing BFW data', err);
+        setEditedFields({});
+        setRecordId(null);
+      }
+    };
+    fetchExistingData();
+
+    return () => {
+      active = false;
+    };
+  }, [date]);
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {
@@ -176,16 +239,18 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       setShsReadings(DEFAULT_SHS_READINGS);
       showToast?.('SHS values reset to defaults.', 'info');
     }
+    setDate(getTodayAsiaKolkata());
     setErrors({});
+    setSaveSuccess(false);
   };
 
-  // ── Save handler (Preserves both BFW and SHS readings for the date) ──
-  const handleSave = async () => {
+  // ── Save Click (Opens Confirmation Modal) ──
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     const newErrors = {};
     const allReadings = [...bfwReadings, ...shsReadings];
 
     allReadings.forEach((r) => {
-      // Validate TH
       if (r.th !== '' && r.th !== null && r.th !== undefined) {
         const s = String(r.th).trim().toLowerCase();
         if (s !== 'nil' && s !== 'n' && s !== 'none' && s !== '-' && isNaN(Number(r.th))) {
@@ -193,7 +258,6 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         }
       }
 
-      // Validate numeric fields
       ['ph', 'cond', 'alk', 'sio2'].forEach((f) => {
         const val = r[f];
         if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
@@ -208,7 +272,29 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
+    const summaryItems = [];
+    allReadings.forEach((r) => {
+      if (r.ph) summaryItems.push({ label: `${r.stream} pH`, value: r.ph });
+      if (r.cond) summaryItems.push({ label: `${r.stream} Cond`, value: r.cond });
+      if (r.th) summaryItems.push({ label: `${r.stream} TH`, value: r.th });
+      if (r.alk) summaryItems.push({ label: `${r.stream} Alk`, value: r.alk });
+      if (r.sio2) summaryItems.push({ label: `${r.stream} SiO₂`, value: r.sio2 });
+    });
+
+    setConfirmData({
+      summaryItems,
+    });
+    setShowConfirmModal(true);
+  };
+
+  // ── Confirm Save (Submits to Backend) ──
+  const handleConfirmSave = async () => {
+    if (saving) return;
     setSaving(true);
+    setSavePhase('saving');
+    setShowConfirmModal(false);
+
+    const allReadings = [...bfwReadings, ...shsReadings];
     try {
       const payload = {
         date,
@@ -224,21 +310,51 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       };
 
       const res = await api.post('/api/bfw-analysis', payload);
+      setSaveSuccess(true);
+      const savedDoc = res.data?.data;
+      if (savedDoc && (savedDoc._id || savedDoc.id)) {
+        setRecordId(savedDoc._id || savedDoc.id);
+      }
+      if (savedDoc?.editedFields) {
+        setEditedFields(savedDoc.editedFields);
+      }
+      if (res.data?.emailRecipient) {
+        setRecipientEmail(res.data.emailRecipient);
+      }
 
-      if (res.data?.success) {
-        showToast?.('BFW & SHS Analysis saved successfully!', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+      const emailStatus = res.data?.emailStatus;
+      if (emailStatus === 'sent' || res.data?.emailSent) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Delivered to SMTP server ✓');
+        showToast?.('Saved & Emailed Successfully ✓', 'success');
+      } else if (emailStatus === 'pending' || res.data?.emailPending) {
+        setSavePhase('email_pending');
+        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
+        showToast?.('Saved — Email Dispatching 🚀', 'info');
       } else {
-        showToast?.(res.data?.message || 'BFW / SHS data saved.', 'success');
-        setLastSaved(new Date().toLocaleTimeString());
+        setSavePhase('email_failed');
+        setEmailStatusDetail(res.data?.emailError || 'Email delivery failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (res.data?.emailError || 'Server error'), 'warning');
       }
     } catch (err) {
-      console.warn('API save error, using local fallback:', err);
-      showToast?.('Saved to local session successfully!', 'success');
-      setLastSaved(new Date().toLocaleTimeString());
+      setSavePhase('idle');
+      console.error('[BFWAnalysis] Save error:', err);
+      const serverMessage = err.response?.data?.message || err.message;
+      showToast?.('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRetryEmail = () => {
+    retryAnalysisEmail({
+      endpoint: '/api/bfw-analysis',
+      recordId,
+      setSavePhase,
+      setEmailStatusDetail,
+      showToast,
+      setSaving,
+    });
   };
 
   return (
@@ -297,25 +413,60 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
             Reset
           </button>
 
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                Save Analysis Data
-              </>
-            )}
-          </button>
+          {!isViewOnly ? (
+            <button
+              onClick={handleSaveClick}
+              disabled={saving}
+              className={`px-4 py-2 rounded-lg text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer ${
+                savePhase === 'completed'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                  : savePhase === 'email_failed'
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+              }`}
+            >
+              {saving ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : savePhase === 'completed' ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Saved & Emailed ✓</span>
+                </>
+              ) : savePhase === 'email_failed' ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Saved — Email Failed</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Analysis Data</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
+              Read-Only
+            </span>
+          )}
         </div>
       </div>
+
+      {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
+      <SaveStatusBanner
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Boiler Feed Water / Super Heated Steam Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSaveSuccess(false)}
+        saving={saving}
+      />
 
       {/* ── SEPARATE SELECTABLE OPTIONS SWITCHER ── */}
       {/* Kept under the SAME option/selection area as TWO distinct selectable options */}
@@ -857,6 +1008,19 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Save Confirmation Modal ── */}
+      <SaveConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        analysisName="Boiler Feed Water / Super Heated Steam Analysis"
+        date={date}
+        shiftOrTime={`${activeOptionLabel} (Daily Frequency)`}
+        summaryItems={confirmData?.summaryItems || []}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

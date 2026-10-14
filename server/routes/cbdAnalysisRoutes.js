@@ -1,21 +1,66 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
+const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
 
-// In-memory cache storage for CBD Analysis records
+/**
+ * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
+ */
+const getTodayKolkata = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+};
+
+/**
+ * Compares two values for differences, preserving decimal precision
+ */
+const isValDiff = (o, n) => {
+  if (o === undefined || o === null || o === '') o = null;
+  if (n === undefined || n === null || n === '') n = null;
+  if (o === null && n === null) return false;
+  if (o === null || n === null) return true;
+  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
+    return Number(o) !== Number(n);
+  }
+  return String(o) !== String(n);
+};
+
+const SHIFT_FIELDS = ['ph', 'po4', 'na2so3', 'talk', 'tfe', 'sio2', 'ss', 'tds'];
+
+// Initial sample data from user's laboratory screenshot
+const SEED_SHIFTS = {
+  iShift:   { ph: '11.0', po4: '26', na2so3: '68', talk: '234', tfe: '3', sio2: '7', ss: '20', tds: '938' },
+  iiShift:  { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
+  iiiShift: { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
+};
+
+// In-memory fallback cache
 const cbdRecords = [
   {
     id: 'cbd_seed_1',
     date: '2026-09-13',
     plant: 'OFFSET',
+    plantCode: 'OFFSITE',
     unit: 'CBD',
     analysisType: 'CBD Analysis',
-    shifts: {
-      iShift:   { ph: '11.0', po4: '26', na2so3: '68', talk: '234', tfe: '3', sio2: '7', ss: '20', tds: '938' },
-      iiShift:  { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
-      iiiShift: { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
+    shifts: SEED_SHIFTS,
+    lockedShifts: {
+      shift1Saved: true,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
     },
+    editedFields: {},
+    editAuditHistory: [],
     submittedBy: 'Shift Chemist',
     submittedAt: new Date('2026-09-13T10:00:00Z').toISOString(),
   },
@@ -25,28 +70,172 @@ const cbdRecords = [
 router.use(protect);
 
 /**
- * @desc    Save CBD Analysis data
+ * @desc    Get CBD Analysis data
+ * @route   GET /api/cbd-analysis
+ * @access  Private
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { date, startDate, endDate, plant } = req.query;
+
+    // Resolve assigned OFFSITE Plant operator email
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || 'offsite_operator@tfl.com';
+    } catch (recipErr) {
+      assignedOperatorEmail = 'offsite_operator@tfl.com';
+    }
+
+    const defaultLocks = {
+      shift1Saved: false,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
+    };
+
+    if (date) {
+      try {
+        const query = {
+          date,
+          analysisType: 'CBD Analysis',
+          plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+        };
+        if (req.user && req.user.company) {
+          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        }
+
+        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        if (doc && doc.data) {
+          const payloadData = doc.data;
+          const shifts = payloadData.shifts || payloadData.data || payloadData;
+          return res.status(200).json({
+            success: true,
+            recordId: doc._id,
+            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+            emailStatus: doc.emailStatus || 'pending',
+            assignedOperatorEmail,
+            lockedShifts: payloadData.lockedShifts || defaultLocks,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            data: {
+              ...payloadData,
+              _id: doc._id,
+              id: doc._id,
+              date: doc.date,
+              shifts: shifts || SEED_SHIFTS,
+              lockedShifts: payloadData.lockedShifts || defaultLocks,
+              editedFields: payloadData.editedFields || {},
+              editAuditHistory: payloadData.editAuditHistory || [],
+              emailStatus: doc.emailStatus || 'pending',
+              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn('[CBD GET] MongoDB lookup note:', dbErr.message);
+      }
+
+      const match = cbdRecords.find((r) => r.date === date);
+      if (match) {
+        return res.status(200).json({
+          success: true,
+          assignedOperatorEmail,
+          lockedShifts: match.lockedShifts || defaultLocks,
+          data: match,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        assignedOperatorEmail,
+        lockedShifts: defaultLocks,
+        data: null,
+        message: `No record found for date ${date}`,
+      });
+    }
+
+    // List query
+    try {
+      const query = {
+        analysisType: 'CBD Analysis',
+        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+      };
+      if (startDate && endDate) {
+        query.date = { $gte: startDate, $lte: endDate };
+      }
+      if (req.user && req.user.company) {
+        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+      }
+
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      if (docs && docs.length > 0) {
+        const results = docs.map((d) => ({
+          ...d.data,
+          _id: d._id,
+          id: d._id,
+          date: d.date,
+          emailStatus: d.emailStatus,
+          emailRecipient: d.emailRecipient,
+        }));
+        return res.status(200).json({
+          success: true,
+          count: results.length,
+          data: results,
+        });
+      }
+    } catch (listErr) {
+      console.warn('[CBD GET list] MongoDB note:', listErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: cbdRecords.length,
+      data: cbdRecords,
+    });
+  } catch (error) {
+    console.error('[CBD GET] Error fetching records:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while retrieving CBD records: ' + error.message,
+    });
+  }
+});
+
+/**
+ * @desc    Save CBD Analysis data (Shift-based with Sequential Locking)
  * @route   POST /api/cbd-analysis
  * @access  Private
  */
 router.post('/', async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = req.body || {};
+    const todayKolkata = getTodayKolkata();
 
-    if (!payload || !payload.date) {
+    if (!payload.date) {
       return res.status(400).json({
         success: false,
         message: 'Analysis Date is required to save CBD Analysis.',
       });
     }
 
+    // Backend Date Restriction Enforcement (Asia/Kolkata)
+    if (payload.date !== todayKolkata) {
+      return res.status(400).json({
+        success: false,
+        message: `Date restriction policy: CBD Analysis can only be submitted for today (${todayKolkata}). Historical or future date entry (${payload.date}) is not permitted.`,
+      });
+    }
+
     const shifts = payload.shifts || {};
     const errors = [];
-    const fields = ['ph', 'po4', 'na2so3', 'talk', 'tfe', 'sio2', 'ss', 'tds'];
 
     ['iShift', 'iiShift', 'iiiShift'].forEach((sKey) => {
       const sData = shifts[sKey] || {};
-      fields.forEach((f) => {
+      SHIFT_FIELDS.forEach((f) => {
         const val = sData[f];
         if (val !== '' && val !== null && val !== undefined) {
           if (isNaN(Number(val))) {
@@ -64,77 +253,267 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const record = {
-      id: `cbd_${Date.now()}`,
+    // Fetch existing record in MongoDB
+    const query = {
       date: payload.date,
-      plant: payload.plant || 'OFFSET',
+      analysisType: 'CBD Analysis',
+      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+    };
+    if (req.user && req.user.company) {
+      query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+    }
+
+    const existingDoc = await PlantAnalysisRecord.findOne(query);
+
+    let lockedShifts = {
+      shift1Saved: false,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
+    };
+    let editedFields = {};
+    let editAuditHistory = [];
+    let oldShifts = { iShift: {}, iiShift: {}, iiiShift: {} };
+
+    if (existingDoc && existingDoc.data) {
+      if (existingDoc.data.lockedShifts) {
+        lockedShifts = { ...lockedShifts, ...existingDoc.data.lockedShifts };
+      }
+      editedFields = { ...(existingDoc.data.editedFields || {}) };
+      editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
+      oldShifts = existingDoc.data.shifts || existingDoc.data.data || oldShifts;
+    }
+
+    // Helper: Check if a shift has non-empty values
+    const hasData = (sData) =>
+      sData && SHIFT_FIELDS.some((f) => sData[f] !== '' && sData[f] !== null && sData[f] !== undefined);
+
+    const hasS1 = hasData(shifts.iShift);
+    const hasS2 = hasData(shifts.iiShift);
+    const hasS3 = hasData(shifts.iiiShift);
+
+    // 1. Sequential Progression Enforcement
+    if (hasS2 && !lockedShifts.shift1Saved && !hasS1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sequential shift restriction: Shift 1 must be completed and saved before proceeding to Shift 2.',
+      });
+    }
+
+    if (hasS3 && !lockedShifts.shift2Saved && !hasS2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sequential shift restriction: Shift 2 must be completed and saved before proceeding to Shift 3.',
+      });
+    }
+
+    // 2. Lock Enforcement
+    if (lockedShifts.shift1Locked) {
+      const s1Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iShift?.[f], shifts.iShift?.[f]));
+      if (s1Changed) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 1 is permanently locked. Modifications to Shift 1 are not permitted.',
+        });
+      }
+    }
+
+    if (lockedShifts.shift2Locked) {
+      const s2Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiShift?.[f], shifts.iiShift?.[f]));
+      if (s2Changed) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 2 is permanently locked. Modifications to Shift 2 are not permitted.',
+        });
+      }
+    }
+
+    if (lockedShifts.shift3Locked) {
+      const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
+      if (s3Changed) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 3 has exhausted its permitted edits and is permanently locked.',
+        });
+      }
+    }
+
+    // 3. Field-Level Edit Audit
+    const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
+    const nowIso = new Date().toISOString();
+
+    if (existingDoc && existingDoc.data) {
+      ['iShift', 'iiShift', 'iiiShift'].forEach((sKey) => {
+        SHIFT_FIELDS.forEach((f) => {
+          const oldVal = oldShifts[sKey]?.[f];
+          const newVal = shifts[sKey]?.[f];
+
+          if (isValDiff(oldVal, newVal)) {
+            const fieldKey = `${sKey}_${f}`;
+            editedFields[fieldKey] = true;
+            editAuditHistory.push({
+              shift: sKey === 'iShift' ? 'I SHIFT' : sKey === 'iiShift' ? 'II SHIFT' : 'III SHIFT',
+              field: f,
+              oldValue: oldVal !== undefined && oldVal !== null ? String(oldVal) : '',
+              newValue: newVal !== undefined && newVal !== null ? String(newVal) : '',
+              editedBy: editorName,
+              timestamp: nowIso,
+            });
+          }
+        });
+      });
+    }
+
+    // 4. Update Shift Lock State Machine
+    if (hasS1) {
+      lockedShifts.shift1Saved = true;
+    }
+
+    if (hasS2) {
+      lockedShifts.shift2Saved = true;
+      lockedShifts.shift1Locked = true; // Lock Shift 1 when Shift 2 is saved
+    }
+
+    if (hasS3) {
+      if (lockedShifts.shift3Saved) {
+        // This is an edit to Shift 3
+        const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
+        if (s3Changed) {
+          lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+          if (lockedShifts.shift3Edits >= 2) {
+            lockedShifts.shift3Locked = true;
+          }
+        }
+      } else {
+        // Initial Shift 3 save
+        lockedShifts.shift3Saved = true;
+        lockedShifts.shift2Locked = true; // Lock Shift 2 when Shift 3 is saved
+      }
+    }
+
+    // Active shift for notification subject
+    const activeShift = hasS3 ? 'III SHIFT' : hasS2 ? 'II SHIFT' : 'I SHIFT';
+
+    const recordData = {
+      id: existingDoc ? String(existingDoc._id) : `cbd_${Date.now()}`,
+      date: payload.date,
+      plant: 'OFFSET',
+      plantCode: 'OFFSITE',
+      plantName: 'OFFSITE Plant',
       unit: 'CBD',
       analysisType: 'CBD Analysis',
       shifts,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,
       submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company || 'TFL',
+      company: req.user?.company?._id || req.user?.company || null,
     };
 
-    // Upsert by date
-    const existingIndex = cbdRecords.findIndex((r) => r.date === payload.date);
-    if (existingIndex >= 0) {
-      cbdRecords[existingIndex] = { ...cbdRecords[existingIndex], ...record };
+    // Update in-memory fallback
+    const memIdx = cbdRecords.findIndex((r) => r.date === payload.date);
+    if (memIdx >= 0) {
+      cbdRecords[memIdx] = { ...cbdRecords[memIdx], ...recordData };
     } else {
-      cbdRecords.unshift(record);
+      cbdRecords.unshift(recordData);
     }
 
     // Persist to MongoDB PlantAnalysisRecord
+    let savedRecord = null;
     try {
-      if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
-            ...(req.user && req.user.company ? { company: req.user.company } : {}),
-          },
-          {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
+      savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        query,
+        {
+          plantName: 'OFFSITE Plant',
+          plantCode: 'OFFSITE',
+          analysisType: 'CBD Analysis',
+          unit: 'CBD',
+          date: payload.date,
+          shift: activeShift,
+          data: recordData,
+          submittedBy: recordData.submittedBy,
+          submittedById: recordData.submittedById,
+          company: recordData.company,
+          savedAt: new Date(),
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      recordData.id = String(savedRecord._id);
+      recordData._id = savedRecord._id;
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('[CBD POST] MongoDB save error:', dbErr);
+      return res.status(500).json({
+        success: false,
+        message: 'Database persistence failed: ' + dbErr.message,
+      });
     }
 
-    // Activity log entry
+    // Execute Email Workflow
+    const saveEventId = `save_cbd_${Date.now()}`;
+    let emailResult = { success: false, emailStatus: 'pending' };
+
+    try {
+      emailResult = await executeSaveAndEmailWorkflow({
+        plantIdentifier: 'OFFSITE',
+        analysisType: 'CBD Analysis',
+        unit: 'CBD',
+        shift: activeShift,
+        date: payload.date,
+        data: recordData,
+        submittedBy: recordData.submittedBy,
+        submittedById: recordData.submittedById,
+        company: recordData.company,
+        explicitRecord: savedRecord,
+        rawBody: { ...payload, ...recordData },
+        saveEventId,
+      });
+    } catch (notifyErr) {
+      console.warn('[CBD POST] Email notification dispatch note:', notifyErr.message);
+      emailResult = {
+        success: false,
+        emailStatus: 'failed',
+        error: notifyErr.message,
+      };
+    }
+
+    const emailStatus = emailResult.emailStatus || (emailResult.success ? 'sent' : 'failed');
+    const emailRecipient = emailResult.recipient || savedRecord.emailRecipient || 'offsite_operator@tfl.com';
+
+    // Activity Log
     try {
       if (ActivityLog && typeof ActivityLog.create === 'function') {
         await ActivityLog.create({
           action: 'CBD_ANALYSIS_SAVED',
           user: req.user?._id,
           userName: req.user?.name,
-          details: `CBD Analysis saved for date: ${payload.date}.`,
+          details: `CBD Analysis saved for date: ${payload.date} (${activeShift}). Email ${emailStatus} to ${emailRecipient}.`,
           timestamp: new Date(),
         });
       }
-    } catch (logErr) {
-      console.warn('[ActivityLog] Could not log CBD activity:', logErr.message);
-    }
+    } catch (logErr) {}
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: 'CBD Analysis data saved successfully.',
-      data: record,
+      message: emailResult.success
+        ? 'CBD Analysis saved and email sent successfully.'
+        : 'CBD Analysis saved in MongoDB. Email delivery failed: ' + (emailResult.error || emailResult.emailError || 'Undeliverable'),
+      recordId: savedRecord._id,
+      emailStatus,
+      emailRecipient,
+      emailMessageId: emailResult.messageId || '',
+      emailError: emailResult.error || emailResult.emailError,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
+      data: recordData,
     });
   } catch (error) {
-    console.error('[CBDAnalysis API] Error saving data:', error);
+    console.error('[CBD POST] Uncaught error saving data:', error);
     return res.status(500).json({
       success: false,
       message: 'Server error while processing CBD analysis: ' + error.message,
@@ -143,53 +522,58 @@ router.post('/', async (req, res) => {
 });
 
 /**
- * @desc    Retrieve CBD Analysis records
- * @route   GET /api/cbd-analysis
+ * @desc    Retry email notification for CBD Analysis
+ * @route   POST /api/cbd-analysis/:id/retry-email
  * @access  Private
  */
-router.get('/', async (req, res) => {
+router.post('/:id/retry-email', async (req, res) => {
   try {
-    const { date, startDate, endDate } = req.query;
-
-    let results = [...cbdRecords];
-
-    if (date) {
-      try {
-        if (PlantAnalysisRecord) {
-          const query = { date, analysisType: 'CBD Analysis' };
-          if (req.user && req.user.company) {
-            query.$or = [{ company: req.user.company }, { company: null }];
-          }
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-          if (doc && doc.data) {
-            return res.status(200).json({
-              success: true,
-              data: [doc.data] // return as array because the frontend usually expects array or we modified it to handle both
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
-      }
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Valid Record ID is required for email retry.' });
     }
 
-
-    if (date) {
-      results = results.filter((r) => r.date === date);
-    } else if (startDate && endDate) {
-      results = results.filter((r) => r.date >= startDate && r.date <= endDate);
+    const record = await PlantAnalysisRecord.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'Record not found for email retry.' });
     }
+
+    const retryEventId = `retry_cbd_${Date.now()}`;
+    const emailResult = await executeSaveAndEmailWorkflow({
+      plantIdentifier: 'OFFSITE',
+      analysisType: record.analysisType || 'CBD Analysis',
+      unit: record.unit || 'CBD',
+      shift: record.shift || 'All Shifts',
+      date: record.date,
+      data: record.data,
+      submittedBy: req.user?.name || record.submittedBy,
+      submittedById: req.user?._id || record.submittedById,
+      company: record.company,
+      explicitRecord: record,
+      rawBody: record.data,
+      saveEventId: retryEventId,
+    });
+
+    const status = emailResult.success ? 'sent' : 'failed';
+    record.emailStatus = status;
+    if (emailResult.recipient) record.emailRecipient = emailResult.recipient;
+    await record.save();
 
     return res.status(200).json({
       success: true,
-      count: results.length,
-      data: results,
+      emailSent: emailResult.success,
+      emailStatus: status,
+      emailRecipient: record.emailRecipient,
+      emailError: emailResult.error || emailResult.emailError,
+      message: emailResult.success
+        ? `Notification email successfully sent to ${record.emailRecipient}.`
+        : `Email retry failed: ${emailResult.error || emailResult.emailError || 'Delivery rejected'}.`,
     });
   } catch (error) {
-    console.error('[CBDAnalysis API] Error fetching records:', error);
+    console.error('[CBD Retry Email] Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Server error while retrieving CBD records.',
+      message: 'Server error during email retry: ' + error.message,
     });
   }
 });

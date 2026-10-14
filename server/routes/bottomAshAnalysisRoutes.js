@@ -1,21 +1,75 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
+const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
 
-// In-memory cache storage for Bottom Ash Analysis records
+/**
+ * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
+ */
+const getTodayKolkata = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+};
+
+/**
+ * Compares two values for differences, preserving decimal precision
+ */
+const isValDiff = (o, n) => {
+  if (o === undefined || o === null || o === '') o = null;
+  if (n === undefined || n === null || n === '') n = null;
+  if (o === null && n === null) return false;
+  if (o === null || n === null) return true;
+  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
+    return Number(o) !== Number(n);
+  }
+  return String(o) !== String(n);
+};
+
+const getShiftFromTime = (timeStr) => {
+  if (!timeStr) return 'shift1';
+  const hour = parseInt(String(timeStr).split(':')[0], 10);
+  if (isNaN(hour)) return 'shift1';
+  if (hour >= 6 && hour < 14) return 'shift1';
+  if (hour >= 14 && hour < 22) return 'shift2';
+  return 'shift3';
+};
+
+const NUMERIC_FIELDS = ['combustible', 'gcv', 'moisture'];
+
+// Seed readings from laboratory specifications
+const SEED_READINGS = [
+  { id: '1', time: '07:00', combustible: '1.0', gcv: '78', moisture: '23.7' },
+  { id: '2', time: '15:00', combustible: '', gcv: '', moisture: '' },
+  { id: '3', time: '23:00', combustible: '', gcv: '', moisture: '' },
+];
+
+// In-memory fallback cache
 const bottomAshRecords = [
   {
     id: 'bottomash_seed_1',
     date: '2026-09-14',
     plant: 'OFFSET',
+    plantCode: 'OFFSITE',
     unit: 'Bottom ash',
     analysisType: 'Bottom Ash Analysis',
-    readings: [
-      { id: 'r1', time: '07:00', combustible: '1.0', gcv: '78', moisture: '23.7' },
-      { id: 'r2', time: '15:00', combustible: '', gcv: '', moisture: '' },
-      { id: 'r3', time: '23:00', combustible: '', gcv: '', moisture: '' },
-    ],
+    readings: SEED_READINGS,
+    lockedShifts: {
+      shift1Saved: true,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
+    },
+    editedFields: {},
+    editAuditHistory: [],
     submittedBy: 'Shift Chemist',
     submittedAt: new Date('2026-09-14T07:30:00Z').toISOString(),
   },
@@ -25,41 +79,185 @@ const bottomAshRecords = [
 router.use(protect);
 
 /**
- * @desc    Save Bottom Ash Analysis data
+ * @desc    Get Bottom Ash Analysis data
+ * @route   GET /api/bottom-ash-analysis
+ * @access  Private
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { date, startDate, endDate, plant } = req.query;
+
+    // Resolve assigned OFFSITE Plant operator email
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || 'offsite_operator@tfl.com';
+    } catch (recipErr) {
+      assignedOperatorEmail = 'offsite_operator@tfl.com';
+    }
+
+    const defaultLocks = {
+      shift1Saved: false,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
+    };
+
+    if (date) {
+      try {
+        const query = {
+          date,
+          analysisType: 'Bottom Ash Analysis',
+          plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+        };
+        if (req.user && req.user.company) {
+          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        }
+
+        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        if (doc && doc.data) {
+          const payloadData = doc.data;
+          const readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
+          return res.status(200).json({
+            success: true,
+            recordId: doc._id,
+            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+            emailStatus: doc.emailStatus || 'pending',
+            assignedOperatorEmail,
+            lockedShifts: payloadData.lockedShifts || defaultLocks,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            data: {
+              ...payloadData,
+              _id: doc._id,
+              id: doc._id,
+              date: doc.date,
+              readings: readings.length > 0 ? readings : SEED_READINGS,
+              lockedShifts: payloadData.lockedShifts || defaultLocks,
+              editedFields: payloadData.editedFields || {},
+              editAuditHistory: payloadData.editAuditHistory || [],
+              emailStatus: doc.emailStatus || 'pending',
+              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn('[BottomAsh GET] MongoDB lookup note:', dbErr.message);
+      }
+
+      const match = bottomAshRecords.find((r) => r.date === date);
+      if (match) {
+        return res.status(200).json({
+          success: true,
+          assignedOperatorEmail,
+          lockedShifts: match.lockedShifts || defaultLocks,
+          data: match,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        assignedOperatorEmail,
+        lockedShifts: defaultLocks,
+        data: null,
+        message: `No record found for date ${date}`,
+      });
+    }
+
+    // List query
+    try {
+      const query = {
+        analysisType: 'Bottom Ash Analysis',
+        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+      };
+      if (startDate && endDate) {
+        query.date = { $gte: startDate, $lte: endDate };
+      }
+      if (req.user && req.user.company) {
+        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+      }
+
+      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      if (docs && docs.length > 0) {
+        const results = docs.map((d) => ({
+          ...d.data,
+          _id: d._id,
+          id: d._id,
+          date: d.date,
+          emailStatus: d.emailStatus,
+          emailRecipient: d.emailRecipient,
+        }));
+        return res.status(200).json({
+          success: true,
+          count: results.length,
+          data: results,
+        });
+      }
+    } catch (listErr) {
+      console.warn('[BottomAsh GET list] MongoDB note:', listErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: bottomAshRecords.length,
+      data: bottomAshRecords,
+    });
+  } catch (error) {
+    console.error('[BottomAsh GET] Error fetching records:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while retrieving Bottom Ash records: ' + error.message,
+    });
+  }
+});
+
+/**
+ * @desc    Save Bottom Ash Analysis data (Sequential Shift Progression)
  * @route   POST /api/bottom-ash-analysis
  * @access  Private
  */
 router.post('/', async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = req.body || {};
+    const todayKolkata = getTodayKolkata();
 
-    if (!payload || !payload.date) {
+    if (!payload.date) {
       return res.status(400).json({
         success: false,
         message: 'Analysis Date is required to save Bottom Ash Analysis.',
       });
     }
 
-    const readings = Array.isArray(payload.readings) ? payload.readings : [];
-    const errors = [];
+    // Backend Date Restriction Enforcement (Asia/Kolkata)
+    if (payload.date !== todayKolkata) {
+      return res.status(400).json({
+        success: false,
+        message: `Date restriction policy: Bottom Ash Analysis can only be submitted for today (${todayKolkata}). Historical or future date entry (${payload.date}) is not permitted.`,
+      });
+    }
 
+    const readings = Array.isArray(payload.readings) ? payload.readings : [];
+    if (readings.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one analytical reading row is required.',
+      });
+    }
+
+    const errors = [];
     readings.forEach((reading, idx) => {
       const rowNum = idx + 1;
-      if (reading.combustible !== '' && reading.combustible !== null && reading.combustible !== undefined) {
-        if (isNaN(Number(reading.combustible))) {
-          errors.push(`Row #${rowNum}: Combustible % must be a valid number.`);
+      NUMERIC_FIELDS.forEach((f) => {
+        const val = reading[f];
+        if (val !== '' && val !== null && val !== undefined) {
+          if (isNaN(Number(val))) {
+            errors.push(`Row #${rowNum} (${reading.time || ''}): ${f.toUpperCase()} must be a valid number.`);
+          }
         }
-      }
-      if (reading.gcv !== '' && reading.gcv !== null && reading.gcv !== undefined) {
-        if (isNaN(Number(reading.gcv))) {
-          errors.push(`Row #${rowNum}: GCV (Kcals/kg) must be a valid number.`);
-        }
-      }
-      if (reading.moisture !== '' && reading.moisture !== null && reading.moisture !== undefined) {
-        if (isNaN(Number(reading.moisture))) {
-          errors.push(`Row #${rowNum}: Moisture % must be a valid number.`);
-        }
-      }
+      });
     });
 
     if (errors.length > 0) {
@@ -70,152 +268,356 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const record = {
-      id: `bottomash_${Date.now()}`,
+    // Prevent duplicate time slots
+    const timeSlots = readings.map((r) => String(r.time || '').trim()).filter(Boolean);
+    const uniqueSlots = new Set(timeSlots);
+    if (timeSlots.length !== uniqueSlots.size) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duplicate sampling time slots detected. Each observation must have a unique time slot.',
+      });
+    }
+
+    // Fetch existing record in MongoDB
+    const query = {
       date: payload.date,
-      plant: payload.plant || 'OFFSET',
+      analysisType: 'Bottom Ash Analysis',
+      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+    };
+    if (req.user && req.user.company) {
+      query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+    }
+
+    const existingDoc = await PlantAnalysisRecord.findOne(query);
+
+    let lockedShifts = {
+      shift1Saved: false,
+      shift2Saved: false,
+      shift3Saved: false,
+      shift1Locked: false,
+      shift2Locked: false,
+      shift3Locked: false,
+      shift3Edits: 0,
+    };
+    let editedFields = {};
+    let editAuditHistory = [];
+    let oldReadings = [];
+
+    if (existingDoc && existingDoc.data) {
+      if (existingDoc.data.lockedShifts) {
+        lockedShifts = { ...lockedShifts, ...existingDoc.data.lockedShifts };
+      }
+      editedFields = { ...(existingDoc.data.editedFields || {}) };
+      editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
+      oldReadings = existingDoc.data.readings || existingDoc.data.shifts || [];
+    }
+
+    // Group incoming rows by shift
+    const s1Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift1');
+    const s2Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift2');
+    const s3Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift3');
+
+    const hasData = (rowList) =>
+      rowList.some((r) => NUMERIC_FIELDS.some((f) => r[f] !== '' && r[f] !== null && r[f] !== undefined));
+
+    const hasS1 = hasData(s1Rows);
+    const hasS2 = hasData(s2Rows);
+    const hasS3 = hasData(s3Rows);
+
+    // Sequential Shift Progression Enforcement
+    if (hasS2 && !lockedShifts.shift1Saved && !hasS1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sequential shift restriction: Shift 1 must be completed and saved before proceeding to Shift 2.',
+      });
+    }
+
+    if (hasS3 && !lockedShifts.shift2Saved && !hasS2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sequential shift restriction: Shift 2 must be completed and saved before proceeding to Shift 3.',
+      });
+    }
+
+    // Check Lock Violations
+    if (lockedShifts.shift1Locked) {
+      const s1Violated = s1Rows.some((newRow) => {
+        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+        return oldRow && NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+      });
+      if (s1Violated) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 1 is permanently locked. Modifications to Shift 1 are not permitted.',
+        });
+      }
+    }
+
+    if (lockedShifts.shift2Locked) {
+      const s2Violated = s2Rows.some((newRow) => {
+        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+        return oldRow && NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+      });
+      if (s2Violated) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 2 is permanently locked. Modifications to Shift 2 are not permitted.',
+        });
+      }
+    }
+
+    if (lockedShifts.shift3Locked) {
+      const s3Violated = s3Rows.some((newRow) => {
+        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+        return oldRow && NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+      });
+      if (s3Violated) {
+        return res.status(400).json({
+          success: false,
+          message: 'Shift 3 has exhausted its permitted edits and is permanently locked.',
+        });
+      }
+    }
+
+    // Field-level edit audit
+    const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
+    const nowIso = new Date().toISOString();
+
+    if (existingDoc && existingDoc.data) {
+      readings.forEach((newRow, idx) => {
+        const rowId = newRow.id || `row_${idx}`;
+        const oldRow = oldReadings.find((r) => r.id === rowId || r.time === newRow.time);
+
+        if (oldRow) {
+          NUMERIC_FIELDS.forEach((f) => {
+            const oldVal = oldRow[f];
+            const newVal = newRow[f];
+
+            if (isValDiff(oldVal, newVal)) {
+              const fieldKey = `${rowId}_${f}`;
+              editedFields[fieldKey] = true;
+              editAuditHistory.push({
+                rowId,
+                time: newRow.time,
+                field: f,
+                oldValue: oldVal !== undefined && oldVal !== null ? String(oldVal) : '',
+                newValue: newVal !== undefined && newVal !== null ? String(newVal) : '',
+                editedBy: editorName,
+                timestamp: nowIso,
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // Update Shift Lock State Machine
+    if (hasS1) {
+      lockedShifts.shift1Saved = true;
+    }
+
+    if (hasS2) {
+      lockedShifts.shift2Saved = true;
+      lockedShifts.shift1Locked = true;
+    }
+
+    if (hasS3) {
+      if (lockedShifts.shift3Saved) {
+        const s3Changed = s3Rows.some((newRow) => {
+          const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+          return oldRow && NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+        });
+        if (s3Changed) {
+          lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+          if (lockedShifts.shift3Edits >= 2) {
+            lockedShifts.shift3Locked = true;
+          }
+        }
+      } else {
+        lockedShifts.shift3Saved = true;
+        lockedShifts.shift2Locked = true;
+      }
+    }
+
+    const activeShift = hasS3 ? 'III SHIFT' : hasS2 ? 'II SHIFT' : 'I SHIFT';
+
+    const recordData = {
+      id: existingDoc ? String(existingDoc._id) : `bottomash_${Date.now()}`,
+      date: payload.date,
+      plant: 'OFFSET',
+      plantCode: 'OFFSITE',
+      plantName: 'OFFSITE Plant',
       unit: 'Bottom ash',
       analysisType: 'Bottom Ash Analysis',
       readings,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,
       submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company || 'TFL',
+      company: req.user?.company?._id || req.user?.company || null,
     };
 
-    // Upsert by date
-    const existingIndex = bottomAshRecords.findIndex(
-      (r) => r.date === payload.date && (r.plant === record.plant || !r.plant)
-    );
-
-    if (existingIndex >= 0) {
-      bottomAshRecords[existingIndex] = { ...bottomAshRecords[existingIndex], ...record };
+    // Update in-memory fallback
+    const memIdx = bottomAshRecords.findIndex((r) => r.date === payload.date);
+    if (memIdx >= 0) {
+      bottomAshRecords[memIdx] = { ...bottomAshRecords[memIdx], ...recordData };
     } else {
-      bottomAshRecords.unshift(record);
+      bottomAshRecords.unshift(recordData);
     }
 
-    // Persist to MongoDB PlantAnalysisRecord
+    // Persist to MongoDB
+    let savedRecord = null;
     try {
-      if (PlantAnalysisRecord) {
-        await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            date: record.date,
-            ...(req.user && req.user.company ? { company: req.user.company } : {}),
-          },
-          {
-            plantName: record.plant || 'Plant',
-            plantCode: record.plant || 'Unknown',
-            analysisType: record.analysisType || 'Unknown',
-            unit: record.unit || '',
-            date: record.date,
-            data: record,
-            submittedBy: record.submittedBy || req.user?.name,
-            submittedById: record.submittedById || req.user?._id,
-            company: record.company || req.user?.company?._id || req.user?.company,
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
+      savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
+        query,
+        {
+          plantName: 'OFFSITE Plant',
+          plantCode: 'OFFSITE',
+          analysisType: 'Bottom Ash Analysis',
+          unit: 'Bottom ash',
+          date: payload.date,
+          shift: activeShift,
+          data: recordData,
+          submittedBy: recordData.submittedBy,
+          submittedById: recordData.submittedById,
+          company: recordData.company,
+          savedAt: new Date(),
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      recordData.id = String(savedRecord._id);
+      recordData._id = savedRecord._id;
     } catch (dbErr) {
-      console.warn('MongoDB PlantAnalysisRecord save note:', dbErr.message);
+      console.error('[BottomAsh POST] MongoDB save error:', dbErr);
+      return res.status(500).json({
+        success: false,
+        message: 'Database persistence failed: ' + dbErr.message,
+      });
     }
 
-    // Keep memory cache under 50 records
-    if (bottomAshRecords.length > 50) {
-      bottomAshRecords.pop();
-    }
+    // Execute Email Workflow
+    const saveEventId = `save_bottomash_${Date.now()}`;
+    let emailResult = { success: false, emailStatus: 'pending' };
 
-    // Log user activity if ActivityLog model is present
     try {
-      if (ActivityLog && req.user?._id) {
+      emailResult = await executeSaveAndEmailWorkflow({
+        plantIdentifier: 'OFFSITE',
+        analysisType: 'Bottom Ash Analysis',
+        unit: 'Bottom ash',
+        shift: activeShift,
+        date: payload.date,
+        data: recordData,
+        submittedBy: recordData.submittedBy,
+        submittedById: recordData.submittedById,
+        company: recordData.company,
+        explicitRecord: savedRecord,
+        rawBody: { ...payload, ...recordData },
+        saveEventId,
+      });
+    } catch (notifyErr) {
+      console.warn('[BottomAsh POST] Email notification dispatch note:', notifyErr.message);
+      emailResult = {
+        success: false,
+        emailStatus: 'failed',
+        error: notifyErr.message,
+      };
+    }
+
+    const emailStatus = emailResult.emailStatus || (emailResult.success ? 'sent' : 'failed');
+    const emailRecipient = emailResult.recipient || savedRecord.emailRecipient || 'offsite_operator@tfl.com';
+
+    // Activity Log
+    try {
+      if (ActivityLog && typeof ActivityLog.create === 'function') {
         await ActivityLog.create({
-          user: req.user._id,
-          action: 'CREATE',
-          entity: 'ANALYSIS',
-          details: {
-            message: `Recorded Bottom Ash Analysis for date ${payload.date}`,
-            plant: record.plant,
-            unit: 'Bottom ash',
-          },
+          action: 'BOTTOM_ASH_ANALYSIS_SAVED',
+          user: req.user?._id,
+          userName: req.user?.name,
+          details: `Bottom Ash Analysis saved for date: ${payload.date} (${activeShift}). Email ${emailStatus} to ${emailRecipient}.`,
+          timestamp: new Date(),
         });
       }
-    } catch (logErr) {
-      console.warn('ActivityLog error:', logErr.message);
-    }
+    } catch (logErr) {}
 
     return res.status(200).json({
       success: true,
-      message: `Bottom Ash Analysis for ${payload.date} saved successfully!`,
-      data: record,
+      message: emailResult.success
+        ? 'Bottom Ash Analysis saved and email sent successfully.'
+        : 'Bottom Ash Analysis saved in MongoDB. Email delivery failed: ' + (emailResult.error || emailResult.emailError || 'Undeliverable'),
+      recordId: savedRecord._id,
+      emailStatus,
+      emailRecipient,
+      emailMessageId: emailResult.messageId || '',
+      emailError: emailResult.error || emailResult.emailError,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
+      data: recordData,
     });
   } catch (error) {
-    console.error('Error in POST /api/bottom-ash-analysis:', error);
+    console.error('[BottomAsh POST] Uncaught error saving data:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to save Bottom Ash Analysis record.',
-      error: error.message,
+      message: 'Server error while processing Bottom Ash analysis: ' + error.message,
     });
   }
 });
 
 /**
- * @desc    Get Bottom Ash Analysis data (by date or latest)
- * @route   GET /api/bottom-ash-analysis
+ * @desc    Retry email notification for Bottom Ash Analysis
+ * @route   POST /api/bottom-ash-analysis/:id/retry-email
  * @access  Private
  */
-router.get('/', async (req, res) => {
+router.post('/:id/retry-email', async (req, res) => {
   try {
-    const { date, plant } = req.query;
-
-    if (date) {
-
-      try {
-        if (PlantAnalysisRecord) {
-          const query = { date, analysisType: 'Bottom Ash Analysis', plantCode: plant || 'OFFSET' };
-          if (req.user && req.user.company) {
-            query.company = req.user.company._id || req.user.company;
-          }
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-          if (doc && doc.data) {
-            return res.status(200).json({
-              success: true,
-              data: doc.data
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('MongoDB lookup note:', dbErr.message);
-      }
-
-      const match = bottomAshRecords.find(
-        (r) => r.date === date && (!plant || r.plant.toLowerCase() === plant.toLowerCase())
-      );
-      if (match) {
-        return res.status(200).json({
-          success: true,
-          data: match,
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Valid Record ID is required for email retry.' });
     }
+
+    const record = await PlantAnalysisRecord.findById(id);
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'Record not found for email retry.' });
+    }
+
+    const retryEventId = `retry_bottomash_${Date.now()}`;
+    const emailResult = await executeSaveAndEmailWorkflow({
+      plantIdentifier: 'OFFSITE',
+      analysisType: record.analysisType || 'Bottom Ash Analysis',
+      unit: record.unit || 'Bottom ash',
+      shift: record.shift || 'All Shifts',
+      date: record.date,
+      data: record.data,
+      submittedBy: req.user?.name || record.submittedBy,
+      submittedById: req.user?._id || record.submittedById,
+      company: record.company,
+      explicitRecord: record,
+      rawBody: record.data,
+      saveEventId: retryEventId,
+    });
+
+    const status = emailResult.success ? 'sent' : 'failed';
+    record.emailStatus = status;
+    if (emailResult.recipient) record.emailRecipient = emailResult.recipient;
+    await record.save();
 
     return res.status(200).json({
       success: true,
-      count: bottomAshRecords.length,
-      data: bottomAshRecords,
+      emailSent: emailResult.success,
+      emailStatus: status,
+      emailRecipient: record.emailRecipient,
+      emailError: emailResult.error || emailResult.emailError,
+      message: emailResult.success
+        ? `Notification email successfully sent to ${record.emailRecipient}.`
+        : `Email retry failed: ${emailResult.error || emailResult.emailError || 'Delivery rejected'}.`,
     });
   } catch (error) {
-    console.error('Error in GET /api/bottom-ash-analysis:', error);
+    console.error('[BottomAsh Retry Email] Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to fetch Bottom Ash Analysis records.',
-      error: error.message,
+      message: 'Server error during email retry: ' + error.message,
     });
   }
 });
