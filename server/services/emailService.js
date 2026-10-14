@@ -31,6 +31,7 @@ const createNodemailerTransporter = () => {
     host: host.trim(),
     port,
     secure,
+    family: 4, // Force IPv4 to prevent ENETUNREACH on environments without IPv6 routing
     auth: {
       user: user.trim(),
       pass,
@@ -38,9 +39,9 @@ const createNodemailerTransporter = () => {
     tls: {
       rejectUnauthorized: false,
     },
-    connectionTimeout: 10000, // 10s connection timeout
-    greetingTimeout: 7000,    // 7s greeting timeout
-    socketTimeout: 15000,     // 15s socket activity timeout
+    connectionTimeout: 15000, // 15s connection timeout
+    greetingTimeout: 10000,   // 10s greeting timeout
+    socketTimeout: 20000,     // 20s socket activity timeout
   });
 };
 
