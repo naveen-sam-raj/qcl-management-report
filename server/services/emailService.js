@@ -38,6 +38,9 @@ const createNodemailerTransporter = () => {
     tls: {
       rejectUnauthorized: false,
     },
+    connectionTimeout: 10000, // 10s connection timeout
+    greetingTimeout: 7000,    // 7s greeting timeout
+    socketTimeout: 15000,     // 15s socket activity timeout
   });
 };
 
