@@ -411,31 +411,53 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Update Shift Lock State Machine
+    // Check if shift1/shift2/shift3 values changed
+    const s1Changed = s1Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+    const s2Changed = s2Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+    const s3Changed = s3Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+
+    // Update Shift Lock State Machine (One-time edit per shift)
     if (hasS1) {
-      lockedShifts.shift1Saved = true;
+      if (lockedShifts.shift1Saved && s1Changed) {
+        lockedShifts.shift1Edits = (lockedShifts.shift1Edits || 0) + 1;
+        if (lockedShifts.shift1Edits >= 1) {
+          lockedShifts.shift1Locked = true;
+        }
+      } else {
+        lockedShifts.shift1Saved = true;
+      }
     }
 
     if (hasS2) {
-      lockedShifts.shift2Saved = true;
-      lockedShifts.shift1Locked = true;
+      lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
+      if (lockedShifts.shift2Saved && s2Changed) {
+        lockedShifts.shift2Edits = (lockedShifts.shift2Edits || 0) + 1;
+        if (lockedShifts.shift2Edits >= 1) {
+          lockedShifts.shift2Locked = true;
+        }
+      } else {
+        lockedShifts.shift2Saved = true;
+      }
     }
 
     if (hasS3) {
-      if (lockedShifts.shift3Saved) {
-        const s3Changed = s3Rows.some((newRow) => {
-          const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-          return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-        });
-        if (s3Changed) {
-          lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-          if (lockedShifts.shift3Edits >= 2) {
-            lockedShifts.shift3Locked = true;
-          }
+      lockedShifts.shift2Locked = true; // Lock Shift 2 permanently when Shift 3 is saved
+      if (lockedShifts.shift3Saved && s3Changed) {
+        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+        if (lockedShifts.shift3Edits >= 1) {
+          lockedShifts.shift3Locked = true;
         }
       } else {
         lockedShifts.shift3Saved = true;
-        lockedShifts.shift2Locked = true;
       }
     }
 

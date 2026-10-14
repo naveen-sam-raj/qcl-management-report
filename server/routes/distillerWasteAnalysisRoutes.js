@@ -269,11 +269,28 @@ router.post('/', async (req, res) => {
     let editedFields = {};
     let editAuditHistory = [];
     let oldReadings = [];
+    let lockedSlots = {};
 
     if (existingDoc && existingDoc.data) {
       editedFields = { ...(existingDoc.data.editedFields || {}) };
       editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
       oldReadings = existingDoc.data.readings || existingDoc.data.shifts || [];
+      lockedSlots = { ...(existingDoc.data.lockedSlots || {}) };
+    }
+
+    // Check Slot-Level Lock Violations (Each slot allows exactly 1 edit after initial save)
+    for (const newRow of readings) {
+      const slotKey = newRow.id || newRow.time;
+      const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
+      if (oldRow) {
+        const slotHasDiff = NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+        if (slotHasDiff && lockedSlots[slotKey]?.isLocked) {
+          return res.status(400).json({
+            success: false,
+            message: `Sampling slot ${newRow.time} has exhausted its permitted edit and is permanently locked.`,
+          });
+        }
+      }
     }
 
     // Field-level edit audit
@@ -308,6 +325,32 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Update lockedSlots state machine
+    readings.forEach((newRow) => {
+      const slotKey = newRow.id || newRow.time;
+      const hasDataInSlot = NUMERIC_FIELDS.some((f) => newRow[f] !== '' && newRow[f] !== null && newRow[f] !== undefined);
+      if (hasDataInSlot) {
+        const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
+        const slotDiff = oldRow && NUMERIC_FIELDS.some((f) => isValDiff(oldRow[f], newRow[f]));
+        const prevSlot = lockedSlots[slotKey] || { initialSaved: false, editCount: 0, isLocked: false };
+
+        if (prevSlot.initialSaved && slotDiff) {
+          const nextEdits = (prevSlot.editCount || 0) + 1;
+          lockedSlots[slotKey] = {
+            initialSaved: true,
+            editCount: nextEdits,
+            isLocked: nextEdits >= 1,
+          };
+        } else if (!prevSlot.initialSaved) {
+          lockedSlots[slotKey] = {
+            initialSaved: true,
+            editCount: 0,
+            isLocked: false,
+          };
+        }
+      }
+    });
+
     const recordData = {
       id: existingDoc ? String(existingDoc._id) : `distiller_${Date.now()}`,
       date: payload.date,
@@ -317,6 +360,7 @@ router.post('/', async (req, res) => {
       unit: payload.unit || 'Distiller waste',
       analysisType: 'Distiller Waste Analysis',
       readings,
+      lockedSlots,
       editedFields,
       editAuditHistory,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',

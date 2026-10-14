@@ -7,6 +7,9 @@ import {
   SaveConfirmationModal,
   EditedBadge,
   retryAnalysisEmail,
+  LockedDateDisplay,
+  StatusSaveButton,
+  RecordStatusBadge,
 } from '../../utils/offsetAnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -93,6 +96,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
+  const [lockedSlots, setLockedSlots] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -125,6 +129,11 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
             setEditedFields(record.editedFields);
           } else {
             setEditedFields({});
+          }
+          if (record?.lockedSlots || record?.data?.lockedSlots) {
+            setLockedSlots(record.lockedSlots || record.data.lockedSlots);
+          } else {
+            setLockedSlots({});
           }
 
           if (!record) {
@@ -400,23 +409,13 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
           )}
 
           {!isViewOnly && (
-            <button
+            <StatusSaveButton
+              saving={saving}
+              isLocked={readings.length > 0 && readings.every((r) => lockedSlots[r.id || r.time]?.isLocked)}
+              savePhase={savePhase}
               onClick={initiateSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  Save Sewer Water Data
-                </>
-              )}
-            </button>
+              className="px-4 py-2 text-xs"
+            />
           )}
         </div>
       </div>
@@ -432,33 +431,8 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
               </h2>
             </div>
 
-            {/* Date Input inside Table Header */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="sewerwater-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="sewerwater-date-input"
-                  type="date"
-                  value={date}
-                  max={getTodayAsiaKolkata()}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-                  required
-                />
-              </div>
-              {date && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-            </div>
+            {/* Read-Only Date Badge */}
+            <LockedDateDisplay date={date} id="sewerwater-date-display" />
           </div>
 
           {!isViewOnly && (
@@ -509,6 +483,10 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                   className="py-2 px-3 text-center border-r border-slate-800 bg-emerald-950/80 font-black tracking-wider text-emerald-300"
                 >
                   &lt;----- FINAL OUTLET -----&gt;
+                </th>
+
+                <th rowSpan={2} className="py-2.5 px-3 w-24 text-center border-r border-slate-800">
+                  STATUS
                 </th>
 
                 {!isViewOnly && (
@@ -581,11 +559,16 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 const vPcl = pclLimit && row.finalOutlet?.pcl !== '' ? (isPclNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
 
                 const rowKey = row.id || row.time;
+                const slotLockInfo = lockedSlots[rowKey] || lockedSlots[row.time] || {};
+                const isSlotLocked = Boolean(slotLockInfo.isLocked || (slotLockInfo.editCount >= 1));
+                const isSlotEditable = Boolean(slotLockInfo.initialSaved && !isSlotLocked);
+                const isSlotNew = !slotLockInfo.initialSaved;
+                const slotDisabled = isViewOnly || isSlotLocked;
 
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-teal-50/30 transition-colors"
+                    className={`transition-colors ${slotDisabled ? 'bg-slate-50/60' : 'hover:bg-teal-50/30'}`}
                   >
                     {/* Row index */}
                     <td className="py-2.5 px-2 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
@@ -597,7 +580,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       <input
                         type="text"
                         value={row.time}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'time', null, e.target.value)}
                         placeholder="HH:mm"
                         className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-md py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -641,7 +624,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.sec200?.cnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec200', 'cnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -673,7 +656,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.sec400?.fnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'fnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -704,7 +687,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.sec400?.cnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'cnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -735,7 +718,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.sec400?.hco3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'hco3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -757,7 +740,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.finalOutlet?.fnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'fnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -788,7 +771,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.finalOutlet?.cnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'cnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -819,7 +802,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.finalOutlet?.hco3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'hco3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -840,7 +823,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.finalOutlet?.pcl ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'pcl', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
@@ -866,12 +849,23 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
+                    {/* STATUS */}
+                    <td className="py-2.5 px-3 text-center border-r border-slate-100">
+                      {isSlotLocked ? (
+                        <RecordStatusBadge status="locked" />
+                      ) : isSlotEditable ? (
+                        <RecordStatusBadge status="editable" />
+                      ) : (
+                        <RecordStatusBadge status="new" />
+                      )}
+                    </td>
+
                     {/* ACTION */}
                     {!isViewOnly && (
                       <td className="py-2.5 px-2 text-center">
                         <button
                           onClick={() => handleRemoveRow(row.id)}
-                          disabled={readings.length <= 1}
+                          disabled={readings.length <= 1 || slotDisabled}
                           className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                           title="Delete row"
                         >

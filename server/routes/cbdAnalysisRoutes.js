@@ -272,6 +272,8 @@ router.post('/', async (req, res) => {
       shift1Locked: false,
       shift2Locked: false,
       shift3Locked: false,
+      shift1Edits: 0,
+      shift2Edits: 0,
       shift3Edits: 0,
     };
     let editedFields = {};
@@ -310,35 +312,30 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // 2. Lock Enforcement
-    if (lockedShifts.shift1Locked) {
-      const s1Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iShift?.[f], shifts.iShift?.[f]));
-      if (s1Changed) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 1 is permanently locked. Modifications to Shift 1 are not permitted.',
-        });
-      }
+    // 2. Lock Enforcement (One-Time Edit per Shift)
+    const s1Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iShift?.[f], shifts.iShift?.[f]));
+    const s2Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiShift?.[f], shifts.iiShift?.[f]));
+    const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
+
+    if (lockedShifts.shift1Locked && s1Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shift 1 is permanently locked. Only 1 edit is permitted and it has already been utilized.',
+      });
     }
 
-    if (lockedShifts.shift2Locked) {
-      const s2Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiShift?.[f], shifts.iiShift?.[f]));
-      if (s2Changed) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 2 is permanently locked. Modifications to Shift 2 are not permitted.',
-        });
-      }
+    if (lockedShifts.shift2Locked && s2Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shift 2 is permanently locked. Only 1 edit is permitted and it has already been utilized.',
+      });
     }
 
-    if (lockedShifts.shift3Locked) {
-      const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
-      if (s3Changed) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 3 has exhausted its permitted edits and is permanently locked.',
-        });
-      }
+    if (lockedShifts.shift3Locked && s3Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shift 3 is permanently locked. Only 1 edit is permitted and it has already been utilized.',
+      });
     }
 
     // 3. Field-Level Edit Audit
@@ -367,32 +364,43 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // 4. Update Shift Lock State Machine
+    // 4. Update Shift Lock State Machine (One-Time Edit per Shift)
     if (hasS1) {
-      lockedShifts.shift1Saved = true;
+      if (lockedShifts.shift1Saved && s1Changed) {
+        lockedShifts.shift1Edits = (lockedShifts.shift1Edits || 0) + 1;
+        if (lockedShifts.shift1Edits >= 1) {
+          lockedShifts.shift1Locked = true;
+        }
+      } else {
+        lockedShifts.shift1Saved = true;
+      }
     }
 
     if (hasS2) {
-      lockedShifts.shift2Saved = true;
-      lockedShifts.shift1Locked = true; // Lock Shift 1 when Shift 2 is saved
+      lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
+      if (lockedShifts.shift2Saved && s2Changed) {
+        lockedShifts.shift2Edits = (lockedShifts.shift2Edits || 0) + 1;
+        if (lockedShifts.shift2Edits >= 1) {
+          lockedShifts.shift2Locked = true;
+        }
+      } else {
+        lockedShifts.shift2Saved = true;
+      }
     }
 
     if (hasS3) {
-      if (lockedShifts.shift3Saved) {
-        // This is an edit to Shift 3
-        const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
-        if (s3Changed) {
-          lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-          if (lockedShifts.shift3Edits >= 2) {
-            lockedShifts.shift3Locked = true;
-          }
+      lockedShifts.shift2Locked = true; // Lock Shift 2 permanently when Shift 3 is saved
+      if (lockedShifts.shift3Saved && s3Changed) {
+        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+        if (lockedShifts.shift3Edits >= 1) {
+          lockedShifts.shift3Locked = true;
         }
       } else {
-        // Initial Shift 3 save
         lockedShifts.shift3Saved = true;
-        lockedShifts.shift2Locked = true; // Lock Shift 2 when Shift 3 is saved
       }
     }
+
+    const isAllLocked = Boolean(lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked);
 
     // Active shift for notification subject
     const activeShift = hasS3 ? 'III SHIFT' : hasS2 ? 'II SHIFT' : 'I SHIFT';

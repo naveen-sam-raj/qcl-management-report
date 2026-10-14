@@ -310,34 +310,58 @@ router.post('/', async (req, res) => {
         });
       }
 
+      // Check if Shift 1 values changed
+      const oldS1 = existingDoc?.data?.readings?.find((r) => r.time === '07:00') || existingDoc?.data?.readings?.[0];
+      const s1Changed = oldS1 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS1[f], s1Reading[f]));
+
       if (s1HasData) {
         if (lockedShifts.shift1Locked) {
-          const oldS1 = existingDoc?.data?.readings?.find((r) => r.time === '07:00') || existingDoc?.data?.readings?.[0];
-          if (oldS1 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS1[f], s1Reading[f]))) {
+          if (s1Changed) {
             return res.status(400).json({
               success: false,
-              message: 'Shift 1 (07:00) is locked because Shift 2 has already been saved. Edits to Shift 1 are prohibited.',
+              message: 'Shift 1 (07:00) is locked. Edits to Shift 1 are prohibited.',
             });
           }
         }
-        lockedShifts.shift1Saved = true;
+        if (lockedShifts.shift1Saved && s1Changed) {
+          lockedShifts.shift1Edits = (lockedShifts.shift1Edits || 0) + 1;
+          if (lockedShifts.shift1Edits >= 1) {
+            lockedShifts.shift1Locked = true;
+          }
+        } else {
+          lockedShifts.shift1Saved = true;
+        }
       }
 
       if (s2HasData) {
         if (lockedShifts.shift2Locked) {
           return res.status(400).json({
             success: false,
-            message: 'Shift 2 (19:00) has reached the maximum permitted edit limit (2 edits) and is permanently locked.',
+            message: 'Shift 2 (19:00) has reached the maximum permitted edit limit (1 edit) and is permanently locked.',
           });
         }
-        if (lockedShifts.shift2Saved) {
+        lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
+        const oldS2 = existingDoc?.data?.readings?.find((r) => r.time === '19:00') || existingDoc?.data?.readings?.[1];
+        const s2Changed = oldS2 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS2[f], s2Reading[f]));
+
+        if (lockedShifts.shift2Saved && s2Changed) {
           lockedShifts.shift2Edits = (lockedShifts.shift2Edits || 0) + 1;
-          if (lockedShifts.shift2Edits >= 2) {
+          if (lockedShifts.shift2Edits >= 1) {
             lockedShifts.shift2Locked = true;
           }
         } else {
           lockedShifts.shift2Saved = true;
-          lockedShifts.shift1Locked = true; // Lock Shift 1 when Shift 2 is saved
+        }
+      }
+    } else {
+      // Day Routine Cooling Water: Record-level one-time edit lock
+      if (existingDoc && existingDoc.data) {
+        const docData = existingDoc.data;
+        if (docData.isLocked || (docData.editCount || 0) >= 1) {
+          return res.status(400).json({
+            success: false,
+            message: 'One-time edit restriction: Cooling Water Analysis has already been edited once and is now permanently locked.',
+          });
         }
       }
     }
@@ -369,6 +393,9 @@ router.post('/', async (req, res) => {
     }
 
     const saveCount = (existingDoc?.data?.saveCount || 0) + 1;
+    const initialSaved = true;
+    const editCount = isEdit ? (existingDoc?.data?.editCount || 0) + 1 : 0;
+    const isLocked = !is200 ? editCount >= 1 : undefined;
 
     const recordData = {
       id: existingDoc?.data?.id || `cw_${Date.now()}`,
@@ -379,6 +406,9 @@ router.post('/', async (req, res) => {
       analysisType: 'Cooling Water (C.W Water) Analysis',
       readings,
       lockedShifts: is200 ? lockedShifts : undefined,
+      initialSaved: !is200 ? initialSaved : undefined,
+      editCount: !is200 ? editCount : undefined,
+      isLocked: !is200 ? isLocked : undefined,
       editedFields,
       editAuditHistory,
       saveCount,

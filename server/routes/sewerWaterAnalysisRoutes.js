@@ -311,6 +311,30 @@ router.post('/', async (req, res) => {
 
     let editedFields = existingDoc?.data?.editedFields || {};
     let editAuditHistory = Array.isArray(existingDoc?.data?.editAuditHistory) ? existingDoc.data.editAuditHistory : [];
+    let lockedSlots = existingDoc?.data?.lockedSlots || {};
+    let oldReadings = existingDoc?.data?.readings || [];
+
+    // Check Slot-Level Lock Violations (Each slot allows exactly 1 edit after initial save)
+    const SEWER_KEYS = [
+      ['sec200', 'fnh3'], ['sec200', 'cnh3'],
+      ['sec400', 'fnh3'], ['sec400', 'cnh3'], ['sec400', 'hco3'],
+      ['finalOutlet', 'fnh3'], ['finalOutlet', 'cnh3'], ['finalOutlet', 'hco3'], ['finalOutlet', 'pcl']
+    ];
+
+    for (const newRow of readings) {
+      const slotKey = newRow.id || newRow.time;
+      const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
+      if (oldRow) {
+        const slotHasDiff = SEWER_KEYS.some(([sec, k]) => isValDiff(oldRow[sec]?.[k], newRow[sec]?.[k]));
+        if (slotHasDiff && lockedSlots[slotKey]?.isLocked) {
+          return res.status(400).json({
+            success: false,
+            message: `Sampling slot ${newRow.time} has exhausted its permitted edit and is permanently locked.`,
+          });
+        }
+      }
+    }
+
     const isEdit = Boolean(existingDoc);
     const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
     const editorId = req.user?._id;
@@ -352,7 +376,34 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const saveCount = (existingDoc?.data?.saveCount || 0) + 1;
+    // Update lockedSlots state machine
+    readings.forEach((newRow) => {
+      const slotKey = newRow.id || newRow.time;
+      const hasDataInSlot = SEWER_KEYS.some(([sec, k]) => {
+        const v = newRow[sec]?.[k];
+        return v !== '' && v !== null && v !== undefined;
+      });
+      if (hasDataInSlot) {
+        const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
+        const slotDiff = oldRow && SEWER_KEYS.some(([sec, k]) => isValDiff(oldRow[sec]?.[k], newRow[sec]?.[k]));
+        const prevSlot = lockedSlots[slotKey] || { initialSaved: false, editCount: 0, isLocked: false };
+
+        if (prevSlot.initialSaved && slotDiff) {
+          const nextEdits = (prevSlot.editCount || 0) + 1;
+          lockedSlots[slotKey] = {
+            initialSaved: true,
+            editCount: nextEdits,
+            isLocked: nextEdits >= 1,
+          };
+        } else if (!prevSlot.initialSaved) {
+          lockedSlots[slotKey] = {
+            initialSaved: true,
+            editCount: 0,
+            isLocked: false,
+          };
+        }
+      }
+    });
 
     const recordData = {
       id: existingDoc?.data?.id || `sewer_${Date.now()}`,
@@ -362,6 +413,7 @@ router.post('/', async (req, res) => {
       unit: 'Sewer Water',
       analysisType: 'Sewer Water Analysis',
       readings,
+      lockedSlots,
       editedFields,
       editAuditHistory,
       saveCount,

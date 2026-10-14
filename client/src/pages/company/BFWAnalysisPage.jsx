@@ -25,6 +25,9 @@ import {
 import {
   getTodayAsiaKolkata,
   formatDateDisplay,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
@@ -93,11 +96,14 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
+  const [initialSaved, setInitialSaved] = useState(false);
+  const [editCount, setEditCount] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -138,6 +144,14 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
           } else {
             setEditedFields({});
           }
+
+          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
+          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
+          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
+
+          setInitialSaved(hasSaved);
+          setEditCount(currentEdits);
+          setIsLocked(lockStatus);
 
           const rawReadings = record.readings || record.data?.readings || record.shifts || [];
           if (Array.isArray(rawReadings) && rawReadings.length > 0) {
@@ -309,7 +323,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         submittedBy: user?.name || 'Shift Chemist',
       };
 
-      const res = await api.post('/api/bfw-analysis', payload);
+      const res = await api.post('/bfw-analysis', payload);
       setSaveSuccess(true);
       const savedDoc = res.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -320,6 +334,14 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       }
       if (res.data?.emailRecipient) {
         setRecipientEmail(res.data.emailRecipient);
+      }
+
+      // Update one-time edit state
+      const nextEdits = initialSaved ? editCount + 1 : 0;
+      setInitialSaved(true);
+      setEditCount(nextEdits);
+      if (initialSaved || nextEdits >= 1) {
+        setIsLocked(true);
       }
 
       const emailStatus = res.data?.emailStatus;
@@ -337,7 +359,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         showToast?.('Data saved to database. Email delivery failed: ' + (res.data?.emailError || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
       console.error('[BFWAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -396,57 +418,32 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
 
         {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
-          )}
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} id="bfw-locked-date" />
+
+          <RecordStatusBadge
+            status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
+            subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+          />
 
           <button
             onClick={handleReset}
-            disabled={saving}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+            disabled={saving || isLocked}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
           >
             <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
             Reset
           </button>
 
           {!isViewOnly ? (
-            <button
+            <StatusSaveButton
+              id="btn-bfw-save"
+              saving={saving}
+              isLocked={isLocked}
+              savePhase={savePhase}
               onClick={handleSaveClick}
-              disabled={saving}
-              className={`px-4 py-2 rounded-lg text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer ${
-                savePhase === 'completed'
-                  ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                  : savePhase === 'email_failed'
-                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
-                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
-              }`}
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : savePhase === 'completed' ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved & Emailed ✓</span>
-                </>
-              ) : savePhase === 'email_failed' ? (
-                <>
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Saved — Email Failed</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Analysis Data</span>
-                </>
-              )}
-            </button>
+              title="Save Boiler Feed Water / Super Heated Steam analysis"
+            />
           ) : (
             <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
               Read-Only
@@ -517,33 +514,6 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
               Frequency: Day
             </span>
           </button>
-        </div>
-
-        {/* Date Selector */}
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <label
-            htmlFor="bfw-date-input"
-            className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-          >
-            <span>Date:</span>
-            <span className="text-red-500">*</span>
-          </label>
-          <div className="relative">
-            <input
-              id="bfw-date-input"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-              required
-            />
-          </div>
-          {date && (
-            <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-              <Calendar className="w-3 h-3 text-slate-400" />
-              {formatDateDisplay(date)}
-            </span>
-          )}
         </div>
       </div>
 

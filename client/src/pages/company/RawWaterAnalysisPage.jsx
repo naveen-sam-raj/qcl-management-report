@@ -3,6 +3,9 @@ import { getCellLimit, validateCellValue } from '../../services/analysisValidati
 import {
   getTodayAsiaKolkata,
   formatDateDisplay,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
@@ -84,11 +87,14 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
+  const [initialSaved, setInitialSaved] = useState(false);
+  const [editCount, setEditCount] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -122,6 +128,14 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
           } else {
             setEditedFields({});
           }
+
+          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
+          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
+          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
+
+          setInitialSaved(hasSaved);
+          setEditCount(currentEdits);
+          setIsLocked(lockStatus);
 
           if (record?.time) {
             setTime(record.time);
@@ -230,7 +244,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
         submittedBy: user?.name || 'Shift Chemist',
       };
 
-      const res = await api.post('/api/raw-water-analysis', payload);
+      const res = await api.post('/raw-water-analysis', payload);
       setSaveSuccess(true);
       const savedDoc = res.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -241,6 +255,14 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
       }
       if (res.data?.emailRecipient) {
         setRecipientEmail(res.data.emailRecipient);
+      }
+
+      // Update one-time edit state
+      const nextEdits = initialSaved ? editCount + 1 : 0;
+      setInitialSaved(true);
+      setEditCount(nextEdits);
+      if (initialSaved || nextEdits >= 1) {
+        setIsLocked(true);
       }
 
       const emailStatus = res.data?.emailStatus;
@@ -258,7 +280,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
         showToast?.('Data saved to database. Email delivery failed: ' + (res.data?.emailError || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
       console.error('[RawWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -313,105 +335,52 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
 
         {/* Right: Date/Time + Action Buttons */}
-        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-          {/* Integrated Date & Time Section */}
-          <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-            <div className="flex items-center gap-1.5">
-              <label
-                htmlFor="rawwater-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="rawwater-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-7 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-                  required
-                />
-              </div>
-            </div>
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} id="rawwater-locked-date" />
 
-            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
-              <label
-                htmlFor="rawwater-time-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Time:</span>
-              </label>
-              <input
-                id="rawwater-time-input"
-                type="text"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                placeholder="HH:mm"
-                className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-              />
-            </div>
-
-            {date && (
-              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                {formatDateDisplay(date)}
-              </span>
-            )}
+          {/* Time input */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
+            <span className="text-xs font-bold text-slate-600">Time:</span>
+            <input
+              id="rawwater-time-input"
+              type="text"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              disabled={isLocked}
+              placeholder="HH:mm"
+              className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-0.5 px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+            />
           </div>
+
+          <RecordStatusBadge
+            status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
+            subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+          />
 
           {/* Action Buttons: Reset & Save */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
+          <button
+            onClick={handleReset}
+            disabled={saving || isLocked}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+            Reset
+          </button>
 
-            {!isViewOnly ? (
-              <button
-                onClick={handleSaveClick}
-                disabled={saving}
-                className={`px-4 py-1.5 rounded-lg text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer ${
-                  savePhase === 'completed'
-                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                    : savePhase === 'email_failed'
-                    ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
-                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
-                }`}
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : savePhase === 'completed' ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Saved & Emailed ✓</span>
-                  </>
-                ) : savePhase === 'email_failed' ? (
-                  <>
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Saved — Email Failed</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save Analysis</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
-                Read-Only
-              </span>
-            )}
-          </div>
+          {!isViewOnly ? (
+            <StatusSaveButton
+              id="btn-rawwater-save"
+              saving={saving}
+              isLocked={isLocked}
+              savePhase={savePhase}
+              onClick={handleSaveClick}
+              title="Save Raw Water analysis"
+            />
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
+              Read-Only
+            </span>
+          )}
         </div>
       </div>
 

@@ -254,6 +254,22 @@ router.post('/', async (req, res) => {
 
     const existingDoc = await PlantAnalysisRecord.findOne(query);
 
+    // Check one-time edit restriction policy
+    if (existingDoc && existingDoc.data) {
+      const isLockedAlready = Boolean(existingDoc.data.isLocked || (existingDoc.data.editCount || 0) >= 1);
+      if (isLockedAlready) {
+        return res.status(400).json({
+          success: false,
+          message: 'One-time edit restriction policy: This Raw Water record has already utilized its single permitted edit and is permanently LOCKED.',
+        });
+      }
+    }
+
+    const isEdit = Boolean(existingDoc && existingDoc.data?.initialSaved);
+    const editCount = isEdit ? (existingDoc.data.editCount || 0) + 1 : 0;
+    const isLocked = isEdit && editCount >= 1;
+    const initialSaved = true;
+
     let editedFields = {};
     let editAuditHistory = [];
 
@@ -294,6 +310,9 @@ router.post('/', async (req, res) => {
       parameters: params,
       editedFields,
       editAuditHistory,
+      initialSaved,
+      editCount,
+      isLocked,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id,
       submittedAt: new Date().toISOString(),

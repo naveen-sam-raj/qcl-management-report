@@ -15,14 +15,19 @@ const getBaseURL = () => {
 
 const api = axios.create({
   baseURL: getBaseURL(),
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Attach JWT token from localStorage to every outgoing request
+// Attach JWT token from localStorage and normalize URL path
 api.interceptors.request.use(
   (config) => {
+    // Strip duplicate /api prefix if baseURL already includes /api
+    if (config.url && config.url.startsWith('/api/')) {
+      config.url = config.url.replace(/^\/api/, '');
+    }
     const token = localStorage.getItem('spic_auth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

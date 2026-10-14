@@ -3,6 +3,9 @@ import { getCellLimit, validateCellValue } from '../../services/analysisValidati
 import {
   getTodayAsiaKolkata,
   formatDateDisplay,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
@@ -24,6 +27,7 @@ import {
   Trash2,
   Clock,
   FlaskRound,
+  Lock,
 } from 'lucide-react';
 
 // Default initial readings matching the user's legacy screenshot
@@ -52,11 +56,12 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
+  const [lockedSlots, setLockedSlots] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -89,6 +94,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
             setEditedFields(record.editedFields);
           } else {
             setEditedFields({});
+          }
+          if (record?.lockedSlots || record?.data?.lockedSlots) {
+            setLockedSlots(record.lockedSlots || record.data.lockedSlots);
+          } else {
+            setLockedSlots({});
           }
 
           if (!record) {
@@ -231,6 +241,9 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         if (record?.editedFields) {
           setEditedFields(record.editedFields);
         }
+        if (record?.lockedSlots) {
+          setLockedSlots(record.lockedSlots);
+        }
 
         const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
         const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
@@ -249,13 +262,13 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         }
       } else {
         showToast?.(res.data?.message || 'Error saving Distiller Waste data.', 'error');
-        setSavePhase('idle');
+        setSavePhase('save_failed');
       }
     } catch (err) {
       console.error('API save error:', err);
       const errMsg = err.response?.data?.message || 'Failed to save Distiller Waste Analysis to database.';
       showToast?.(errMsg, 'error');
-      setSavePhase('idle');
+      setSavePhase('save_failed');
     } finally {
       setSaving(false);
       setShowConfirmModal(false);
@@ -332,36 +345,34 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
 
         {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} id="distiller-locked-date" />
+
           {!isViewOnly && (
             <button
               onClick={handleReset}
               disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Reset
             </button>
           )}
 
-          {!isViewOnly && (
-            <button
+          {!isViewOnly ? (
+            <StatusSaveButton
+              id="btn-distiller-save"
+              saving={saving}
+              isLocked={readings.length > 0 && readings.every((r) => lockedSlots[r.id || r.time]?.isLocked)}
+              savePhase={savePhase}
               onClick={initiateSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  Save Distiller Data
-                </>
-              )}
-            </button>
+              title="Save Distiller Waste Analysis"
+            />
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              Read-Only
+            </span>
           )}
         </div>
       </div>
@@ -375,34 +386,6 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
               <h2 className="text-xs font-bold text-slate-900 uppercase">
                 Distiller Waste Water Hourly Laboratory Measurements
               </h2>
-            </div>
-
-            {/* Date Input inside Table Header */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="distiller-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="distiller-date-input"
-                  type="date"
-                  value={date}
-                  max={getTodayAsiaKolkata()}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-                  required
-                />
-              </div>
-              {date && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
-                </span>
-              )}
             </div>
           </div>
 
@@ -448,6 +431,9 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                   <div>NaHCO₃</div>
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
+                <th className="py-3 px-3 w-28 text-center border-r border-slate-700">
+                  STATUS
+                </th>
                 {!isViewOnly && (
                   <th className="py-3 px-2 w-14 text-center">ACTION</th>
                 )}
@@ -468,6 +454,12 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                 const tnh3Valid = tnh3Limit && row.tnh3 !== '' ? validateCellValue(row.tnh3, tnh3Limit) : { isOutOfLimit: false };
 
                 const slotId = row.id || row.time || String(idx);
+                const slotLockInfo = lockedSlots[slotId] || lockedSlots[row.time] || {};
+                const isSlotLocked = Boolean(slotLockInfo.isLocked || (slotLockInfo.editCount >= 1));
+                const isSlotEditable = Boolean(slotLockInfo.initialSaved && !isSlotLocked);
+                const isSlotNew = !slotLockInfo.initialSaved;
+                const slotDisabled = isViewOnly || isSlotLocked;
+
                 const isExCaoEdited = Boolean(editedFields[`${slotId}_exCao`] || editedFields[`${row.time}_exCao`]);
                 const isFnh3Edited = Boolean(editedFields[`${slotId}_fnh3`] || editedFields[`${row.time}_fnh3`]);
                 const isCnh3Edited = Boolean(editedFields[`${slotId}_cnh3`] || editedFields[`${row.time}_cnh3`]);
@@ -477,7 +469,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-violet-50/30 transition-colors"
+                    className={`transition-colors ${slotDisabled ? 'bg-slate-50/60' : 'hover:bg-violet-50/30'}`}
                   >
                     {/* Row index */}
                     <td className="py-2.5 px-3 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
@@ -489,7 +481,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       <input
                         type="text"
                         value={row.time}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
                         placeholder="HH:mm"
                         className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-md py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -502,11 +494,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.exCao}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'exCao', e.target.value)}
                         placeholder="00.00"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
+                          slotDisabled
                             ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
                             : errors[`${row.id}_exCao`] || exCaoValid.isOutOfLimit
                             ? 'border-red-500 bg-red-50'
@@ -534,11 +526,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.fnh3}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'fnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
+                          slotDisabled
                             ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
                             : errors[`${row.id}_fnh3`] || fnh3Valid.isOutOfLimit
                             ? 'border-red-500 bg-red-50'
@@ -566,11 +558,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.cnh3}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'cnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
+                          slotDisabled
                             ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
                             : errors[`${row.id}_cnh3`] || cnh3Valid.isOutOfLimit
                             ? 'border-red-500 bg-red-50'
@@ -598,11 +590,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.tnh3}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'tnh3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
+                          slotDisabled
                             ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
                             : errors[`${row.id}_tnh3`] || tnh3Valid.isOutOfLimit
                             ? 'border-red-500 bg-red-50'
@@ -630,11 +622,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                         type="text"
                         inputMode="decimal"
                         value={row.nahco3}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'nahco3', e.target.value)}
                         placeholder="0"
                         className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
+                          slotDisabled
                             ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
                             : errors[`${row.id}_nahco3`]
                             ? 'border-red-500 bg-red-50'
@@ -646,12 +638,23 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                       <EditedBadge isEdited={isNahco3Edited} />
                     </td>
 
+                    {/* STATUS */}
+                    <td className="py-2.5 px-3 text-center border-r border-slate-100">
+                      {isSlotLocked ? (
+                        <RecordStatusBadge status="locked" />
+                      ) : isSlotEditable ? (
+                        <RecordStatusBadge status="editable" />
+                      ) : (
+                        <RecordStatusBadge status="new" />
+                      )}
+                    </td>
+
                     {/* ACTION */}
                     {!isViewOnly && (
                       <td className="py-2.5 px-2 text-center">
                         <button
                           onClick={() => handleRemoveRow(row.id)}
-                          disabled={readings.length <= 1}
+                          disabled={readings.length <= 1 || slotDisabled}
                           className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                           title="Delete row"
                         >

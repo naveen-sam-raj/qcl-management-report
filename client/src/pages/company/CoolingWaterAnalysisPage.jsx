@@ -11,6 +11,9 @@ import {
   SaveConfirmationModal,
   EditedBadge,
   retryAnalysisEmail,
+  LockedDateDisplay,
+  StatusSaveButton,
+  RecordStatusBadge,
 } from '../../utils/offsetAnalysisHelper';
 import {
   ArrowLeft,
@@ -64,6 +67,9 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
+  const [initialSaved, setInitialSaved] = useState(false);
+  const [editCount, setEditCount] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
   const [lockedShifts, setLockedShifts] = useState({
     shift1Saved: false,
     shift2Saved: false,
@@ -75,10 +81,10 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
-  // Sequential shift permissions for 200#
+  // Sequential shift permissions for 200# / lock for Day routine
   const isRowDisabled = useCallback((row, idx) => {
     if (isViewOnly) return true;
-    if (!is200) return false;
+    if (!is200) return isLocked;
 
     const time = String(row.time || '');
     if (idx === 0 || time === '07:00') {
@@ -87,11 +93,11 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
     if (idx === 1 || time === '19:00') {
       if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
       if (lockedShifts.shift2Locked) return true;
-      if (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 2) return true;
+      if (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1) return true;
       return false;
     }
     return false;
-  }, [isViewOnly, is200, lockedShifts]);
+  }, [isViewOnly, is200, lockedShifts, isLocked]);
 
   // Fetch existing data when date or unit changes
   useEffect(() => {
@@ -118,6 +124,15 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
+          }
+          if (record?.initialSaved !== undefined) {
+            setInitialSaved(Boolean(record.initialSaved));
+          }
+          if (record?.editCount !== undefined) {
+            setEditCount(record.editCount);
+          }
+          if (record?.isLocked !== undefined) {
+            setIsLocked(Boolean(record.isLocked || (record.editCount >= 1)));
           }
           if (record?.lockedShifts) {
             setLockedShifts(record.lockedShifts);
@@ -250,6 +265,15 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
         if (record?._id || record?.id) {
           setRecordId(record._id || record.id);
         }
+        if (record?.initialSaved !== undefined) {
+          setInitialSaved(Boolean(record.initialSaved));
+        }
+        if (record?.editCount !== undefined) {
+          setEditCount(record.editCount);
+        }
+        if (record?.isLocked !== undefined) {
+          setIsLocked(Boolean(record.isLocked || (record.editCount >= 1)));
+        }
         if (record?.lockedShifts) {
           setLockedShifts(record.lockedShifts);
         }
@@ -361,6 +385,15 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
 
         {/* Action Buttons: Reset & Save */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
+          {!is200 && (
+            <div className="mr-2">
+              <RecordStatusBadge
+                status={isLocked ? 'locked' : initialSaved ? 'editable' : 'new'}
+                subLabel={isLocked ? 'Max 1 edit saved' : initialSaved ? '1 edit remaining' : 'Ready for initial entry'}
+              />
+            </div>
+          )}
+
           {!isViewOnly && (
             <button
               onClick={handleReset}
@@ -373,23 +406,13 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           )}
 
           {!isViewOnly && (
-            <button
+            <StatusSaveButton
+              saving={saving}
+              isLocked={is200 ? (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) : isLocked}
+              savePhase={savePhase}
               onClick={initiateSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  Save Cooling Water Data
-                </>
-              )}
-            </button>
+              className="px-4 py-2 text-xs"
+            />
           )}
         </div>
       </div>
@@ -405,33 +428,8 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
               </h2>
             </div>
 
-            {/* Date Input inside Table Header */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="cw-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="cw-date-input"
-                  type="date"
-                  value={date}
-                  max={getTodayAsiaKolkata()}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white hover:border-slate-400"
-                  required
-                />
-              </div>
-              {date && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  {formatDateDisplay(date)}
-                </span>
-              )}
-            </div>
+            {/* Read-Only Date Badge */}
+            <LockedDateDisplay date={date} id="cw-date-display" />
           </div>
 
           {!isViewOnly && (
@@ -562,21 +560,21 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                   const time = String(row.time || '');
                   if (idx === 0 || time === '07:00') {
                     if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300"><Lock className="w-3 h-3" /> LOCKED</span>;
+                      shiftBadge = <RecordStatusBadge status="locked" />;
                     } else if (lockedShifts.shift1Saved) {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">EDITABLE</span>;
+                      shiftBadge = <RecordStatusBadge status="editable" />;
                     } else {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">NEW</span>;
+                      shiftBadge = <RecordStatusBadge status="new" />;
                     }
                   } else if (idx === 1 || time === '19:00') {
                     if (!lockedShifts.shift1Saved) {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">WAITING</span>;
-                    } else if (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 2)) {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300"><Lock className="w-3 h-3" /> LOCKED</span>;
+                      shiftBadge = <RecordStatusBadge status="waiting" />;
+                    } else if (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) {
+                      shiftBadge = <RecordStatusBadge status="locked" />;
                     } else if (lockedShifts.shift2Saved) {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">EDITABLE ({2 - (lockedShifts.shift2Edits || 0)} left)</span>;
+                      shiftBadge = <RecordStatusBadge status="editable" />;
                     } else {
-                      shiftBadge = <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">NEW</span>;
+                      shiftBadge = <RecordStatusBadge status="new" />;
                     }
                   }
                 }

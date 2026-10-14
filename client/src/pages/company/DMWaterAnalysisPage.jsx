@@ -26,6 +26,9 @@ import {
 import {
   getTodayAsiaKolkata,
   formatDateDisplay,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
@@ -97,11 +100,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
+  const [initialSaved, setInitialSaved] = useState(false);
+  const [editCount, setEditCount] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -135,6 +141,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           } else {
             setEditedFields({});
           }
+
+          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
+          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
+          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
+
+          setInitialSaved(hasSaved);
+          setEditCount(currentEdits);
+          setIsLocked(lockStatus);
           
           if (!record) {
              // Leave default
@@ -152,12 +166,18 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         } else {
           setEditedFields({});
           setRecordId(null);
+          setInitialSaved(false);
+          setEditCount(0);
+          setIsLocked(false);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
         setEditedFields({});
         setRecordId(null);
+        setInitialSaved(false);
+        setEditCount(0);
+        setIsLocked(false);
       }
     };
     fetchExistingData();
@@ -309,7 +329,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     };
 
     try {
-      const response = await api.post('/api/dm-water-analysis', payload);
+      const response = await api.post('/dm-water-analysis', payload);
       setSaveSuccess(true);
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -320,6 +340,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       }
       if (response.data?.emailRecipient) {
         setRecipientEmail(response.data.emailRecipient);
+      }
+
+      // Update one-time edit state
+      const nextEdits = initialSaved ? editCount + 1 : 0;
+      setInitialSaved(true);
+      setEditCount(nextEdits);
+      if (initialSaved || nextEdits >= 1) {
+        setIsLocked(true);
       }
 
       const emailStatus = response.data?.emailStatus;
@@ -337,7 +365,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         showToast?.('Data saved to database. Email delivery failed: ' + (response.data?.emailError || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
       console.error('[DMWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -389,12 +417,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+            <LockedDateDisplay date={date} id="dmwater-locked-date" />
+
+            <RecordStatusBadge
+              status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
+              subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+            />
+
             <button
               id="btn-dm-reset"
               onClick={handleReset}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
+              disabled={saving || isLocked}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
               title="Reset to default reference values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -402,40 +437,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             </button>
 
             {!isViewOnly ? (
-              <button
+              <StatusSaveButton
                 id="btn-dm-save"
+                saving={saving}
+                isLocked={isLocked}
+                savePhase={savePhase}
                 onClick={handleSaveClick}
-                disabled={saving}
-                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
-                  savePhase === 'completed'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : savePhase === 'email_failed'
-                    ? 'bg-amber-600 hover:bg-amber-700'
-                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : savePhase === 'completed' ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Saved & Emailed ✓</span>
-                  </>
-                ) : savePhase === 'email_failed' ? (
-                  <>
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Saved — Email Failed</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save Analysis</span>
-                  </>
-                )}
-              </button>
+                title="Save DM Water analysis"
+              />
             ) : (
               <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
                 Read-Only
@@ -472,15 +481,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
               Frequency: Day
             </span>
-            <div className="flex items-center gap-1.5 ml-1">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="px-2 py-0.5 text-xs font-bold rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
           </div>
 
           <div className="flex items-center gap-2">

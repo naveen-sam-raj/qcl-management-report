@@ -1,6 +1,6 @@
 import React from 'react';
 import api from '../services/api';
-import { AlertCircle, CheckCircle2, Clock, Calendar, Mail, RotateCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Calendar, Mail, RotateCw, Lock, Save } from 'lucide-react';
 
 /**
  * Returns today's operating date in Asia/Kolkata timezone (YYYY-MM-DD)
@@ -32,6 +32,42 @@ export const formatDateDisplay = (isoDate) => {
 };
 
 /**
+ * Standard Read-Only Date Display Badge matching ACL 300# reference
+ * No editable date-picker; strictly locked to Asia/Kolkata today
+ */
+export const LockedDateDisplay = ({ date, label = 'Date:', id = 'offset-date-display' }) => {
+  return (
+    <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+      <label
+        htmlFor={id}
+        className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+      >
+        <span>{label}</span>
+        <span className="text-red-500">*</span>
+      </label>
+      <div className="relative">
+        <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          id={id}
+          type="date"
+          value={date}
+          readOnly
+          disabled
+          className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md border-slate-300 bg-slate-100 text-slate-700 cursor-not-allowed select-none"
+          title="Date is locked to Today (Asia/Kolkata timezone)"
+        />
+      </div>
+      <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+        {formatDateDisplay(date)}
+      </span>
+      <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
+        Today
+      </span>
+    </div>
+  );
+};
+
+/**
  * Decoupled Retry Email Action
  */
 export const retryAnalysisEmail = async ({
@@ -46,9 +82,11 @@ export const retryAnalysisEmail = async ({
     showToast?.('Cannot retry email: Record ID is not available.', 'error');
     return false;
   }
+  // Strip any leading /api prefix if present
+  const cleanEndpoint = endpoint.replace(/^\/api/, '');
   if (setSaving) setSaving(true);
   try {
-    const res = await api.post(`${endpoint}/${recordId}/retry-email`);
+    const res = await api.post(`${cleanEndpoint}/${recordId}/retry-email`);
     if (res.data?.success || res.data?.emailStatus === 'sent' || res.data?.emailSent) {
       if (setSavePhase) setSavePhase('completed');
       if (setEmailStatusDetail) setEmailStatusDetail('Email sent successfully on retry ✓');
@@ -88,6 +126,97 @@ export const EditedBadge = ({ isEdited }) => {
 };
 
 /**
+ * Status Badge for Records / Shifts (NEW, EDITABLE, WAITING, LOCKED)
+ * Matching ACL 300# visual styling
+ */
+export const RecordStatusBadge = ({ status = 'NEW', subLabel }) => {
+  const normalized = String(status).toUpperCase();
+  let color = 'bg-blue-100 text-blue-800 border-blue-200';
+  let icon = null;
+
+  if (normalized.includes('LOCK')) {
+    color = 'bg-slate-100 text-slate-600 border-slate-300';
+    icon = <Lock className="w-2.5 h-2.5 inline mr-1" />;
+  } else if (normalized.includes('EDIT')) {
+    color = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+  } else if (normalized.includes('WAIT')) {
+    color = 'bg-amber-50 text-amber-700 border-amber-200';
+  }
+
+  return (
+    <span className={`inline-flex items-center text-[9.5px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider ${color}`}>
+      {icon}
+      {status}
+      {subLabel && <span className="ml-1 opacity-80 lowercase font-normal">({subLabel})</span>}
+    </span>
+  );
+};
+
+/**
+ * Standard Status Save Button matching ACL 300#
+ * States:
+ * - Saving... (with spinner)
+ * - Locked (All Edits Exhausted / All Shifts Saved)
+ * - Saved — Email Sent ✓
+ * - Saved — Email Pending 🚀
+ * - Saved — Email Failed ⚠️
+ * - Save Failed — Retry
+ * - Save / Submit (Default)
+ */
+export const StatusSaveButton = ({
+  saving,
+  isLocked,
+  savePhase = 'idle',
+  onClick,
+  disabled,
+  title = 'Save analysis data',
+  id = 'btn-offset-save',
+}) => {
+  let buttonText = 'Save / Submit';
+  let buttonIcon = <Save className="w-3.5 h-3.5" />;
+  let colorClass = 'bg-blue-600 hover:bg-blue-700';
+
+  if (saving) {
+    buttonText = 'Saving...';
+    buttonIcon = <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />;
+  } else if (isLocked) {
+    buttonText = 'Locked';
+    buttonIcon = <Lock className="w-3.5 h-3.5" />;
+    colorClass = 'bg-slate-400 cursor-not-allowed';
+  } else if (savePhase === 'completed') {
+    buttonText = 'Saved — Email Sent ✓';
+    buttonIcon = <CheckCircle2 className="w-3.5 h-3.5" />;
+    colorClass = 'bg-emerald-600 hover:bg-emerald-700';
+  } else if (savePhase === 'email_pending') {
+    buttonText = 'Saved — Email Pending 🚀';
+    buttonIcon = <Mail className="w-3.5 h-3.5" />;
+    colorClass = 'bg-sky-600 hover:bg-sky-700';
+  } else if (savePhase === 'email_failed') {
+    buttonText = 'Saved — Email Failed ⚠️';
+    buttonIcon = <AlertCircle className="w-3.5 h-3.5" />;
+    colorClass = 'bg-amber-600 hover:bg-amber-700';
+  } else if (savePhase === 'save_failed') {
+    buttonText = 'Save Failed — Retry';
+    buttonIcon = <RotateCw className="w-3.5 h-3.5" />;
+    colorClass = 'bg-rose-600 hover:bg-rose-700';
+  }
+
+  return (
+    <button
+      id={id}
+      type="button"
+      onClick={onClick}
+      disabled={disabled || saving || isLocked}
+      className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer ${colorClass}`}
+      title={title}
+    >
+      {buttonIcon}
+      <span>{buttonText}</span>
+    </button>
+  );
+};
+
+/**
  * Standard Save Status Banner (Email Sent, Email Pending, Email Failed)
  */
 export const SaveStatusBanner = ({
@@ -101,22 +230,27 @@ export const SaveStatusBanner = ({
   onDismiss,
   saving,
 }) => {
-  if (!saveSuccess) return null;
+  if (!saveSuccess && savePhase !== 'email_failed' && savePhase !== 'save_failed') return null;
 
   const isFailed = savePhase === 'email_failed';
   const isPending = savePhase === 'email_pending';
+  const isSaveFailed = savePhase === 'save_failed';
 
   return (
     <div
       className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
-        isFailed
+        isSaveFailed
+          ? 'bg-rose-50 border-rose-200 text-rose-900'
+          : isFailed
           ? 'bg-amber-50 border-amber-200 text-amber-900'
           : isPending
           ? 'bg-sky-50 border-sky-200 text-sky-900'
           : 'bg-emerald-50 border-emerald-200 text-emerald-900'
       }`}
     >
-      {isFailed ? (
+      {isSaveFailed ? (
+        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+      ) : isFailed ? (
         <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
       ) : (
         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -124,17 +258,21 @@ export const SaveStatusBanner = ({
       <div className="text-xs flex-1 space-y-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-extrabold uppercase tracking-wide">
-            {isFailed
+            {isSaveFailed
+              ? 'Save Failed — Retry ❌'
+              : isFailed
               ? 'Saved — Email Failed ⚠️'
               : isPending
               ? 'Saved — Email Pending 🚀'
               : 'Saved — Email Sent ✓'}
           </span>
           <span className="text-slate-600">
-            {analysisName} for <strong>{formatDateDisplay(date)}</strong> has been persisted in MongoDB.
+            {isSaveFailed
+              ? `${analysisName} for ${formatDateDisplay(date)} could not be saved to MongoDB. Please try again.`
+              : `${analysisName} for ${formatDateDisplay(date)} has been persisted in MongoDB.`}
           </span>
         </div>
-        {recipientEmail && (
+        {recipientEmail && !isSaveFailed && (
           <div className="text-[11px] text-slate-600 font-mono flex items-center gap-1">
             <Mail className="w-3 h-3 text-slate-400" />
             <span>Assigned Recipient:</span>
@@ -184,6 +322,7 @@ export const SaveConfirmationModal = ({
   analysisName = 'OFFSET Analysis',
   date,
   shiftOrTime,
+  isEdit = false,
   summaryItems = [],
   recipientEmail,
 }) => {
@@ -199,8 +338,12 @@ export const SaveConfirmationModal = ({
               <CheckCircle2 className="w-4 h-4 text-blue-400" />
             </div>
             <div>
-              <h3 className="font-extrabold text-sm tracking-wide uppercase">Confirm Analysis Save</h3>
-              <p className="text-[11px] text-slate-300">Review parameters before database persistence</p>
+              <h3 className="font-extrabold text-sm tracking-wide uppercase">
+                {isEdit ? 'Confirm One-Time Edit Save' : 'Confirm Analysis Save'}
+              </h3>
+              <p className="text-[11px] text-slate-300">
+                {isEdit ? 'Note: Exactly 1 edit is permitted. Once saved, this record will be LOCKED.' : 'Review parameters before database persistence'}
+              </p>
             </div>
           </div>
           <button
@@ -234,6 +377,15 @@ export const SaveConfirmationModal = ({
               </div>
             )}
           </div>
+
+          {isEdit && (
+            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>One-Time Edit Warning:</strong> This is your single permitted edit for this record. After saving, it will be permanently <strong>LOCKED</strong>.
+              </span>
+            </div>
+          )}
 
           {summaryItems.length > 0 && (
             <div>
@@ -281,7 +433,7 @@ export const SaveConfirmationModal = ({
             {saving && (
               <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
             )}
-            <span>Confirm & Save</span>
+            <span>{isEdit ? 'Confirm & Lock' : 'Confirm & Save'}</span>
           </button>
         </div>
       </div>
