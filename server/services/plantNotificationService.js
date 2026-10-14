@@ -3906,6 +3906,7 @@ const executeSaveAndEmailWorkflow = async ({
       emailStatus: 'failed',
       message: 'Data saved and Excel generated, but email sending failed.',
       emailError: emailResult.error,
+      error: emailResult.error,
       recipient: assignedUser.email,
       data: savedRecord,
       excel: excelResult
