@@ -505,6 +505,12 @@ const sendPlantAnalysisEmail = async ({
     (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('bagging') && String(analysisType || '').toLowerCase().includes('sieve')) ||
     String(analysisType || '').toLowerCase().includes('lsa_bagging_sieve');
 
+  const isSAGasConcAnalysis =
+    analysisType === 'Gas Conc. Analysis' ||
+    analysisType === 'Gas Conc Analysis' ||
+    (String(analysisType || '').toLowerCase().includes('gas') && String(analysisType || '').toLowerCase().includes('conc')) ||
+    String(analysisType || '').toLowerCase().includes('gas_conc');
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -1153,6 +1159,27 @@ TK 110 (Feed Tank):
             return `#${i + 1} | Time: ${r.time || '—'} | BSS 10: ${bss10}% | BSS 30: ${bss30}% (Spec: 1.5–2.0%) | -30: ${m30}% | BSS 60: ${bss60}% (Spec: 5.5–6.0%)`;
           }).join('\n')
         : 'No sieve readings entered yet.') + '\n\n';
+  } else if (isSAGasConcAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    sieveTextSummary = `SA Plant Gas Conc. Analysis (${rows.length} Observations Recorded):\n` +
+      (rows.length > 0
+        ? rows.map((r, i) => {
+            const d = r.displayDate || r.date || '—';
+            const t = r.time || '—';
+            const s = r.seal || 'NOT OK';
+            const rec = formatVal(r.recoveryCo2Con);
+            const cln = formatVal(r.cleaningGas);
+            const bot = formatVal(r.bottomGas);
+            return `#${i + 1} | Date: ${d} | Time: ${t} | Seal: ${s} | Recovery CO2: ${rec}% (Spec: 75%–85%) | Cleaning Gas: ${cln}% (Spec: 9%–11%) | Bottom Gas: ${bot}% (Spec: 80%–90%)`;
+          }).join('\n')
+        : 'No observations recorded yet.') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2867,6 +2894,70 @@ Attachment: ${excelFileName}
         </div>
       </div>
     `;
+  } else if (isSAGasConcAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const checkOut = (val, min, max) => {
+      const n = parseFloat(val);
+      return !isNaN(n) && (n < min || n > max);
+    };
+
+    dataHtml = `
+      <div class="field-group" style="margin-bottom: 16px;">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center; background: #0f2e5a; color: #ffffff; padding: 7px 12px; border-radius: 6px 6px 0 0;">
+          <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px;">SA Plant — GAS CONC. ANALYSIS OBSERVATIONS</span>
+          <span style="font-size: 11px; opacity: 0.9;">${rows.length} Observations Recorded</span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #1e3a8a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 95px;">Date</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 75px;">Time</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 85px;">SEAL</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Recovery CO₂ (%)<br/><span style="font-size: 9.5px; opacity: 0.85;">[75%–85%]</span></th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Cleaning Gas (%)<br/><span style="font-size: 9.5px; opacity: 0.85;">[9%–11%]</span></th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Bottom Gas (%)<br/><span style="font-size: 9.5px; opacity: 0.85;">[80%–90%]</span></th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 90px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r, idx) => {
+              const isRecOut = checkOut(r.recoveryCo2Con, 75, 85);
+              const isCleanOut = checkOut(r.cleaningGas, 9, 11);
+              const isBotOut = checkOut(r.bottomGas, 80, 90);
+              const isAnyOut = isRecOut || isCleanOut || isBotOut;
+              const hasVal = (r.recoveryCo2Con !== '' && r.recoveryCo2Con !== null && r.recoveryCo2Con !== undefined) ||
+                             (r.cleaningGas !== '' && r.cleaningGas !== null && r.cleaningGas !== undefined) ||
+                             (r.bottomGas !== '' && r.bottomGas !== null && r.bottomGas !== undefined);
+
+              return `
+                <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; color: #64748b;">${idx + 1}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; color: #334155;">${r.displayDate || r.date || '—'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${r.time || '—'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: ${r.seal === 'OK' ? '#059669' : '#e11d48'};">${r.seal || 'NOT OK'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isRecOut ? '#e11d48' : '#059669'};">${formatVal(r.recoveryCo2Con)}%</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isCleanOut ? '#e11d48' : '#059669'};">${formatVal(r.cleaningGas)}%</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isBotOut ? '#e11d48' : '#059669'};">${formatVal(r.bottomGas)}%</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-size: 10px; font-weight: 700; color: ${!hasVal ? '#94a3b8' : (isAnyOut ? '#e11d48' : '#059669')};">
+                    ${!hasVal ? 'Pending' : (isAnyOut ? 'Out of Limit' : 'Normal')}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Unit: <strong>Gas Conc.</strong> | Frequency: <strong>Once in a Shift</strong>
+        </div>
+      </div>
+    `;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -3535,6 +3626,24 @@ const executeSaveAndEmailWorkflow = async ({
         savedDateFormatted: dateFormatted,
         savedTimeFormatted: timeFormatted,
         filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'Gas Conc. Analysis' ||
+      analysisType === 'Gas Conc Analysis' ||
+      cleanType.toLowerCase().includes('gas_conc') ||
+      cleanType.toLowerCase().includes('gasconc')
+    ) {
+      const { generateGasConcExcel } = require('./excelService');
+      const recordData = savedRecord.toObject ? savedRecord.toObject() : savedRecord;
+      excelResult = await generateGasConcExcel({
+        ...recordData,
+        plant: plantName,
+        date: savedRecord.date,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+        rows: recordData.data?.rows || recordData.rows || [],
       });
     } else {
       const { generatePlantReportExcel } = require('./excelService');
