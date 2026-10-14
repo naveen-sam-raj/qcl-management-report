@@ -661,9 +661,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
               <span className="font-extrabold">
                 {emailStatus === 'sent'
                   ? 'Saved — Email Sent:'
-                  : emailStatus === 'failed'
-                  ? 'Saved — Email Delivery Failed:'
-                  : 'Saved — Email Pending / Processing:'}
+                  : 'Saved — Email Delivery Failed:'}
               </span>{' '}
               <span>
                 {emailMessage ||

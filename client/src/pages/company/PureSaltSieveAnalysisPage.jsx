@@ -424,45 +424,11 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         setSavePhase('completed');
         setEmailStatusDetail('Email accepted by SMTP server ✓');
         showToast('Saved — Email Sent ✓', 'success');
-      } else if (response.data?.emailPending || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast('Saved — Email Dispatching 🚀', 'info');
-
-        // Poll fast (800ms and 1800ms) so user sees sent status right away
-        const checkStatus = async () => {
-          try {
-            const checkRes = await api.get('/pure-salt-sieve-analysis?date=' + date);
-            const latestDoc = checkRes.data?.data?.[0];
-            if (latestDoc?.emailStatus === 'sent') {
-              setSavePhase('completed');
-              setEmailStatusDetail('Email accepted by SMTP server ✓');
-              showToast('Saved — Email Sent ✓', 'success');
-              return true;
-            } else if (latestDoc?.emailStatus === 'failed') {
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Saved — Email Failed');
-              return true;
-            }
-          } catch (cErr) {}
-          return false;
-        };
-
-        setTimeout(async () => {
-          const done = await checkStatus();
-          if (!done) {
-            setTimeout(checkStatus, 1000);
-          }
-        }, 800);
-      } else if (statusFromApi === 'failed' || (emailNotification && !emailNotification.success)) {
+      } else {
         setSavePhase('email_failed');
         const errDetail = emailNotification?.error || emailNotification?.message || 'Email delivery failed to mail server';
         setEmailStatusDetail('Saved — Email Failed: ' + errDetail);
         showToast('Saved — Email Failed: ' + errDetail, 'warning');
-      } else {
-        setSavePhase('completed');
-        setEmailStatusDetail('Saved successfully');
-        showToast(response.data.message || 'Saved successfully', 'success');
       }
       setSaveSuccess(true);
     } catch (err) {
@@ -605,8 +571,6 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
                       ? 'Saved & Emailed ✓'
                       : savePhase === 'email_failed'
                       ? 'Saved — Email Failed'
-                      : savePhase === 'email_pending'
-                      ? 'Saved — Email Pending'
                       : 'Save / Submit'}
                   </span>
                 </button>
@@ -630,8 +594,6 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
             savePhase === 'email_failed'
               ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : savePhase === 'email_pending'
-              ? 'bg-sky-50 border-sky-200 text-sky-900'
               : 'bg-emerald-50 border-emerald-200 text-emerald-900'
           }`}
         >
@@ -645,8 +607,6 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
               <span className="font-bold">
                 {savePhase === 'email_failed'
                   ? 'Saved — Email Failed ⚠️'
-                  : savePhase === 'email_pending'
-                  ? 'Saved — Email Pending ⏳'
                   : 'Saved — Email Sent ✓'}
               </span>
               <span className="text-slate-600">

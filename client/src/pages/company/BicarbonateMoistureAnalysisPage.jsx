@@ -192,7 +192,7 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
   const [lastSaved, setLastSaved]                   = useState(null);
 
   // Email & Persistence states
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');

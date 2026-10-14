@@ -237,7 +237,7 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
   const [originalLockedShifts, setOriginalLockedShifts] = useState(null);
 
   // Email & Persistence states
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
@@ -383,9 +383,6 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
             } else if (rec.emailStatus === 'failed' || response.data.emailStatus === 'failed') {
               setSavePhase('email_failed');
               setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
-            } else if (rec.emailStatus === 'pending') {
-              setSavePhase('email_pending');
-              setEmailStatusDetail('Database save succeeded. Email notification is pending.');
             }
           } else {
             setShiftData(buildInitialShiftData());
@@ -936,8 +933,6 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
           className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
             savePhase === 'completed'
               ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              : savePhase === 'email_pending'
-              ? 'bg-sky-50 border-sky-300 text-sky-900'
               : savePhase === 'saving'
               ? 'bg-blue-50 border-blue-200 text-blue-900'
               : 'bg-amber-50 border-amber-300 text-amber-900'
@@ -946,10 +941,6 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
           <div className="flex items-center gap-2.5">
             {savePhase === 'completed' ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : savePhase === 'email_pending' ? (
-              <Clock className="w-4 h-4 text-sky-600 animate-pulse shrink-0" />
-            ) : savePhase === 'saving' ? (
-              <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
             ) : (
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
             )}
@@ -957,8 +948,6 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
               <span className="font-bold">
                 {savePhase === 'completed'
                   ? 'Saved — Email Sent: '
-                  : savePhase === 'email_pending'
-                  ? 'Saved — Email Pending: '
                   : savePhase === 'saving'
                   ? 'Saving Data: '
                   : 'Saved — Email Failed: '}

@@ -143,10 +143,6 @@ export const StatusSaveButton = ({
     label = 'Saved — Email Sent ✓';
     icon = <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />;
     btnClasses = 'bg-emerald-600 hover:bg-emerald-700 text-white';
-  } else if (savePhase === 'email_pending') {
-    label = 'Saved — Email Pending 🚀';
-    icon = <Clock className="w-3.5 h-3.5 text-blue-200" />;
-    btnClasses = 'bg-sky-600 hover:bg-sky-700 text-white';
   } else if (savePhase === 'email_failed') {
     label = 'Saved — Email Failed ⚠️';
     icon = <AlertCircle className="w-3.5 h-3.5 text-amber-200" />;
@@ -189,7 +185,6 @@ export const SaveStatusBanner = ({
   if (!saveSuccess && savePhase === 'idle') return null;
 
   const isEmailFailed = savePhase === 'email_failed';
-  const isEmailPending = savePhase === 'email_pending';
   const isEmailSent = savePhase === 'completed';
 
   return (
@@ -199,8 +194,6 @@ export const SaveStatusBanner = ({
       className={`rounded-xl border p-4 text-xs transition-all shadow-xs ${
         isEmailFailed
           ? 'bg-amber-50 border-amber-200 text-amber-900'
-          : isEmailPending
-          ? 'bg-sky-50 border-sky-200 text-sky-900'
           : 'bg-emerald-50 border-emerald-200 text-emerald-900'
       }`}
     >
@@ -208,8 +201,6 @@ export const SaveStatusBanner = ({
         <div className="flex items-start gap-2.5">
           {isEmailFailed ? (
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          ) : isEmailPending ? (
-            <Clock className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
           ) : (
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
           )}
@@ -217,9 +208,7 @@ export const SaveStatusBanner = ({
           <div>
             <div className="font-bold text-sm">
               {isEmailFailed
-                ? 'Saved in Database — Email Dispatch Pending/Failed'
-                : isEmailPending
-                ? 'Saved in Database — Email Dispatching'
+                ? 'Saved in Database — Email Delivery Failed'
                 : 'Analysis Saved & Email Notification Dispatched'}
             </div>
             <p className="mt-0.5 text-xs opacity-90 leading-relaxed">

@@ -88,7 +88,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
   const [saving, setSaving]                         = useState(false);
   const [emailRetrying, setEmailRetrying]           = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
@@ -120,7 +120,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -370,10 +370,6 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
           setSavePhase('completed');
           setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
           showToast?.('Saved — Email Sent ✓', 'success');
-        } else if (emailPending || statusFromApi === 'pending') {
-          setSavePhase('email_pending');
-          setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-          showToast?.('Saved — Email Dispatching 🚀', 'info');
         } else {
           setSavePhase('email_failed');
           setEmailStatusDetail(emailRes?.error || 'Email delivery failed');
@@ -538,11 +534,6 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
                     <AlertCircle className="w-3.5 h-3.5" />
                     <span>Saved — Email Failed</span>
                   </>
-                ) : savePhase === 'email_pending' ? (
-                  <>
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Saved — Email Pending</span>
-                  </>
                 ) : (
                   <>
                     <Save className="w-3.5 h-3.5" />
@@ -573,22 +564,7 @@ const CaCl2AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       )}
 
-      {savePhase === 'email_pending' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between text-amber-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <Mail className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
-            <div>
-              <span className="font-extrabold">Saved — Email Pending</span>
-              <span className="text-amber-700 ml-1.5">
-                Data persisted. Dispatched to queue for {recipientEmail || 'ACL operator'}.
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded border border-amber-200">
-            In Transit
-          </span>
-        </div>
-      )}
+      
 
       {savePhase === 'email_failed' && (
         <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between text-rose-900 text-xs animate-fadeIn shadow-2xs">

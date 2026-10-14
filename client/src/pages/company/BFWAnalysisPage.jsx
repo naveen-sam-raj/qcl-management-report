@@ -96,7 +96,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed' | 'save_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
@@ -130,7 +130,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -349,10 +349,6 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         setSavePhase('completed');
         setEmailStatusDetail('Delivered to SMTP server ✓');
         showToast?.('Saved & Emailed Successfully ✓', 'success');
-      } else if (emailStatus === 'pending' || res.data?.emailPending) {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast?.('Saved — Email Dispatching 🚀', 'info');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(res.data?.emailError || 'Email delivery failed');

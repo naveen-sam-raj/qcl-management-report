@@ -483,9 +483,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
               <span className="font-extrabold uppercase tracking-wide">
                 {emailDelivery.status === 'sent'
                   ? 'Saved — Email Sent'
-                  : emailDelivery.status === 'failed'
-                  ? 'Saved — Email Failed'
-                  : 'Saved — Email Pending'}
+                  : 'Saved — Email Failed'}
               </span>
               <span className="mx-1.5 text-slate-400">|</span>
               <span>Recipient: <strong>{emailDelivery.recipient || 'sa_operator@tfl.com'}</strong></span>

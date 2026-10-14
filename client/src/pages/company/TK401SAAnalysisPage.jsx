@@ -191,7 +191,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
@@ -243,7 +243,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -501,10 +501,6 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
-      } else if (emailPending || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast?.('Saved — Email Dispatching 🚀', 'info');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailErrMsg || 'Email delivery failed');
@@ -693,8 +689,6 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
                       ? 'Saved & Emailed ✓'
                       : savePhase === 'email_failed'
                       ? 'Saved — Email Failed'
-                      : savePhase === 'email_pending'
-                      ? 'Saved — Email Pending'
                       : 'Save / Submit'}
                   </span>
                 </button>
@@ -716,8 +710,6 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
           className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
             savePhase === 'email_failed'
               ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : savePhase === 'email_pending'
-              ? 'bg-sky-50 border-sky-200 text-sky-900'
               : 'bg-emerald-50 border-emerald-200 text-emerald-900'
           }`}
         >
@@ -731,8 +723,6 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
               <span className="font-bold">
                 {savePhase === 'email_failed'
                   ? 'Saved — Email Failed ⚠️'
-                  : savePhase === 'email_pending'
-                  ? 'Saved — Email Pending ⏳'
                   : 'Saved — Email Sent ✓'}
               </span>
               <span className="text-slate-600">

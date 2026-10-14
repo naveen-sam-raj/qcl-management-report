@@ -420,7 +420,7 @@ function createCO2ShiftAnalysisRouter({
 
       // Email dispatch workflow
       const saveEventId = `save_${unit}_${Date.now()}`;
-      let emailResult = { success: false, emailStatus: 'pending' };
+      let emailResult = { success: false, emailStatus: 'failed' };
 
       try {
         emailResult = await executeSaveAndEmailWorkflow({
@@ -443,7 +443,7 @@ function createCO2ShiftAnalysisRouter({
       }
 
       const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
-      const emailStatus = emailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+      const emailStatus = emailSent ? 'sent' : 'failed';
       const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || 'co2_operator@tfl.com';
 
       return res.status(201).json({
@@ -453,7 +453,7 @@ function createCO2ShiftAnalysisRouter({
           : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB. Email status: ${emailStatus}`,
         data: updatedRecordData,
         emailSent,
-        emailPending: emailStatus === 'pending',
+        emailPending: false,
         emailStatus,
         emailRecipient,
         emailNotification: emailResult,
@@ -827,7 +827,7 @@ function createCO2WeeklyAnalysisRouter({
 
       // Email workflow
       const saveEventId = `save_${unit}_${Date.now()}`;
-      let emailResult = { success: false, emailStatus: 'pending' };
+      let emailResult = { success: false, emailStatus: 'failed' };
 
       try {
         emailResult = await executeSaveAndEmailWorkflow({
@@ -850,7 +850,7 @@ function createCO2WeeklyAnalysisRouter({
       }
 
       const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
-      const emailStatus = emailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+      const emailStatus = emailSent ? 'sent' : 'failed';
       const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || 'co2_operator@tfl.com';
 
       return res.status(201).json({
@@ -860,7 +860,7 @@ function createCO2WeeklyAnalysisRouter({
           : `Successfully saved ${analysisType} in MongoDB. Email status: ${emailStatus}`,
         data: updatedRecordData,
         emailSent,
-        emailPending: emailStatus === 'pending',
+        emailPending: false,
         emailStatus,
         emailRecipient,
         emailNotification: emailResult,

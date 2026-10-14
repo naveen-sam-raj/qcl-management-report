@@ -264,8 +264,8 @@ router.post('/', protect, async (req, res) => {
     // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
     
-    // Fire and forget - do not await! Dispatch one email per newly saved shift.
-    newlySavedShifts.forEach(shiftKey => {
+    // Await immediate email delivery for newly saved shifts
+    const emailPromises = newlySavedShifts.map((shiftKey) =>
       executeSaveAndEmailWorkflow({
         plantIdentifier: plantTarget,
         analysisType: 'Pure Salt Analysis',
@@ -278,15 +278,43 @@ router.post('/', protect, async (req, res) => {
         company: savedRecord?.company || req.user?.company?._id || req.user?.company || null,
         explicitRecord: savedRecord,
         rawBody: payload,
-      }).catch(err => console.warn(`[AutoPlantEmail] Exception in background workflow for ${shiftKey}:`, err.message));
-    });
+      }).catch((err) => {
+        console.warn(`[AutoPlantEmail] Exception in workflow for ${shiftKey}:`, err.message);
+        return { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+      })
+    );
+
+    let lastEmailResult = null;
+    try {
+      const emailResults = await Promise.all(emailPromises);
+      if (Array.isArray(emailResults) && emailResults.length > 0) {
+        lastEmailResult = emailResults[emailResults.length - 1];
+      }
+    } catch (err) {
+      console.warn('[AutoPlantEmail] Note for Pure Salt:', err.message);
+      lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
+    }
+
+    const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.success));
+    const finalEmailStatus = emailSent ? 'sent' : 'failed';
+    const emailRecipient =
+      lastEmailResult?.recipient ||
+      lastEmailResult?.data?.emailRecipient ||
+      savedRecord?.emailRecipient ||
+      '';
 
     return res.status(201).json({
       success: true,
-      message: `Successfully saved ${newlySavedShifts.length} shift(s)`,
+      message: emailSent
+        ? `Successfully saved ${newlySavedShifts.length} shift(s) & email sent ✓`
+        : `Successfully saved ${newlySavedShifts.length} shift(s) in MongoDB. Email delivery failed: ${lastEmailResult?.error || 'Rejected by server'}`,
       data: savedRecord,
-      emailStatus: 'processing',
-      newlySavedShifts
+      emailSent,
+      emailPending: false,
+      emailStatus: finalEmailStatus,
+      emailRecipient,
+      emailNotification: lastEmailResult,
+      newlySavedShifts,
     });
   } catch (error) {
     console.error('[PureSaltAnalysis API] Error saving data:', error);

@@ -382,23 +382,12 @@ router.post('/', async (req, res) => {
         saveEventId,
       });
 
-      // 4000ms race timeout to prevent frontend UI freeze
-      const timeoutPromise = new Promise((resolve) =>
-        setTimeout(() => resolve({ timedOut: true }), 4000)
-      );
-
-      const workflowResult = await Promise.race([emailPromise, timeoutPromise]);
-
-      if (workflowResult && !workflowResult.timedOut) {
-        emailStatus = workflowResult.emailStatus || (workflowResult.success ? 'sent' : 'failed');
+      const workflowResult = await emailPromise;
+      emailStatus = workflowResult.emailStatus || (workflowResult.success ? 'sent' : 'failed');
         emailRecipient = workflowResult.recipient || null;
         emailMessage = workflowResult.emailSent
           ? `T 401 Analysis saved and notification sent to ${emailRecipient}.`
           : `T 401 Analysis saved. Email status: ${workflowResult.emailError || workflowResult.message || 'pending'}`;
-      } else {
-        emailStatus = 'pending';
-        emailMessage = 'T 401 Analysis saved. Notification email queued.';
-      }
     } catch (emailErr) {
       console.error('[T 401 Email] Error during email workflow:', emailErr);
       emailStatus = 'failed';
@@ -502,7 +491,7 @@ router.get('/', async (req, res) => {
       lockedShifts: {},
       editedFields: {},
       assignedOperatorEmail,
-      emailStatus: 'pending',
+      emailStatus: 'failed',
       emailRecipient: assignedOperatorEmail,
     });
   } catch (error) {

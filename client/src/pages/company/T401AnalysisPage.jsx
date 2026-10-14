@@ -179,7 +179,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
   const [selectedOption, setSelectedOption] = useState("all");
   
   // Save & Email tracking states
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
@@ -498,7 +498,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
         setEmailStatusDetail(`Database save succeeded. Email failed: ${smtpErr}`);
         showToast?.('Data saved, but notification email delivery failed.', 'warning');
       } else {
-        setSavePhase('email_pending');
+        setSavePhase('idle');
         setEmailStatusDetail('Saved — Email notification queued.');
         showToast?.('T 401 Analysis data saved successfully!', 'success');
       }
@@ -662,25 +662,6 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
           <button
             onClick={() => setSavePhase('idle')}
             className="ml-auto text-emerald-500 hover:text-emerald-700 text-sm leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {savePhase === 'email_pending' && (
-        <div
-          id="t401-pending-banner"
-          className="flex items-center gap-2.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-lg shadow-2xs animate-fadeIn"
-        >
-          <RefreshCw className="w-4 h-4 text-sky-600 animate-spin shrink-0" />
-          <div className="text-xs text-sky-800 font-medium">
-            <span className="font-bold">Saved — Email Pending:</span> {emailStatusDetail}
-          </div>
-          <button
-            onClick={() => setSavePhase('idle')}
-            className="ml-auto text-sky-500 hover:text-sky-700 text-sm leading-none shrink-0 cursor-pointer"
             aria-label="Dismiss"
           >
             ×

@@ -237,23 +237,12 @@ router.post('/', async (req, res) => {
         saveEventId,
       });
 
-      // 4000ms race timeout to avoid freezing client UI
-      const timeoutPromise = new Promise((resolve) =>
-        setTimeout(() => resolve({ timedOut: true }), 4000)
-      );
-
-      const workflowResult = await Promise.race([emailPromise, timeoutPromise]);
-
-      if (workflowResult && !workflowResult.timedOut) {
-        emailStatus = workflowResult.emailStatus || (workflowResult.success ? 'sent' : 'failed');
+      const workflowResult = await emailPromise;
+      emailStatus = workflowResult.emailStatus || (workflowResult.success ? 'sent' : 'failed');
         emailRecipient = workflowResult.recipient || null;
         emailMessage = workflowResult.emailSent
           ? `Bi Carbonate Analysis saved and notification sent to ${emailRecipient}.`
           : `Bi Carbonate Analysis saved. Email status: ${workflowResult.emailError || workflowResult.message || 'pending'}`;
-      } else {
-        emailStatus = 'pending';
-        emailMessage = 'Bi Carbonate Analysis saved. Notification email queued.';
-      }
     } catch (emailErr) {
       console.error('[Bi Carbonate Email] Error during email workflow:', emailErr);
       emailStatus = 'failed';
@@ -361,7 +350,7 @@ router.get('/', async (req, res) => {
           recordId: match._id || match.id,
           editedFields: match.editedFields || {},
           assignedOperatorEmail,
-          emailStatus: 'pending',
+          emailStatus: 'failed',
           emailRecipient: assignedOperatorEmail,
         });
       }
@@ -373,7 +362,7 @@ router.get('/', async (req, res) => {
         recordId: null,
         editedFields: {},
         assignedOperatorEmail,
-        emailStatus: 'pending',
+        emailStatus: 'failed',
         emailRecipient: assignedOperatorEmail,
         message: `No record found for date ${date}`,
       });

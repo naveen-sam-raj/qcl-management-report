@@ -345,7 +345,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
@@ -396,7 +396,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -790,10 +790,6 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast('Saved — Email Sent ✓', 'success');
-      } else if (emailPending || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast('Saved — Email Dispatching 🚀', 'info');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
@@ -999,8 +995,6 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
           className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
             savePhase === 'completed'
               ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              : savePhase === 'email_pending'
-              ? 'bg-sky-50 border-sky-300 text-sky-900'
               : savePhase === 'saving'
               ? 'bg-blue-50 border-blue-200 text-blue-900'
               : 'bg-amber-50 border-amber-300 text-amber-900'
@@ -1009,10 +1003,6 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
           <div className="flex items-center gap-2.5">
             {savePhase === 'completed' ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : savePhase === 'email_pending' ? (
-              <Clock className="w-4 h-4 text-sky-600 animate-pulse shrink-0" />
-            ) : savePhase === 'saving' ? (
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
             ) : (
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
             )}
@@ -1020,8 +1010,6 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
               <span className="font-extrabold text-sm">
                 {savePhase === 'completed'
                   ? 'Saved & Emailed Successfully ✓'
-                  : savePhase === 'email_pending'
-                  ? 'Saved — Email Pending ⏳'
                   : savePhase === 'saving'
                   ? 'Saving to MongoDB & preparing notification...'
                   : 'Saved to Database — Email Delivery Alert ⚠️'}

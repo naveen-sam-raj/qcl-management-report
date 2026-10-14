@@ -411,7 +411,7 @@ router.post('/', async (req, res) => {
 
     // Email dispatch
     const saveEventId = `save_lean_${Date.now()}`;
-    let emailResult = { success: false, emailStatus: 'pending' };
+    let emailResult = { success: false, emailStatus: 'failed' };
 
     try {
       emailResult = await executeSaveAndEmailWorkflow({
@@ -434,7 +434,7 @@ router.post('/', async (req, res) => {
     }
 
     const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
-    const emailStatus = emailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const emailStatus = emailSent ? 'sent' : 'failed';
     const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || 'co2_operator@tfl.com';
 
     return res.status(201).json({
@@ -444,7 +444,7 @@ router.post('/', async (req, res) => {
         : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeKey]} in MongoDB. Email status: ${emailStatus}`,
       data: updatedRecordData,
       emailSent,
-      emailPending: emailStatus === 'pending',
+      emailPending: false,
       emailStatus,
       emailRecipient,
       emailNotification: emailResult,

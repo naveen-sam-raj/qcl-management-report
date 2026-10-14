@@ -290,23 +290,12 @@ router.post('/', async (req, res) => {
         saveEventId,
       });
 
-      // 4000ms race timeout to avoid freezing client UI
-      const timeoutPromise = new Promise((resolve) =>
-        setTimeout(() => resolve({ timedOut: true }), 4000)
-      );
-
-      const workflowResult = await Promise.race([emailPromise, timeoutPromise]);
-
-      if (workflowResult && !workflowResult.timedOut) {
-        emailStatus = workflowResult.emailStatus || (workflowResult.success || workflowResult.emailSent ? 'sent' : 'failed');
+      const workflowResult = await emailPromise;
+      emailStatus = workflowResult.emailStatus || (workflowResult.success || workflowResult.emailSent ? 'sent' : 'failed');
         emailRecipient = workflowResult.recipient || emailRecipient;
         emailMessage = workflowResult.emailSent || workflowResult.emailStatus === 'sent'
           ? `Saved and notification dispatched to ${emailRecipient}`
           : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'SMTP delivery rejected'}`;
-      } else {
-        emailStatus = 'processing';
-        emailMessage = 'Saved successfully. Email notification is processing in background.';
-      }
     } catch (emailWorkflowErr) {
       console.warn('[LSABaggingSieve Email Warning]:', emailWorkflowErr.message);
       emailStatus = 'failed';

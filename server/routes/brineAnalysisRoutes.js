@@ -259,28 +259,14 @@ router.post('/', async (req, res) => {
         saveEventId,
       });
 
-      const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 7500));
-      const raceResult = await Promise.race([emailPromise, fastLimit]);
-
-      if (raceResult === 'TIMEOUT') {
-        emailTimedOut = true;
-        emailPromise
-          .then((bgRes) => {
-            console.log(`[Brine Save] Background email dispatch finished for event ${saveEventId}:`, bgRes?.emailStatus);
-          })
-          .catch((bgErr) => {
-            console.error(`[Brine Save] Background email dispatch error for event ${saveEventId}:`, bgErr.message);
-          });
-      } else {
-        lastEmailResult = raceResult;
-      }
+      lastEmailResult = await emailPromise;
     } catch (err) {
       console.warn(`[AutoPlantEmail] Instant workflow note for Brine:`, err.message);
       lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
     }
 
     const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.emailStatus === 'sent'));
-    const finalEmailStatus = emailTimedOut ? 'pending' : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const finalEmailStatus = emailSent ? 'sent' : 'failed';
     const emailRecipient =
       lastEmailResult?.recipient ||
       lastEmailResult?.data?.emailRecipient ||
@@ -291,14 +277,12 @@ router.post('/', async (req, res) => {
       success: true,
       message: emailSent
         ? `Successfully saved Brine Analysis & email sent ✓`
-        : emailTimedOut
-        ? `Successfully saved Brine Analysis — Email dispatching immediately 🚀`
         : `Successfully saved Brine Analysis — Email delivery failed: ${lastEmailResult?.error || 'Unknown error'}`,
       data: updatedRecordData,
       recordId: savedDoc?._id || updatedRecordData.id,
       saveEventId,
       emailSent,
-      emailPending: emailTimedOut,
+      emailPending: false,
       emailStatus: finalEmailStatus,
       emailRecipient,
       emailNotification: lastEmailResult,

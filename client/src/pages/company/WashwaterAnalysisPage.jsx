@@ -166,7 +166,7 @@ const WashwaterAnalysisPage = ({ plantId = 'co2' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -441,10 +441,6 @@ const WashwaterAnalysisPage = ({ plantId = 'co2' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
-      } else if (emailPending || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast?.('Saved — Email Dispatching 🚀', 'info');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');

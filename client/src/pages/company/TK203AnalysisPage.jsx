@@ -132,7 +132,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving' | 'email_pending' | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
@@ -187,7 +187,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
         if (hasExistingRecord && response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         } else {
           setSavePhase('idle');
         }
@@ -455,44 +455,6 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast('Saved — Email Sent ✓', 'success');
-      } else if (emailPending || statusFromApi === 'pending') {
-        setSavePhase('email_pending');
-        setEmailStatusDetail('Saved — Email dispatching immediately 🚀');
-        showToast('Saved — Email Dispatching 🚀', 'info');
-
-        // Bounded polling for asynchronous background dispatch completion
-        let attempts = 0;
-        const maxAttempts = 10;
-        const intervalId = setInterval(async () => {
-          attempts += 1;
-          try {
-            const checkRes = await api.get(`/api/tk-203-analysis?date=${date}`);
-            const checkStatus = checkRes.data?.emailStatus;
-            const updatedRecord = checkRes.data?.data?.[0];
-            if (updatedRecord?._id || checkRes.data?.recordId) {
-              setRecordId(updatedRecord?._id || checkRes.data?.recordId);
-            }
-            if (checkStatus === 'sent') {
-              clearInterval(intervalId);
-              setSavePhase('completed');
-              setEmailStatusDetail('Delivered to SMTP server ✓');
-              showToast('Saved — Email Sent ✓', 'success');
-            } else if (checkStatus === 'failed') {
-              clearInterval(intervalId);
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Email delivery failed to mail server');
-              showToast('Saved — Email Failed. You can retry sending.', 'warning');
-            } else if (attempts >= maxAttempts) {
-              clearInterval(intervalId);
-              // Bounded timeout reached: allow user manual retry rather than stuck forever
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Email dispatch timeout. Please click Retry Email.');
-              showToast('Email dispatch timed out. Click Retry Email to resend.', 'warning');
-            }
-          } catch (pollErr) {
-            if (attempts >= maxAttempts) clearInterval(intervalId);
-          }
-        }, 1500);
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
@@ -682,8 +644,6 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
                       ? 'Saved & Emailed ✓'
                       : savePhase === 'email_failed'
                       ? 'Saved — Email Failed'
-                      : savePhase === 'email_pending'
-                      ? 'Saved — Email Pending'
                       : 'Save / Submit'}
                   </span>
                 </button>
@@ -705,8 +665,6 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
           className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
             savePhase === 'email_failed'
               ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : savePhase === 'email_pending'
-              ? 'bg-sky-50 border-sky-200 text-sky-900'
               : 'bg-emerald-50 border-emerald-200 text-emerald-900'
           }`}
         >
@@ -720,8 +678,6 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
               <span className="font-bold">
                 {savePhase === 'email_failed'
                   ? 'Saved — Email Failed ⚠️'
-                  : savePhase === 'email_pending'
-                  ? 'Saved — Email Pending ⏳'
                   : 'Saved — Email Sent ✓'}
               </span>
               <span className="text-slate-600">

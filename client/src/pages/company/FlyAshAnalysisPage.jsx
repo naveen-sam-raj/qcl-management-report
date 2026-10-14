@@ -51,7 +51,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_pending' | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
@@ -104,7 +104,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
         if (response.data?.emailStatus) {
           if (response.data.emailStatus === 'sent') setSavePhase('completed');
           else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('email_pending');
+          else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
@@ -282,7 +282,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
           setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
           showToast?.('Fly Ash Analysis saved to MongoDB. Email dispatch failed.', 'warning');
         } else {
-          setSavePhase('email_pending');
+          setSavePhase('idle');
           showToast?.('Fly Ash Analysis saved to MongoDB. Email dispatch pending.', 'info');
         }
       } else {

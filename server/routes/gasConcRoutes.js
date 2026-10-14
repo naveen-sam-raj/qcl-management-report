@@ -209,7 +209,7 @@ router.get('/', async (req, res) => {
           editedFields: cached.editedFields || {},
           editAuditHistory: cached.editAuditHistory || [],
           assignedOperatorEmail,
-          emailStatus: 'pending',
+          emailStatus: 'failed',
           emailRecipient: assignedOperatorEmail,
         });
       }
@@ -732,23 +732,12 @@ router.post('/', async (req, res) => {
         saveEventId,
       });
 
-      // 4000ms race timeout to prevent UI freezes
-      const timeoutPromise = new Promise((resolve) =>
-        setTimeout(() => resolve({ timedOut: true }), 4000)
-      );
-
-      const workflowResult = await Promise.race([emailPromise, timeoutPromise]);
-
-      if (workflowResult && !workflowResult.timedOut) {
-        emailStatus = workflowResult.emailStatus || (workflowResult.emailSent ? 'sent' : 'failed');
+      const workflowResult = await emailPromise;
+      emailStatus = workflowResult.emailStatus || (workflowResult.emailSent ? 'sent' : 'failed');
         emailRecipient = workflowResult.recipient || workflowResult.primaryEmail || 'sa_operator@tfl.com';
         emailMessage = workflowResult.emailSent
           ? `Saved and notification dispatched to ${emailRecipient}`
           : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'SMTP delivery rejected'}`;
-      } else {
-        emailStatus = 'processing';
-        emailMessage = 'Saved successfully. Email notification is processing in background.';
-      }
     } catch (emailWorkflowErr) {
       console.warn('[GasConc] Email workflow warning:', emailWorkflowErr.message);
       emailStatus = 'failed';

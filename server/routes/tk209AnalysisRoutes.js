@@ -329,21 +329,18 @@ router.post('/', async (req, res) => {
     );
 
     let lastEmailResult = null;
-    let emailTimedOut = false;
-    const fastCheck = Promise.all(emailPromises);
-    const fastLimit = new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 800));
-
-    const raceResult = await Promise.race([fastCheck, fastLimit]);
-    if (raceResult === 'TIMEOUT') {
-      emailTimedOut = true;
-    } else if (Array.isArray(raceResult) && raceResult.length > 0) {
-      lastEmailResult = raceResult[raceResult.length - 1];
+    try {
+      const emailResults = await Promise.all(emailPromises);
+      if (Array.isArray(emailResults) && emailResults.length > 0) {
+        lastEmailResult = emailResults[emailResults.length - 1];
+      }
+    } catch (err) {
+      console.warn('[AutoPlantEmail] Note for TK 209:', err.message);
+      lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
     }
 
-    const emailSent = !!(lastEmailResult && lastEmailResult.emailSent);
-    const finalEmailStatus = emailTimedOut
-      ? 'pending'
-      : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.success));
+    const finalEmailStatus = emailSent ? 'sent' : 'failed';
     const emailRecipient =
       lastEmailResult?.recipient ||
       lastEmailResult?.data?.emailRecipient ||
@@ -354,10 +351,10 @@ router.post('/', async (req, res) => {
       success: true,
       message: emailSent
         ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} & email sent ✓`
-        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} — Email dispatching immediately 🚀`,
+        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB. Email delivery failed: ${lastEmailResult?.error || 'Rejected by server'}`,
       data: updatedRecordData,
       emailSent,
-      emailPending: emailTimedOut,
+      emailPending: false,
       emailStatus: finalEmailStatus,
       emailRecipient,
       emailNotification: lastEmailResult,

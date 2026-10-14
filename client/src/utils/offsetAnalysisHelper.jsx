@@ -187,10 +187,6 @@ export const StatusSaveButton = ({
     buttonText = 'Saved — Email Sent ✓';
     buttonIcon = <CheckCircle2 className="w-3.5 h-3.5" />;
     colorClass = 'bg-emerald-600 hover:bg-emerald-700';
-  } else if (savePhase === 'email_pending') {
-    buttonText = 'Saved — Email Pending 🚀';
-    buttonIcon = <Mail className="w-3.5 h-3.5" />;
-    colorClass = 'bg-sky-600 hover:bg-sky-700';
   } else if (savePhase === 'email_failed') {
     buttonText = 'Saved — Email Failed ⚠️';
     buttonIcon = <AlertCircle className="w-3.5 h-3.5" />;
@@ -217,7 +213,7 @@ export const StatusSaveButton = ({
 };
 
 /**
- * Standard Save Status Banner (Email Sent, Email Pending, Email Failed)
+ * Standard Save Status Banner (Email Sent, Email Failed)
  */
 export const SaveStatusBanner = ({
   saveSuccess,
@@ -233,7 +229,6 @@ export const SaveStatusBanner = ({
   if (!saveSuccess && savePhase !== 'email_failed' && savePhase !== 'save_failed') return null;
 
   const isFailed = savePhase === 'email_failed';
-  const isPending = savePhase === 'email_pending';
   const isSaveFailed = savePhase === 'save_failed';
 
   return (
@@ -243,8 +238,6 @@ export const SaveStatusBanner = ({
           ? 'bg-rose-50 border-rose-200 text-rose-900'
           : isFailed
           ? 'bg-amber-50 border-amber-200 text-amber-900'
-          : isPending
-          ? 'bg-sky-50 border-sky-200 text-sky-900'
           : 'bg-emerald-50 border-emerald-200 text-emerald-900'
       }`}
     >
@@ -262,8 +255,6 @@ export const SaveStatusBanner = ({
               ? 'Save Failed — Retry ❌'
               : isFailed
               ? 'Saved — Email Failed ⚠️'
-              : isPending
-              ? 'Saved — Email Pending 🚀'
               : 'Saved — Email Sent ✓'}
           </span>
           <span className="text-slate-600">
