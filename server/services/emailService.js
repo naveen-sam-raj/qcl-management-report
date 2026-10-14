@@ -1,36 +1,31 @@
 const nodemailer = require('nodemailer');
 
 /**
- * Creates and returns a Nodemailer transporter configured from server/.env.
- * Uses environment variables:
- * MAIL_HOST, MAIL_PORT, MAIL_SECURE, MAIL_USER, MAIL_PASSWORD, MAIL_FROM
+ * Creates and returns a Nodemailer transporter configured from environment variables:
+ * EMAIL_USER, EMAIL_PASS, SENDER_NAME (with fallback to MAIL_USER / MAIL_PASSWORD).
+ * Configured securely for Gmail SMTP with IPv4 enforcement.
  */
 const createNodemailerTransporter = () => {
   try {
     require('dotenv').config();
   } catch (e) {
-    // Ignore error if dotenv already loaded
+    // Ignore if dotenv is already loaded
   }
 
-  const host = process.env.MAIL_HOST || process.env.SMTP_HOST;
-  const user = process.env.MAIL_USER || process.env.SMTP_USER;
-  const rawPass = process.env.MAIL_PASSWORD || process.env.SMTP_PASS || process.env.MAIL_PASS;
+  const user = process.env.EMAIL_USER || process.env.MAIL_USER;
+  const rawPass = process.env.EMAIL_PASS || process.env.MAIL_PASSWORD || process.env.MAIL_PASS;
 
-  if (!host || !user || !rawPass) {
+  if (!user || !rawPass) {
     return null;
   }
 
   const pass = rawPass.trim().replace(/\s+/g, '');
-  const port = parseInt(process.env.MAIL_PORT || process.env.SMTP_PORT || '587', 10);
-  const secure = process.env.MAIL_SECURE === 'true' || port === 465;
 
   return nodemailer.createTransport({
-    pool: true,
-    maxConnections: 5,
-    maxMessages: 100,
-    host: host.trim(),
-    port,
-    secure,
+    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
     family: 4, // Force IPv4 to prevent ENETUNREACH on environments without IPv6 routing
     auth: {
       user: user.trim(),
@@ -39,9 +34,9 @@ const createNodemailerTransporter = () => {
     tls: {
       rejectUnauthorized: false,
     },
-    connectionTimeout: 15000, // 15s connection timeout
-    greetingTimeout: 10000,   // 10s greeting timeout
-    socketTimeout: 20000,     // 20s socket activity timeout
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   });
 };
 
@@ -167,12 +162,13 @@ Please find the Excel report attached with the submitted plant entry details.
 Regards,
 ACL Plant`;
 
-  // 3. Attempt Delivery via Backend Nodemailer
+  // 3. Attempt Delivery via Nodemailer (Gmail SMTP)
   const transporter = createNodemailerTransporter();
-
   if (transporter && buffer) {
     try {
-      const fromAddress = process.env.MAIL_FROM || process.env.MAIL_USER || '"ACL Plant Management" <no-reply@spic.co.in>';
+      const fromName = process.env.SENDER_NAME || 'QCL Management System';
+      const senderUser = process.env.EMAIL_USER || process.env.MAIL_USER;
+      const fromAddress = `"${fromName}" <${senderUser}>`;
 
       const mailOptions = {
         from: fromAddress,
@@ -189,18 +185,17 @@ ACL Plant`;
       };
 
       const info = await transporter.sendMail(mailOptions);
-      console.log(`[Nodemailer] ✅ Excel report emailed to ${recipientEmail} (MessageId: ${info.messageId})`);
+      console.log(`[EmailService] ✅ Excel report emailed to ${recipientEmail} (MessageId: ${info.messageId})`);
       return { success: true, messageId: info.messageId, provider: 'Nodemailer' };
     } catch (nodemailerErr) {
-      console.error('[Nodemailer Error]', nodemailerErr);
-      // Fall through to corporate Microsoft Graph fallback if available
+      console.error('[EmailService Error]', nodemailerErr.message);
     }
   }
 
-  // 4. Modular Fallback: Microsoft 365 Graph API (if corporate M365 configured)
+  // 4. Modular Fallback via Microsoft Graph API (if configured)
   try {
     const accessToken = await getMicrosoftGraphAccessToken();
-    const senderEmail = process.env.MICROSOFT_SENDER_EMAIL || process.env.M365_SENDER_EMAIL || process.env.MAIL_USER;
+    const senderEmail = process.env.MICROSOFT_SENDER_EMAIL || process.env.M365_SENDER_EMAIL;
 
     if (accessToken && senderEmail && buffer) {
       const graphEndpoint = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
@@ -250,19 +245,9 @@ ACL Plant`;
     console.warn('[Microsoft Graph Fallback Error]', m365Err.message);
   }
 
-  // If mail credentials are not configured in server/.env:
-  if (!process.env.MAIL_HOST && !process.env.MICROSOFT_TENANT_ID) {
-    console.warn('[EmailService] ⚠️ No backend mail provider configured in server/.env (MAIL_HOST / MAIL_USER)');
-    return {
-      success: false,
-      notConfigured: true,
-      error: 'Backend mail provider is not configured. Please set MAIL_HOST, MAIL_USER, and MAIL_PASSWORD in server/.env.',
-    };
-  }
-
   return {
     success: false,
-    error: 'Failed to dispatch email report via backend mailers.',
+    error: 'Failed to dispatch email report via configured mailers.',
   };
 };
 

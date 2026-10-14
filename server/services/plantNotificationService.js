@@ -272,9 +272,12 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
   }
 
   const users = await User.find(operatorQuery).sort({ createdAt: 1 });
-  const operatorEmails = users.map((u) => u.email).filter(Boolean);
+  // Validate email address strictly from User Management records
+  const validOperatorUsers = users.filter((u) => u.email && typeof u.email === 'string' && u.email.includes('@'));
+  const operatorEmails = validOperatorUsers.map((u) => u.email.trim().toLowerCase());
 
   if (operatorEmails.length === 0) {
+    console.warn(`[PlantNotification] No valid registered email found in User Management for plant "${plant.name}" (${plant.code}). Skipping email dispatch without fallback.`);
     return {
       plant,
       users: [],
@@ -282,7 +285,7 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
       recipientEmails: [],
       assignedUser: null,
       adminEmails: [],
-      error: `No active user assigned to ${plant.name || 'this plant'} for company isolation.`,
+      error: `No registered user with a valid email is assigned to ${plant.name || 'this plant'}.`,
     };
   }
 
@@ -298,7 +301,9 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
   let adminEmails = [];
   try {
     const adminDocs = await User.find(adminQuery).select('email').lean();
-    adminEmails = adminDocs.map((a) => a.email).filter(Boolean);
+    adminEmails = adminDocs
+      .map((a) => (a.email && typeof a.email === 'string' && a.email.includes('@') ? a.email.trim().toLowerCase() : null))
+      .filter(Boolean);
   } catch (aErr) {
     console.warn('[PlantNotification] Could not query admin recipients:', aErr.message);
   }
@@ -308,10 +313,10 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
 
   return {
     plant,
-    users,
+    users: validOperatorUsers,
     primaryEmail: operatorEmails[0],
     recipientEmails: allRecipients,
-    assignedUser: users[0],
+    assignedUser: validOperatorUsers[0],
     adminEmails,
   };
 };
@@ -3294,18 +3299,22 @@ Attachment: ${excelFileName}
 </html>
 `;
 
-  // Transporter
+  // 4. Create Nodemailer Transporter
   const transporter = createNodemailerTransporter();
   if (!transporter) {
+    console.warn(`[PlantNotification] SMTP credentials (EMAIL_USER / EMAIL_PASS) not configured. Skipping email dispatch.`);
     return {
       success: false,
       emailStatus: 'failed',
-      error: 'SMTP credentials not configured in server/.env.',
+      error: 'SMTP credentials (EMAIL_USER / EMAIL_PASS) not configured.',
       recipient: assignedUser.email,
     };
   }
 
-  const fromAddress = process.env.MAIL_FROM || process.env.MAIL_USER || '"Plant Management" <no-reply@spic.co.in>';
+  const fromName = process.env.SENDER_NAME || 'QCL Management System';
+  const senderUser = process.env.EMAIL_USER || process.env.MAIL_USER;
+  const fromAddress = `"${fromName}" <${senderUser}>`;
+
   const targetRecipients = Array.isArray(recipientEmails) && recipientEmails.length > 0
     ? recipientEmails.filter(Boolean).map(e => e.trim())
     : [assignedUser.email.trim()];
@@ -3332,10 +3341,7 @@ Attachment: ${excelFileName}
     };
 
     const info = await transporter.sendMail(mailOptions);
-
-    console.log(
-      `[PlantNotification] ✅ Nodemailer confirmation: sent to [${toField}] (MessageId: ${info.messageId})`
-    );
+    console.log(`[PlantNotification] ✅ Nodemailer confirmation: sent to [${toField}] (MessageId: ${info.messageId})`);
     return {
       success: true,
       emailStatus: 'sent',
@@ -3343,22 +3349,11 @@ Attachment: ${excelFileName}
       recipient: toField,
     };
   } catch (mailErr) {
-    const is550Rejected =
-      mailErr.responseCode === 550 ||
-      /550|5\.1\.1|5\.4\.1|Recipient address rejected|undeliverable address|Access denied/i.test(mailErr.message);
-    if (is550Rejected) {
-      console.error(
-        `[PlantNotification] ❌ SMTP Recipient Rejection (550 / 5.1.1 / 5.4.1) for "${assignedUser.email}": Mailbox is undeliverable, does not exist, access is denied, or organization policy rejected the address. Microsoft 365 / mail server administrator verification of the recipient mailbox is required.`
-      );
-    } else {
-      console.error(`[PlantNotification] ❌ Nodemailer delivery failed for "${assignedUser.email}": ${mailErr.message}`);
-    }
+    console.error(`[PlantNotification] ❌ Nodemailer delivery failed for [${toField}]: ${mailErr.message}`);
     return {
       success: false,
       emailStatus: 'failed',
-      error: is550Rejected
-        ? `Recipient address rejected by mail server (550: undeliverable / access denied): The registered mailbox "${assignedUser.email}" requires Microsoft 365 administrator or mail server verification.`
-        : mailErr.message,
+      error: mailErr.message,
       recipient: assignedUser.email,
     };
   }
