@@ -3445,6 +3445,9 @@ const executeSaveAndEmailWorkflow = async ({
 
       if (existingRecord) {
         // Update the persisted record with the latest exact values entered by the Admin
+        existingRecord.plantName = existingRecord.plantName || plantName;
+        existingRecord.plantCode = existingRecord.plantCode || plantCode;
+        if (!existingRecord.plant && plantDoc?._id) existingRecord.plant = plantDoc._id;
         existingRecord.data = payloadData;
         existingRecord.shift = targetShift;
         existingRecord.submittedBy = submittedBy;
