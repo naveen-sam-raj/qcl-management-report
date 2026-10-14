@@ -127,6 +127,10 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/t501-analysis') ||
     url.includes('/lsa-analysis') ||
     url.includes('/lsa-shift-analysis') ||
+    url.includes('/lsa-bagging') ||
+    url.includes('/lsa-bagging-analysis') ||
+    url.includes('/lsa-bagging-sieve') ||
+    url.includes('/lsa-sieve') ||
     url.includes('/notify-update') ||
     url.includes('/retry-email')
   ) {

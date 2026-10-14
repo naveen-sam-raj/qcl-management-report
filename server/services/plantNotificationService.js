@@ -44,6 +44,8 @@ const ANALYSIS_PLANT_MAPPING = {
   'lsa': 'SA',
   'lsa 500': 'SA',
   'lsa bagging': 'SA',
+  'lsa bagging sieve': 'SA',
+  'lsa sieve': 'SA',
   'lsa shift': 'SA',
   'e 501': 'SA',
   't 501': 'SA',
@@ -490,6 +492,18 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'LSA Shift Analysis' ||
     analysisType === 'LSA Shift' ||
     (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('shift') && !String(analysisType || '').toLowerCase().includes('bagging'));
+
+  const isSALSABaggingAnalysis =
+    analysisType === 'LSA Bagging Analysis' ||
+    analysisType === 'LSA Bagging Shift Analysis' ||
+    analysisType === 'LSA Bagging Hourly Monitoring' ||
+    (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('bagging') && !String(analysisType || '').toLowerCase().includes('sieve'));
+
+  const isSALSABaggingSieveAnalysis =
+    analysisType === 'LSA Bagging Sieve Analysis' ||
+    analysisType === 'LSA Bagging Sieve' ||
+    (String(analysisType || '').toLowerCase().includes('lsa') && String(analysisType || '').toLowerCase().includes('bagging') && String(analysisType || '').toLowerCase().includes('sieve')) ||
+    String(analysisType || '').toLowerCase().includes('lsa_bagging_sieve');
 
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
@@ -1065,6 +1079,80 @@ TK 110 (Feed Tank):
 - BD: ${formatVal(r.bd)} g/L (Spec: 500–750 g/L)
 - Turbidity: ${formatVal(r.turbidity)} NTU (Spec: 75–85 NTU)`;
       }).join('\n\n') + '\n\n';
+  } else if (isSALSABaggingAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftAnalysis = rawData.shiftAnalysis || rawData.shifts || {};
+    const hourlyReadings = Array.isArray(rawData.hourlyReadings) ? rawData.hourlyReadings : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const saveType = rawData.saveType || (shift ? 'shift' : 'all');
+    const targetShift = rawData.targetShift || (shift || 'all');
+
+    let textBlocks = [];
+
+    // Shift Analysis summary
+    if (saveType !== 'hourly' || Object.keys(shiftAnalysis).length > 0) {
+      const sList = [
+        { key: 'shift1', label: 'SHIFT 1 (06:00–14:00)' },
+        { key: 'shift2', label: 'SHIFT 2 (14:00–22:00)' },
+        { key: 'shift3', label: 'SHIFT 3 (22:00–06:00)' },
+      ];
+
+      const activeShifts = targetShift !== 'all' && targetShift !== 'All Shifts'
+        ? sList.filter((s) => s.key === targetShift || s.label.toLowerCase().includes(String(targetShift).toLowerCase()))
+        : sList;
+
+      const displayShifts = activeShifts.length > 0 ? activeShifts : sList;
+
+      const shiftSummary = `SA Plant LSA Bagging Shift Analysis Readings (Once in a Shift):\n` +
+        displayShifts.map((s) => {
+          const r = shiftAnalysis[s.key] || {};
+          return `${s.label}:
+- Na2CO3: ${formatVal(r.na2co3)}% (Spec: 98.5–99.5%)
+- NaCl: ${formatVal(r.nacl)}% (Spec: 0.5–1.0%)
+- Fe2O3: ${formatVal(r.fe)}% (Spec: 0.006–0.008%)
+- Na2SO4: ${formatVal(r.na2so4)}% (Spec: 0.079–0.081%)
+- VM: ${formatVal(r.vm)}% (Spec: 0.5–2.1%)
+- IR: ${formatVal(r.ir)}% (Spec: 0.14–0.16%)
+- BD: ${formatVal(r.bd)} g/L (Spec: 500–750 g/L)
+- Turbidity: ${formatVal(r.turbidity)} NTU (Spec: 75–85 NTU)`;
+        }).join('\n\n');
+      textBlocks.push(shiftSummary);
+    }
+
+    // Hourly Routine Monitoring summary
+    if (saveType !== 'shift' && hourlyReadings.length > 0) {
+      const recordedHours = hourlyReadings.filter((h) => (h.nacl !== '' && h.nacl !== null && h.nacl !== undefined) || (h.bd !== '' && h.bd !== null && h.bd !== undefined));
+      const hoursText = `SA Plant LSA Bagging Hourly Routine Monitoring (${recordedHours.length} Readings Recorded):\n` +
+        (recordedHours.length > 0
+          ? recordedHours.map((h, i) => `#${i + 1} | Time: ${h.time} | Shift: ${h.shift} | NaCl: ${formatVal(h.nacl)}% (Spec: 0.5–1.0%) | BD: ${formatVal(h.bd)} g/L (Spec: 500–750 g/L)`).join('\n')
+          : 'No hourly readings entered yet.');
+      textBlocks.push(hoursText);
+    }
+
+    sieveTextSummary = textBlocks.join('\n\n') + '\n\n';
+  } else if (isSALSABaggingSieveAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+
+    const recordedRows = rows.filter((r) =>
+      ['bss10', 'bss30', 'm30', 'bss60', 'p10', 'p30', 'p60', 'm60'].some((k) => r[k] !== '' && r[k] !== null && r[k] !== undefined)
+    );
+
+    sieveTextSummary = `SA Plant LSA Bagging Sieve Analysis (${recordedRows.length} Sampling Intervals Recorded):\n` +
+      (recordedRows.length > 0
+        ? recordedRows.map((r, i) => {
+            const bss10 = formatVal(r.bss10 !== undefined && r.bss10 !== '' ? r.bss10 : r.p10);
+            const bss30 = formatVal(r.bss30 !== undefined && r.bss30 !== '' ? r.bss30 : r.p30);
+            const m30 = formatVal(r.m30 !== undefined && r.m30 !== '' ? r.m30 : r.p60);
+            const bss60 = formatVal(r.bss60 !== undefined && r.bss60 !== '' ? r.bss60 : r.m60);
+            return `#${i + 1} | Time: ${r.time || '—'} | BSS 10: ${bss10}% | BSS 30: ${bss30}% (Spec: 1.5–2.0%) | -30: ${m30}% | BSS 60: ${bss60}% (Spec: 5.5–6.0%)`;
+          }).join('\n')
+        : 'No sieve readings entered yet.') + '\n\n';
   } else if (isSieveAnalysis) {
     // Reload freshly persisted record from database to guarantee exact persisted values
     let freshSieveDoc = null;
@@ -2583,6 +2671,202 @@ Attachment: ${excelFileName}
           Plant: <strong>SA Plant</strong> | Section: <strong>LSA</strong> | Frequency: <strong>Once in a Shift</strong>
         </div>
       </div>`;
+  } else if (isSALSABaggingAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const shiftAnalysis = rawData.shiftAnalysis || rawData.shifts || {};
+    const hourlyReadings = Array.isArray(rawData.hourlyReadings) ? rawData.hourlyReadings : [];
+    const saveType = rawData.saveType || (shift ? 'shift' : 'all');
+    const targetShift = rawData.targetShift || (shift || 'all');
+
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const checkOut = (val, min, max) => {
+      const n = parseFloat(val);
+      return !isNaN(n) && (n < min || n > max);
+    };
+
+    let sectionsHtml = [];
+
+    // Section 1: Shift Analysis
+    if (saveType !== 'hourly' || Object.keys(shiftAnalysis).length > 0) {
+      const sList = [
+        { key: 'shift1', label: 'SHIFT 1', desc: '06:00–14:00' },
+        { key: 'shift2', label: 'SHIFT 2', desc: '14:00–22:00' },
+        { key: 'shift3', label: 'SHIFT 3', desc: '22:00–06:00' },
+      ];
+
+      const activeShifts = targetShift !== 'all' && targetShift !== 'All Shifts'
+        ? sList.filter((s) => s.key === targetShift || s.label.toLowerCase().includes(String(targetShift).toLowerCase()))
+        : sList;
+
+      const displayShifts = activeShifts.length > 0 ? activeShifts : sList;
+
+      sectionsHtml.push(`
+        <div class="field-group" style="margin-bottom: 16px;">
+          <div class="field-label" style="display: flex; justify-content: space-between; align-items: center; background: #0f2e5a; color: #ffffff; padding: 7px 12px; border-radius: 6px 6px 0 0;">
+            <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px;">SA Plant — LSA BAGGING SHIFT ANALYSIS (ONCE IN A SHIFT)</span>
+            ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <thead>
+              <tr style="background-color: #1e3a8a; color: #ffffff;">
+                <th style="padding: 6px 8px; text-align: left; border: 1px solid #cbd5e1;">Shift</th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂CO₃ %<br/><span style="font-size: 9.5px; opacity: 0.85;">[98.5–99.5]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">NaCl %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.5–1.0]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Fe₂O₃ %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.006–0.008]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂SO₄ %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.079–0.081]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">VM %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.5–2.1]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">IR %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.14–0.16]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">BD (g/L)<br/><span style="font-size: 9.5px; opacity: 0.85;">[500–750]</span></th>
+                <th style="padding: 6px 6px; text-align: center; border: 1px solid #cbd5e1;">Turbidity<br/><span style="font-size: 9.5px; opacity: 0.85;">[75–85 NTU]</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${displayShifts.map((s) => {
+                const r = shiftAnalysis[s.key] || {};
+                return `
+                  <tr>
+                    <td style="padding: 5px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-family: monospace;">
+                      ${s.label} <span style="font-size: 9.5px; font-weight: normal; color: #64748b;">(${s.desc})</span>
+                    </td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.na2co3, 98.5, 99.5) ? '#e11d48' : '#0f172a'};">${formatVal(r.na2co3)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.nacl, 0.5, 1.0) ? '#e11d48' : '#0f172a'};">${formatVal(r.nacl)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.fe, 0.006, 0.008) ? '#e11d48' : '#0f172a'};">${formatVal(r.fe)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.na2so4, 0.079, 0.081) ? '#e11d48' : '#0f172a'};">${formatVal(r.na2so4)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.vm, 0.5, 2.1) ? '#e11d48' : '#0f172a'};">${formatVal(r.vm)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.ir, 0.14, 0.16) ? '#e11d48' : '#0f172a'};">${formatVal(r.ir)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.bd, 500, 750) ? '#e11d48' : '#0f172a'};">${formatVal(r.bd)}</td>
+                    <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${checkOut(r.turbidity, 75, 85) ? '#e11d48' : '#0f172a'};">${formatVal(r.turbidity)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+          <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+            Plant: <strong>SA Plant</strong> | Section: <strong>LSA Bagging</strong> | Frequency: <strong>Once in a Shift</strong>
+          </div>
+        </div>
+      `);
+    }
+
+    // Section 2: Hourly Routine Monitoring
+    if (saveType !== 'shift' && hourlyReadings.length > 0) {
+      const recordedHours = hourlyReadings.filter((h) => (h.nacl !== '' && h.nacl !== null && h.nacl !== undefined) || (h.bd !== '' && h.bd !== null && h.bd !== undefined));
+
+      sectionsHtml.push(`
+        <div class="field-group" style="margin-bottom: 16px;">
+          <div class="field-label" style="display: flex; justify-content: space-between; align-items: center; background: #064e3b; color: #ffffff; padding: 7px 12px; border-radius: 6px 6px 0 0;">
+            <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px;">SA Plant — LSA BAGGING HOURLY ROUTINE MONITORING (1 HR ONCE)</span>
+            <span style="font-size: 11px; opacity: 0.9;">${recordedHours.length} Readings Recorded</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <thead>
+              <tr style="background-color: #047857; color: #ffffff;">
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Sampling Time</th>
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Shift</th>
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">NaCl %<br/><span style="font-size: 9.5px; opacity: 0.85;">[0.5–1.0]</span></th>
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">BD (g/L)<br/><span style="font-size: 9.5px; opacity: 0.85;">[500–750]</span></th>
+                <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(recordedHours.length > 0 ? recordedHours : hourlyReadings.slice(0, 10)).map((h, idx) => {
+                const isNaclOut = checkOut(h.nacl, 0.5, 1.0);
+                const isBdOut = checkOut(h.bd, 500, 750);
+                const isAnyOut = isNaclOut || isBdOut;
+                const hasVal = (h.nacl !== '' && h.nacl !== null && h.nacl !== undefined) || (h.bd !== '' && h.bd !== null && h.bd !== undefined);
+
+                return `
+                  <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; color: #64748b;">${idx + 1}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${h.time}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-size: 10px; font-weight: 600; color: #334155;">${h.shift}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isNaclOut ? '#e11d48' : '#0f172a'};">${formatVal(h.nacl)}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isBdOut ? '#e11d48' : '#0f172a'};">${formatVal(h.bd)}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-size: 10px; font-weight: 700; color: ${!hasVal ? '#94a3b8' : (isAnyOut ? '#e11d48' : '#059669')};">
+                      ${!hasVal ? 'Pending' : (isAnyOut ? 'Out of Limit' : 'Normal')}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+          <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+            Plant: <strong>SA Plant</strong> | Section: <strong>LSA Bagging</strong> | Frequency: <strong>1 Hr Once</strong>
+          </div>
+        </div>
+      `);
+    }
+
+    dataHtml = sectionsHtml.join('');
+  } else if (isSALSABaggingSieveAnalysis) {
+    const rawData = savedRecord?.data || savedRecord || {};
+    const rows = Array.isArray(rawData.rows)
+      ? rawData.rows
+      : Array.isArray(rawData.data?.rows)
+      ? rawData.data.rows
+      : [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const checkOut = (val, min, max) => {
+      const n = parseFloat(val);
+      return !isNaN(n) && (n < min || n > max);
+    };
+
+    const recordedRows = rows.filter((r) =>
+      ['bss10', 'bss30', 'm30', 'bss60', 'p10', 'p30', 'p60', 'm60'].some((k) => r[k] !== '' && r[k] !== null && r[k] !== undefined)
+    );
+
+    dataHtml = `
+      <div class="field-group" style="margin-bottom: 16px;">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center; background: #0f2e5a; color: #ffffff; padding: 7px 12px; border-radius: 6px 6px 0 0;">
+          <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px;">SA Plant — LSA BAGGING SIEVE ANALYSIS READINGS</span>
+          <span style="font-size: 11px; opacity: 0.9;">${recordedRows.length} Readings Recorded</span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11.5px;">
+          <thead>
+            <tr style="background-color: #1e3a8a; color: #ffffff;">
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 40px;">#</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 85px;">Time</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">BSS 10 (%)</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">BSS 30 (%)<br/><span style="font-size: 9.5px; opacity: 0.85;">[1.5–2.0]</span></th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">-30 (%)</th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1;">BSS 60 (%)<br/><span style="font-size: 9.5px; opacity: 0.85;">[5.5–6.0]</span></th>
+              <th style="padding: 6px 8px; text-align: center; border: 1px solid #cbd5e1; width: 90px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(recordedRows.length > 0 ? recordedRows : rows.slice(0, 10)).map((r, idx) => {
+              const bss10 = r.bss10 !== undefined && r.bss10 !== '' ? r.bss10 : r.p10;
+              const bss30 = r.bss30 !== undefined && r.bss30 !== '' ? r.bss30 : r.p30;
+              const m30 = r.m30 !== undefined && r.m30 !== '' ? r.m30 : r.p60;
+              const bss60 = r.bss60 !== undefined && r.bss60 !== '' ? r.bss60 : r.m60;
+
+              const isBss30Out = checkOut(bss30, 1.5, 2.0);
+              const isBss60Out = checkOut(bss60, 5.5, 6.0);
+              const isAnyOut = isBss30Out || isBss60Out;
+              const hasVal = ['bss10', 'bss30', 'm30', 'bss60', 'p10', 'p30', 'p60', 'm60'].some((k) => r[k] !== '' && r[k] !== null && r[k] !== undefined);
+
+              return `
+                <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; color: #64748b;">${idx + 1}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${r.time || '—'}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${formatVal(bss10)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isBss30Out ? '#e11d48' : '#059669'};">${formatVal(bss30)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${formatVal(m30)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-family: monospace; font-weight: 700; color: ${isBss60Out ? '#e11d48' : '#059669'};">${formatVal(bss60)}</td>
+                  <td style="padding: 5px 6px; border: 1px solid #e2e8f0; text-align: center; font-size: 10px; font-weight: 700; color: ${!hasVal ? '#94a3b8' : (isAnyOut ? '#e11d48' : '#059669')};">
+                    ${!hasVal ? 'Pending' : (isAnyOut ? 'Out of Limit' : 'Normal')}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Plant: <strong>SA Plant</strong> | Section: <strong>LSA Bagging Sieve Analysis</strong> | Frequency: <strong>1 Hour Once</strong>
+        </div>
+      </div>
+    `;
   } else if (isSieveAnalysis) {
     let freshSieveDoc = null;
     if (savedRecord?._id) {
@@ -3209,6 +3493,40 @@ const executeSaveAndEmailWorkflow = async ({
     ) {
       const { generateSALSAAnalysisExcel } = require('./excelService');
       excelResult = await generateSALSAAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'LSA Bagging Analysis' ||
+      analysisType === 'LSA Bagging Shift Analysis' ||
+      analysisType === 'LSA Bagging Hourly Monitoring' ||
+      (cleanType.toLowerCase().includes('lsa') && cleanType.toLowerCase().includes('bagging') && !cleanType.toLowerCase().includes('sieve'))
+    ) {
+      const { generateSALSABaggingAnalysisExcel } = require('./excelService');
+      excelResult = await generateSALSABaggingAnalysisExcel({
+        ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
+        plant: plantName,
+        date: savedRecord.date,
+        shift: targetShift,
+        submittedBy,
+        savedDateFormatted: dateFormatted,
+        savedTimeFormatted: timeFormatted,
+        filename: excelFileName,
+      });
+    } else if (
+      analysisType === 'LSA Bagging Sieve Analysis' ||
+      analysisType === 'LSA Bagging Sieve' ||
+      (cleanType.toLowerCase().includes('lsa') && cleanType.toLowerCase().includes('bagging') && cleanType.toLowerCase().includes('sieve')) ||
+      cleanType.toLowerCase().includes('lsa_bagging_sieve')
+    ) {
+      const { generateSALSABaggingSieveAnalysisExcel } = require('./excelService');
+      excelResult = await generateSALSABaggingSieveAnalysisExcel({
         ...(savedRecord.toObject ? savedRecord.toObject() : savedRecord),
         plant: plantName,
         date: savedRecord.date,
