@@ -259,8 +259,8 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
     };
   }
 
-  // Find users assigned to this plant in MongoDB, enforcing company isolation if company is provided
-  const query = {
+  // 1. Find operators assigned to this plant in MongoDB
+  const operatorQuery = {
     plant: plant._id,
     role: 'user',
     status: 'active',
@@ -268,30 +268,51 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
 
   const companyFilter = options.company || plant.company;
   if (companyFilter) {
-    query.company = companyFilter;
+    operatorQuery.company = companyFilter;
   }
 
-  const users = await User.find(query).sort({ createdAt: 1 });
+  const users = await User.find(operatorQuery).sort({ createdAt: 1 });
+  const operatorEmails = users.map((u) => u.email).filter(Boolean);
 
-  const recipientEmails = users.map((u) => u.email).filter(Boolean);
-
-  if (recipientEmails.length === 0) {
+  if (operatorEmails.length === 0) {
     return {
       plant,
       users: [],
       primaryEmail: null,
       recipientEmails: [],
       assignedUser: null,
+      adminEmails: [],
       error: `No active user assigned to ${plant.name || 'this plant'} for company isolation.`,
     };
   }
 
+  // 2. Resolve registered Admin users (Company Admin or Super Admin) for notification
+  const adminQuery = {
+    role: { $in: ['admin', 'super_admin', 'company_admin'] },
+    status: 'active',
+  };
+  if (companyFilter) {
+    adminQuery.$or = [{ company: companyFilter }, { company: null }];
+  }
+
+  let adminEmails = [];
+  try {
+    const adminDocs = await User.find(adminQuery).select('email').lean();
+    adminEmails = adminDocs.map((a) => a.email).filter(Boolean);
+  } catch (aErr) {
+    console.warn('[PlantNotification] Could not query admin recipients:', aErr.message);
+  }
+
+  // Combine unique recipients: Plant Operator + Registered Admins
+  const allRecipients = Array.from(new Set([...operatorEmails, ...adminEmails]));
+
   return {
     plant,
     users,
-    primaryEmail: recipientEmails[0],
-    recipientEmails,
+    primaryEmail: operatorEmails[0],
+    recipientEmails: allRecipients,
     assignedUser: users[0],
+    adminEmails,
   };
 };
 
@@ -333,6 +354,7 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
 const sendPlantAnalysisEmail = async ({
   plantDoc,
   assignedUser,
+  recipientEmails = [],
   analysisType,
   shift = '',
   savedRecord,
@@ -3284,11 +3306,15 @@ Attachment: ${excelFileName}
   }
 
   const fromAddress = process.env.MAIL_FROM || process.env.MAIL_USER || '"Plant Management" <no-reply@spic.co.in>';
+  const targetRecipients = Array.isArray(recipientEmails) && recipientEmails.length > 0
+    ? recipientEmails.filter(Boolean).map(e => e.trim())
+    : [assignedUser.email.trim()];
+  const toField = targetRecipients.join(', ');
 
   try {
     const mailOptions = {
       from: fromAddress,
-      to: assignedUser.email.trim(),
+      to: toField,
       subject,
       text: textBody,
       html: htmlBody,
@@ -3308,13 +3334,13 @@ Attachment: ${excelFileName}
     const info = await transporter.sendMail(mailOptions);
 
     console.log(
-      `[PlantNotification] ✅ Nodemailer confirmation: sent to ${assignedUser.email} (MessageId: ${info.messageId})`
+      `[PlantNotification] ✅ Nodemailer confirmation: sent to [${toField}] (MessageId: ${info.messageId})`
     );
     return {
       success: true,
       emailStatus: 'sent',
       messageId: info.messageId,
-      recipient: assignedUser.email,
+      recipient: toField,
     };
   } catch (mailErr) {
     const is550Rejected =
@@ -3379,8 +3405,8 @@ const executeSaveAndEmailWorkflow = async ({
   const plantName = plantDoc.name;
   const plantCode = plantDoc.code;
 
-  // 2. Resolve Assigned User from MongoDB
-  const { assignedUser, primaryEmail, error: userError } = await getPlantAssignedUser(plantDoc._id, { company });
+  // 2. Resolve Assigned User and Admin Recipients from MongoDB
+  const { assignedUser, primaryEmail, recipientEmails, adminEmails, error: userError } = await getPlantAssignedUser(plantDoc._id, { company });
 
   // 3. Save to MongoDB Atlas (if not already saved explicitly)
   let savedRecord = explicitRecord;
@@ -3408,18 +3434,25 @@ const executeSaveAndEmailWorkflow = async ({
       }
       const existingRecord = await PlantAnalysisRecord.findOne(lookupQuery).sort({ createdAt: -1 });
 
+      const payloadData =
+        data ||
+        rawBody.shifts ||
+        rawBody.rows ||
+        rawBody.readings ||
+        rawBody.units ||
+        rawBody.data ||
+        rawBody;
+
       if (existingRecord) {
-        savedRecord = existingRecord;
-        console.log(`[SaveAndEmail] 🔍 Found existing record in MongoDB (ID: ${savedRecord._id})`);
+        // Update the persisted record with the latest exact values entered by the Admin
+        existingRecord.data = payloadData;
+        existingRecord.shift = targetShift;
+        existingRecord.submittedBy = submittedBy;
+        existingRecord.submittedById = submittedById;
+        existingRecord.savedAt = new Date();
+        savedRecord = await existingRecord.save();
+        console.log(`[SaveAndEmail] 🔍 Updated existing record in MongoDB with latest values (ID: ${savedRecord._id})`);
       } else {
-        const payloadData =
-          data ||
-          rawBody.shifts ||
-          rawBody.rows ||
-          rawBody.readings ||
-          rawBody.units ||
-          rawBody.data ||
-          rawBody;
 
         savedRecord = await PlantAnalysisRecord.create({
           plant: plantDoc._id,
@@ -3835,6 +3868,7 @@ const executeSaveAndEmailWorkflow = async ({
     emailResult = await sendPlantAnalysisEmail({
       plantDoc,
       assignedUser,
+      recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
       analysisType: analysisType || `${plantName} Analysis`,
       shift: targetShift,
       savedRecord,
