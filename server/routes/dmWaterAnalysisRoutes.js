@@ -31,52 +31,38 @@ const isValDiff = (o, n) => {
   return String(o) !== String(n);
 };
 
-// Seed/reference initial rows provided by laboratory specifications
-const SEED_READINGS = [
+// Zero initial rows for DM Water and Anion unit
+const ZERO_READINGS = [
   {
     id: 'r_dm_water',
     unit: 'DM WATER',
-    time: '15:00',
-    ph: '7.2',
-    cond: '10',
+    time: '',
+    ph: '0',
+    cond: '0',
     p: '0',
-    m: '5',
-    alk: '5',
+    m: '0',
+    alk: '0',
     th: '0',
-    sio2: '0.20',
+    sio2: '0',
     isDefault: true,
   },
   {
     id: 'r_anion_unit',
     unit: 'A.UNIT',
     time: '',
-    ph: '',
-    cond: '',
-    p: '',
-    m: '',
-    alk: '',
-    th: '',
-    sio2: '',
+    ph: '0',
+    cond: '0',
+    p: '0',
+    m: '0',
+    alk: '0',
+    th: '0',
+    sio2: '0',
     isDefault: true,
   },
 ];
 
-// In-memory fallback cache
-const dmWaterRecords = [
-  {
-    id: 'dm_water_seed_1',
-    date: '2026-09-13',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'DM Water',
-    analysisType: 'Analysis For DM Water / Anion unit',
-    readings: SEED_READINGS,
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-13T15:30:00Z').toISOString(),
-  },
-];
+// In-memory fallback cache (no hardcoded demo/sample records)
+const dmWaterRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -113,7 +99,37 @@ router.get('/', async (req, res) => {
         const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
         if (doc && doc.data) {
           const payloadData = doc.data;
-          const readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
+          let readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
+          if (readings.length === 0 && (payloadData.ph !== undefined || payloadData.conductivity !== undefined || payloadData.silica !== undefined)) {
+            readings = [
+              {
+                id: 'r_dm_water',
+                unit: 'DM WATER',
+                time: payloadData.time || '',
+                ph: payloadData.ph !== undefined ? String(payloadData.ph) : '0',
+                cond: (payloadData.cond || payloadData.conductivity) !== undefined ? String(payloadData.cond || payloadData.conductivity) : '0',
+                th: payloadData.th !== undefined ? String(payloadData.th) : '0',
+                alk: payloadData.alk !== undefined ? String(payloadData.alk) : '0',
+                sio2: (payloadData.sio2 || payloadData.silica) !== undefined ? String(payloadData.sio2 || payloadData.silica) : '0',
+                p: payloadData.p !== undefined ? String(payloadData.p) : '0',
+                m: payloadData.m !== undefined ? String(payloadData.m) : '0',
+                isDefault: true,
+              },
+              {
+                id: 'r_anion_unit',
+                unit: 'A.UNIT',
+                time: '',
+                ph: '0',
+                cond: '0',
+                th: '0',
+                alk: '0',
+                sio2: '0',
+                p: '0',
+                m: '0',
+                isDefault: true,
+              },
+            ];
+          }
           return res.status(200).json({
             success: true,
             recordId: doc._id,
@@ -127,7 +143,7 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              readings: readings.length > 0 ? readings : SEED_READINGS,
+              readings: readings.length > 0 ? readings : ZERO_READINGS,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',
@@ -272,6 +288,8 @@ router.post('/', async (req, res) => {
       query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
     }
 
+    const existingDoc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 });
+
     // Check one-time edit restriction policy
     if (existingDoc && existingDoc.data) {
       const isLockedAlready = Boolean(existingDoc.data.isLocked || (existingDoc.data.editCount || 0) >= 1);
@@ -363,8 +381,9 @@ router.post('/', async (req, res) => {
     // Persist to MongoDB PlantAnalysisRecord
     let savedRecord = null;
     try {
+      const updateQuery = existingDoc ? { _id: existingDoc._id } : query;
       savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
-        query,
+        updateQuery,
         {
           plantName: 'OFFSITE Plant',
           plantCode: 'OFFSITE',

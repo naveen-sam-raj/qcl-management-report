@@ -477,14 +477,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         setSaveSuccess(true);
         showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
 
-        // Reset button state to idle after feedback display
+        // Reset phase back to idle after feedback display
         setTimeout(() => {
-          setSaving(false);
           setSavePhase('idle');
-        }, 4000);
+        }, 3000);
       } else {
         // MongoDB save succeeded, but email sending failed
-        setSaving(false);
         setSavePhase('email_failed');
         setSaveSuccess(true);
         const warnMsg = response.data.message || 'Data saved and Excel generated, but email sending failed.';
@@ -492,16 +490,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       }
     } catch (err) {
       setSavePhase('idle');
-      setSaving(false);
       console.error('[PureSaltAnalysis] Database save failed:', err);
       // If MongoDB save fails: "Unable to save the data. Please try again."
       showToast(err.response?.data?.message || 'Unable to save the data. Please try again.', 'error');
       setShowConfirmModal(false);
     } finally {
-      // If error occurred or early return, ensure saving is reset
-      if (!response?.data?.success) {
-        setSaving(false);
-      }
+      setSaving(false);
     }
   };
 
@@ -541,38 +535,37 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section, Recipient Email, Test & Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Read-Only Restricted Strictly to Today (Asia/Kolkata) */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs select-none">
+            {/* Integrated Date Section - Allows historical navigation and current date entry */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
               <label
                 htmlFor="psa-date-input"
                 className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
               >
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
                 <span>Date:</span>
+                <span className="text-red-500">*</span>
               </label>
-              <div className="flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span className="text-xs font-extrabold text-slate-800 tracking-tight font-mono">
-                  {date}
-                </span>
-                <span className="text-[11px] font-bold text-blue-800 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
-                  {formatDateDisplay(date)}
-                </span>
-                <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded uppercase tracking-wider border border-emerald-200 shadow-2xs">
-                  TODAY
-                </span>
-                {/* Hidden accessible locked input to prevent any manual date change or future/past navigation */}
+              <div className="relative">
                 <input
                   id="psa-date-input"
                   type="date"
                   value={date}
-                  readOnly
-                  disabled
-                  min={date}
-                  max={date}
-                  className="sr-only"
-                  aria-label="Analysis Date (Restricted to Today)"
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    setSaveSuccess(false);
+                  }}
+                  className="pl-2.5 pr-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700 bg-white shadow-2xs hover:border-slate-400 transition"
+                  required
                 />
               </div>
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-blue-800 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
+                {formatDateDisplay(date)}
+              </span>
+              {date === getTodayAsiaKolkata() && (
+                <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded uppercase tracking-wider border border-emerald-200 shadow-2xs">
+                  TODAY
+                </span>
+              )}
             </div>
 
             {/* Actions */}

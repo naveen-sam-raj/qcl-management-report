@@ -382,6 +382,7 @@ const sendPlantAnalysisEmail = async ({
 
   const plantName = plantDoc.name || 'Industrial Plant';
   const recordId = String(savedRecord?._id || savedRecord?.id || 'N/A');
+  const recordDate = savedRecord?.date || date || dateFormatted;
 
   // Unique Subject per save: includes shift and event ID to prevent deduplication / threading suppression
   const shiftSuffix = shift ? ` (${shift})` : '';
@@ -446,6 +447,11 @@ const sendPlantAnalysisEmail = async ({
     analysisType === 'ACL 300# Analysis' ||
     String(analysisType || '').toLowerCase().includes('acl 300') ||
     String(analysisType || '').toLowerCase().includes('acl-300');
+
+  const isPureSaltAnalysis =
+    analysisType === 'Pure Salt Analysis' ||
+    (String(analysisType || '').toLowerCase().includes('pure salt') && !String(analysisType || '').toLowerCase().includes('sieve')) ||
+    (String(analysisType || '').toLowerCase().includes('pure_salt') && !String(analysisType || '').toLowerCase().includes('sieve'));
 
   const isRawSaltAnalysis =
     analysisType === 'Raw Salt Analysis' ||
@@ -910,6 +916,33 @@ B S S (Sieve Analysis) — 9 Mesh Sizes:
 - +44 %: ${formatVal(s.p44)} (+44 Mesh Particle Spec)
 - NaCl %: ${formatVal(s.nacl)} (Sodium Chloride Content)`;
     }).join('\n\n') + '\n\n';
+  } else if (isPureSaltAnalysis) {
+    const rawData = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftKeys = ['rawSalt', 'shift1', 'shift2', 'shift3', 'composition'];
+    const shiftLabelsMap = {
+      rawSalt: 'Raw Salt',
+      shift1: 'I Shift (06:00–14:00)',
+      shift2: 'II Shift (14:00–22:00)',
+      shift3: 'III Shift (22:00–06:00)',
+      composition: 'Day (Composition)'
+    };
+    
+    // Check if a specific shift was saved or display all rows with entered values
+    const hasAnyValue = (row) => row && Object.values(row).some(v => v !== null && v !== undefined && v !== '');
+    const activeRows = shiftKeys.filter(k => hasAnyValue(rawData[k]));
+
+    sieveTextSummary = `ACL Pure Salt Analysis Parameters:
+` + (activeRows.length > 0 ? activeRows.map(k => {
+      const r = rawData[k] || {};
+      return `${shiftLabelsMap[k]}:
+- NaCl %: ${formatVal(r.nacl)}
+- Ca %: ${formatVal(r.ca)}
+- Mg %: ${formatVal(r.mg)}
+- SO4 %: ${formatVal(r.so4)}
+- IR %: ${formatVal(r.ir)}
+- H2O %: ${formatVal(r.h2o)}`;
+    }).join('\n\n') : 'No shift values recorded.') + '\n\n';
   } else if (isRawSaltAnalysis) {
     const rawData = savedRecord?.data || savedRecord || {};
     const params = rawData.parameters || rawData || {};
@@ -1399,11 +1432,14 @@ ${plantName}
 Analysis:
 ${analysisType}
 
+Analysis Date:
+${recordDate}
+
 ${shiftLabel ? `Shift:\n${shiftLabel}\n\n` : ''}Saved Date:
 ${dateFormatted}
 
 Saved Time:
-${timeFormatted}
+${timeFormatted} (IST)
 
 ${sieveTextSummary}Status:
 Saved Successfully
@@ -2064,6 +2100,62 @@ Attachment: ${excelFileName}
         </table>
         <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
           Operational Quality Standard: <strong>+18 Mesh Particle Distribution</strong>, <strong>+44 Mesh Particle Distribution</strong>, and <strong>Sodium Chloride (NaCl %)</strong>.
+        </div>
+      </div>`;
+  } else if (isPureSaltAnalysis) {
+    const rawData = savedRecord?.rows || savedRecord?.data?.rows || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' ? String(v) : '—');
+    const shiftKeys = [
+      { key: 'rawSalt', label: 'RAW SALT', sub: 'Input Stream', color: '#0284c7' },
+      { key: 'shift1', label: 'I SHIFT', sub: '06:00 – 14:00', color: '#0369a1' },
+      { key: 'shift2', label: 'II SHIFT', sub: '14:00 – 22:00', color: '#4338ca' },
+      { key: 'shift3', label: 'III SHIFT', sub: '22:00 – 06:00', color: '#6d28d9' },
+      { key: 'composition', label: 'COMPOSITION', sub: 'Day Composite', color: '#047857' },
+    ];
+    const hasAnyValue = (row) => row && Object.values(row).some(v => v !== null && v !== undefined && v !== '');
+    const activeRows = shiftKeys.filter(s => hasAnyValue(rawData[s.key]));
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>ACL Pure Salt Analysis — <strong>Recorded Shift Parameters</strong></span>
+          ${saveEventId ? `<span style="font-family: monospace; font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">ID: ${saveEventId.slice(-8)}</span>` : ''}
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Shift / Stream</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">NaCl %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Ca %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Mg %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">SO₄ %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">IR %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">H₂O %</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(activeRows.length > 0 ? activeRows : shiftKeys.slice(0, 1)).map((s, idx) => {
+              const r = rawData[s.key] || {};
+              const bg = idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
+              return `
+                <tr style="${bg}">
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: ${s.color};">
+                    <div>${s.label}</div>
+                    <div style="font-size: 10px; color: #64748b; font-weight: normal;">${s.sub}</div>
+                  </td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.nacl)}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.ca)}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.mg)}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.so4)}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.ir)}</td>
+                  <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0284c7; font-family: monospace;">${formatVal(r.h2o)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px;">
+          Operational Quality Standard: Shift Ca = 0.10% ± 0.05 | Shift Mg = 0.04% ± 0.06
         </div>
       </div>`;
   } else if (isRawSaltAnalysis) {
@@ -3263,6 +3355,10 @@ Attachment: ${excelFileName}
       <div class="field-group">
         <div class="field-label">Analysis</div>
         <div class="field-value">${analysisType}</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Analysis Date</div>
+        <div class="field-value" style="font-weight: 700; color: #0284c7;">${recordDate}</div>
       </div>
       ${shiftLabel ? `
       <div class="field-group">

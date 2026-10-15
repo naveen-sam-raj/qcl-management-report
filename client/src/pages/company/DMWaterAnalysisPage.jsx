@@ -42,19 +42,19 @@ const TH_LIMIT = OFFSET_DM_WATER_LIMITS.th;
 const ALK_LIMIT = OFFSET_DM_WATER_LIMITS.alk;
 const SIO2_LIMIT = OFFSET_DM_WATER_LIMITS.sio2;
 
-// Screenshot & Laboratory reference values for DM Water and Anion Unit (Date: 13/09/2026)
-const DEFAULT_ROWS = [
+// Zero initial rows for DM Water and Anion Unit (first-time opening display all zeros)
+const createZeroRows = () => [
   {
     id: 'r_dm_water',
     unit: 'DM WATER',
-    time: '15:00',
-    ph: '7.2',
-    cond: '10',
+    time: '',
+    ph: '0',
+    cond: '0',
     th: '0',
-    alk: '5',
-    sio2: '0.20',
+    alk: '0',
+    sio2: '0',
     p: '0',
-    m: '5',
+    m: '0',
     isDefault: true,
     accent: 'blue',
   },
@@ -62,17 +62,19 @@ const DEFAULT_ROWS = [
     id: 'r_anion_unit',
     unit: 'A.UNIT',
     time: '',
-    ph: '',
-    cond: '',
-    th: '',
-    alk: '',
-    sio2: '',
-    p: '',
-    m: '',
+    ph: '0',
+    cond: '0',
+    th: '0',
+    alk: '0',
+    sio2: '0',
+    p: '0',
+    m: '0',
     isDefault: true,
     accent: 'indigo',
   },
 ];
+
+const DEFAULT_ROWS = createZeroRows();
 
 const NUMERIC_FIELDS = ['ph', 'cond', 'th', 'alk', 'sio2'];
 
@@ -80,7 +82,7 @@ const isValidInput = (val, field) => {
   if (val === '' || val === null || val === undefined) return true;
   if (field === 'th') {
     const s = String(val).toLowerCase();
-    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-') return true;
+    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-' || s === '0') return true;
   }
   return /^-?\d*\.?\d*$/.test(val);
 };
@@ -96,7 +98,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   // ── States ──
   // Date strictly initialized to today in Asia/Kolkata
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(DEFAULT_ROWS);
+  const [readings, setReadings] = useState(() => createZeroRows());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -115,6 +117,16 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   useEffect(() => {
     if (!date) return;
     let active = true;
+
+    // Immediately reset to clean zero rows on date change so stale values from another date never appear
+    setReadings(createZeroRows());
+    setEditedFields({});
+    setRecordId(null);
+    setInitialSaved(false);
+    setEditCount(0);
+    setIsLocked(false);
+    setSaveSuccess(false);
+    setSavePhase('idle');
 
     const fetchExistingData = async () => {
       try {
@@ -150,20 +162,39 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           setEditCount(currentEdits);
           setIsLocked(lockStatus);
           
-          if (!record) {
-             // Leave default
-          } else if (record.shifts) {
-            setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
+          let loadedReadings = null;
+          if (record.shifts && Array.isArray(record.shifts) && record.shifts.length > 0) {
+            loadedReadings = record.shifts;
+          } else if (record.readings && Array.isArray(record.readings) && record.readings.length > 0) {
+            loadedReadings = record.readings;
           } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            setReadings(record.data);
+            loadedReadings = record.data;
           } else if (Array.isArray(record) && record.length > 0) {
-            setReadings(record);
-          } else if (record.data && record.data.readings) {
-            setReadings(record.data.readings);
+            loadedReadings = record;
+          } else if (record.data && Array.isArray(record.data.readings) && record.data.readings.length > 0) {
+            loadedReadings = record.data.readings;
+          }
+
+          if (loadedReadings && loadedReadings.length > 0) {
+            const normalized = loadedReadings.map((r, idx) => ({
+              ...r,
+              id: r.id || (idx === 0 ? 'r_dm_water' : idx === 1 ? 'r_anion_unit' : `r_custom_${idx}`),
+              unit: r.unit || (idx === 0 ? 'DM WATER' : idx === 1 ? 'A.UNIT' : `Stream ${idx + 1}`),
+              time: r.time !== undefined && r.time !== null ? String(r.time) : '',
+              ph: r.ph !== undefined && r.ph !== null && r.ph !== '' ? String(r.ph) : '0',
+              cond: r.cond !== undefined && r.cond !== null && r.cond !== '' ? String(r.cond) : '0',
+              th: r.th !== undefined && r.th !== null && r.th !== '' ? String(r.th) : '0',
+              alk: r.alk !== undefined && r.alk !== null && r.alk !== '' ? String(r.alk) : '0',
+              sio2: r.sio2 !== undefined && r.sio2 !== null && r.sio2 !== '' ? String(r.sio2) : '0',
+              isDefault: idx < 2,
+              accent: idx % 2 === 0 ? 'blue' : 'indigo',
+            }));
+            setReadings(normalized);
+          } else {
+            setReadings(createZeroRows());
           }
         } else {
+          setReadings(createZeroRows());
           setEditedFields({});
           setRecordId(null);
           setInitialSaved(false);
@@ -173,6 +204,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
+        setReadings(createZeroRows());
         setEditedFields({});
         setRecordId(null);
         setInitialSaved(false);
@@ -216,18 +248,18 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         id: nextId,
         unit: defaultUnitName,
         time: '',
-        ph: '',
-        cond: '',
-        th: '',
-        alk: '',
-        sio2: '',
-        p: '',
-        m: '',
+        ph: '0',
+        cond: '0',
+        th: '0',
+        alk: '0',
+        sio2: '0',
+        p: '0',
+        m: '0',
         isDefault: false,
         accent: nextIndex % 2 === 1 ? 'blue' : 'indigo',
       },
     ]);
-    showToast?.('Added new sampling row.', 'info');
+    showToast?.('Added new sampling stream row.', 'info');
   };
 
   // ── Remove custom row ──
@@ -242,11 +274,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── Reset ──
   const handleReset = () => {
-    setReadings(DEFAULT_ROWS);
+    setReadings(createZeroRows());
     setDate(getTodayAsiaKolkata());
     setErrors({});
     setSaveSuccess(false);
-    showToast?.('Values reset to laboratory default readings.', 'info');
+    showToast?.('Values reset to zero.', 'info');
   };
 
   // ── Validate ──
@@ -330,6 +362,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
     try {
       const response = await api.post('/dm-water-analysis', payload);
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || 'Database save not confirmed');
+      }
       setSaveSuccess(true);
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -362,6 +397,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       }
     } catch (err) {
       setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[DMWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');

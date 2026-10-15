@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PureSaltAnalysis, ActivityLog } = require('../models');
+const { PureSaltAnalysis, ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 const { generatePureSaltAnalysisExcel } = require('../services/excelService');
 const { sendPureSaltAnalysisReport } = require('../services/emailService');
@@ -37,25 +37,12 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-    // ── Enforce Today's Date Restriction (Asia/Kolkata) for Pure Salt Analysis ──
-    const getTodayKolkata = () => {
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Kolkata',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).formatToParts(new Date());
-      const y = parts.find(p => p.type === 'year')?.value;
-      const m = parts.find(p => p.type === 'month')?.value;
-      const d = parts.find(p => p.type === 'day')?.value;
-      return `${y}-${m}-${d}`;
-    };
-
-    const todayKolkata = getTodayKolkata();
-    if (payload.date !== todayKolkata) {
+    // ── Validate Date Format (YYYY-MM-DD) ──
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(payload.date)) {
       return res.status(400).json({
         success: false,
-        message: `Date restriction enforced: Pure Salt Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+        message: 'Invalid date format. Expected YYYY-MM-DD.',
       });
     }
 
@@ -259,9 +246,35 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-    analysisRecords.unshift(savedRecord.toObject ? savedRecord.toObject() : savedRecord);
+    // ── 4. Mirror to PlantAnalysisRecord for consolidated multi-analysis reporting ──
+    try {
+      if (PlantAnalysisRecord) {
+        await PlantAnalysisRecord.findOneAndUpdate(
+          {
+            plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
+            analysisType: 'Pure Salt Analysis',
+            date: payload.date,
+          },
+          {
+            plantName: 'ACL Plant',
+            plantCode: 'ACL',
+            analysisType: 'Pure Salt Analysis',
+            unit: '',
+            date: payload.date,
+            data: savedRecord.rows || payload.rows,
+            shift: savedRecord.shift || 'All Shifts (I, II, III)',
+            submittedBy: savedRecord.submittedBy,
+            submittedById: savedRecord.submittedById,
+            company: savedRecord.company,
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    } catch (syncErr) {
+      console.warn('[PureSaltAnalysis] PlantAnalysisRecord mirror warning:', syncErr.message);
+    }
 
-    // ── 4. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
+    // ── 5. Execute Centralized Save -> Timestamp -> Assigned User -> Excel -> Nodemailer Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
     
     // Await immediate email delivery for newly saved shifts
@@ -407,7 +420,15 @@ router.get('/:id/download-excel', protect, async (req, res) => {
 router.get('/', protect, async (req, res) => {
   try {
     const { date } = req.query;
-    const { PureSaltAnalysis } = require('../models');
+
+    // Dynamically resolve active operator email assigned to ACL Plant
+    let assignedOperatorEmail = null;
+    try {
+      const { assignedUser, primaryEmail } = await getPlantAssignedUser('ACL');
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+    } catch (uErr) {
+      console.warn('[PureSalt GET] Operator lookup warning:', uErr.message);
+    }
 
     if (date) {
       const query = { date, plant: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] }, analysisType: 'Pure Salt Analysis' };
@@ -415,19 +436,64 @@ router.get('/', protect, async (req, res) => {
         query.$or = [{ company: req.user.company }, { company: null }];
       }
 
-      const doc = await PureSaltAnalysis.findOne(query).sort({ createdAt: -1 }).lean();
+      let doc = await PureSaltAnalysis.findOne(query).sort({ createdAt: -1 }).lean();
       
+      // Fallback check against PlantAnalysisRecord if not in PureSaltAnalysis collection
+      if (!doc && PlantAnalysisRecord) {
+        const fallbackQuery = {
+          date,
+          plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
+          analysisType: 'Pure Salt Analysis',
+        };
+        if (req.user && req.user.company) {
+          fallbackQuery.$or = [{ company: req.user.company }, { company: null }];
+        }
+        const fallback = await PlantAnalysisRecord.findOne(fallbackQuery).sort({ createdAt: -1 }).lean();
+        if (fallback) {
+          doc = {
+            _id: fallback._id,
+            date: fallback.date,
+            plant: fallback.plantName || 'ACL Plant',
+            analysisType: fallback.analysisType,
+            shift: fallback.shift || 'All Shifts (I, II, III)',
+            rows: fallback.data || {},
+            lockedShifts: {
+              rawSalt: true,
+              shift1: false,
+              shift2: false,
+              shift3: false,
+              composition: false,
+              shift1Saved: true,
+              shift2Saved: false,
+              shift3Saved: false,
+              shift3Edits: 0,
+            },
+            editedFields: {},
+            submittedBy: fallback.submittedBy,
+            company: fallback.company,
+            emailStatus: fallback.emailStatus || 'pending',
+            emailRecipient: fallback.emailRecipient || assignedOperatorEmail,
+          };
+        }
+      }
+
       if (doc) {
         return res.status(200).json({
           success: true,
-          data: [doc]
+          data: [doc],
+          assignedOperatorEmail,
+          emailStatus: doc.emailStatus || 'pending',
+          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
         });
       }
     }
 
     return res.status(200).json({
       success: true,
-      data: []
+      data: [],
+      assignedOperatorEmail,
+      emailStatus: 'pending',
+      emailRecipient: assignedOperatorEmail,
     });
   } catch (error) {
     console.error('[PureSalt GET] Error:', error);
