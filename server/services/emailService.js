@@ -46,7 +46,7 @@ const createNodemailerTransporter = () => {
       pass,
     },
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
       minVersion: 'TLSv1.2',
     },
     connectionTimeout,

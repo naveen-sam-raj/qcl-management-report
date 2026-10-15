@@ -64,6 +64,119 @@ const EMPTY_READINGS = [
 // In-memory fallback cache (no hardcoded demo/sample records)
 const dmWaterRecords = [];
 
+/**
+ * @desc    SMTP diagnostic and probe endpoint
+ * @route   GET /api/dm-water-analysis/smtp-diagnostic
+ * @access  Public (Safe redacted diagnostics)
+ */
+router.get('/smtp-diagnostic', async (req, res) => {
+  const dns = require('dns');
+  const net = require('net');
+  const { createNodemailerTransporter } = require('../services/emailService');
+
+  const maskEmail = (email) => {
+    if (!email || !email.includes('@')) return 'N/A';
+    const [u, d] = email.split('@');
+    return `${u.slice(0, 2)}***${u.slice(-1)}@${d}`;
+  };
+
+  const testTcp = (host, port, timeout = 7000) => {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      socket.setTimeout(timeout);
+      socket.on('connect', () => {
+        const elapsed = Date.now() - start;
+        socket.destroy();
+        resolve({ port, success: true, elapsed });
+      });
+      socket.on('timeout', () => {
+        const elapsed = Date.now() - start;
+        socket.destroy();
+        resolve({ port, success: false, elapsed, error: 'TIMEOUT' });
+      });
+      socket.on('error', (err) => {
+        const elapsed = Date.now() - start;
+        resolve({ port, success: false, elapsed, error: err.code || err.message });
+      });
+      socket.connect(port, host);
+    });
+  };
+
+  // 1. DNS Resolution
+  let dnsResult = { success: false };
+  const targetHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  try {
+    const dnsStart = Date.now();
+    const addresses = await dns.promises.resolve4(targetHost);
+    dnsResult = { success: true, elapsed: Date.now() - dnsStart, addresses };
+  } catch (dErr) {
+    dnsResult = { success: false, error: dErr.code || dErr.message };
+  }
+
+  // 2. TCP Probes on Port 465 and Port 587
+  const [probe465, probe587] = await Promise.all([
+    testTcp(targetHost, 465, 7000),
+    testTcp(targetHost, 587, 7000),
+  ]);
+
+  // 3. Transporter Verify
+  let verifyResult = { success: false };
+  try {
+    const transporter = createNodemailerTransporter();
+    if (!transporter) {
+      verifyResult = { success: false, error: 'Transporter creation returned null (check EMAIL_USER/EMAIL_PASS in environment)' };
+    } else {
+      const vStart = Date.now();
+      verifyResult = await new Promise((resolve) => {
+        transporter.verify((err, success) => {
+          const elapsed = Date.now() - vStart;
+          if (err) {
+            resolve({
+              success: false,
+              elapsed,
+              code: err.code,
+              command: err.command,
+              response: err.response,
+              message: err.message,
+            });
+          } else {
+            resolve({ success: true, elapsed });
+          }
+        });
+      });
+    }
+  } catch (vErr) {
+    verifyResult = { success: false, error: vErr.message };
+  }
+
+  return res.status(200).json({
+    status: 'diagnostic_complete',
+    timestamp: new Date().toISOString(),
+    environment: process.env.RENDER ? 'Render' : 'Local/Self-Hosted',
+    platform: process.platform,
+    nodeVersion: process.version,
+    renderCommit: process.env.RENDER_GIT_COMMIT || 'N/A',
+    renderInstance: process.env.RENDER_INSTANCE_ID || 'N/A',
+    smtpConfig: {
+      host: targetHost,
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === 'true' : (Number(process.env.SMTP_PORT) || 465) === 465,
+      configuredUser: maskEmail(process.env.EMAIL_USER || process.env.MAIL_USER),
+      hasPass: Boolean(process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.MAIL_PASSWORD),
+      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT) || 30000,
+      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT) || 20000,
+      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT) || 45000,
+    },
+    dnsResult,
+    tcpProbes: {
+      port465: probe465,
+      port587: probe587,
+    },
+    transporterVerify: verifyResult,
+  });
+});
+
 // Apply authentication middleware
 router.use(protect);
 
