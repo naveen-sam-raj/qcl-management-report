@@ -3849,11 +3849,15 @@ Attachment: ${excelFileName}
       recipient: toField,
     };
   } catch (mailErr) {
-    console.error(`[PlantNotification] ❌ Nodemailer delivery failed for [${toField}]: ${mailErr.message}`);
+    let friendlyError = mailErr.message;
+    if (mailErr.code === 'ETIMEDOUT' || mailErr.command === 'CONN' || mailErr.message?.includes('Connection timeout')) {
+      friendlyError = 'Hosting network timeout: Outbound SMTP ports (465/587) are restricted by hosting environment (Render Free tier drops outbound SMTP traffic). Upgrade Render instance to Starter tier to allow outbound SMTP traffic, or run backend on an environment with open outbound SMTP ports.';
+    }
+    console.error(`[PlantNotification] ❌ Nodemailer delivery failed for [${toField}]: ${friendlyError}`);
     return {
       success: false,
       emailStatus: 'failed',
-      error: mailErr.message,
+      error: friendlyError,
       recipient: assignedUser.email,
     };
   }
