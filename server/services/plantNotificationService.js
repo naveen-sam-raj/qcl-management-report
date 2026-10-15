@@ -3305,6 +3305,358 @@ Attachment: ${excelFileName}
           </tbody>
         </table>
       </div>`;
+  } else if (isOffsetBFW) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Boiler Feed Water / SHS Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Stream / Sample</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Time</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">pH</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Cond</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">TH</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Alk</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">SiO₂</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.stream || `Stream ${idx + 1}`}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; color: #475569;">${r.time || '15:00'}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ph)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.cond)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.th)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.alk || r.tAlk)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.sio2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetCBD) {
+    const rawData = savedRecord?.data?.shifts || savedRecord?.shifts || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+    const shifts = [
+      { key: 'iShift', name: 'I SHIFT (06:00–14:00)' },
+      { key: 'iiShift', name: 'II SHIFT (14:00–22:00)' },
+      { key: 'iiiShift', name: 'III SHIFT (22:00–06:00)' },
+    ];
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">CBD Analytical Observations (Shift-wise)</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Shift</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">pH</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">PO₄</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">Na₂SO₃</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">T.Alk</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">T.Fe</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">SiO₂</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">SS</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">TDS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${shifts.map((s, idx) => {
+              const r = rawData[s.key] || {};
+              return `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${s.name}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ph)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.po4)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.na2so3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.talk)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.tfe)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.sio2)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ss)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.tds)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetRawWater) {
+    const rawData = savedRecord?.data?.parameters || savedRecord?.data || {};
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Raw Water Analysis Parameters (08:00 Sample)</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Persisted Value</th>
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Parameter</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Persisted Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">pH</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.ph)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">M.Alk (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.mAlk)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Conductivity (µS/cm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.cond)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Total Hardness (TH) (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.th)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Turbidity (NTU)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.turbidity)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Ca-Hardness (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.caH)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">TDS (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.tds)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Mg-Hardness (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.mgH)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Free Cl₂ (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.freeCl2)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Chloride (Cl) (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.cl)}</td>
+            </tr>
+            <tr style="background-color: #f8fafc;">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Iron (Fe) (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.fe)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Sulphate (SO₄) (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.so4)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">Silica (SiO₂) (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.sio2)}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 600;">EMA (ppm)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${formatVal(rawData.ema)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetBottomAsh) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Bottom Ash Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Combustible %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">GCV (Kcal/kg)</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Moisture %</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.combustible)}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.gcv)}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.moisture)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetFlyAsh) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Fly Ash Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Combustible %</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">GCV (Kcal/kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.combustible)}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.gcv)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetDistillerWaste) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Distiller Waste Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Ex. CaO (g/L)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">FNH3 (g/L)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">CNH3 (g/L)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">TNH3 (g/L)</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">NaHCO3 (g/L)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.exCao)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.fnh3)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.cnh3)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.tnh3)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.nahco3)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetVacuumSealWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Vacuum Seal Water Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">FNH3 (g/L)</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">CNH3 (g/L)</th>
+              <th style="padding: 7px 10px; text-align: center; border: 1px solid #cbd5e1;">Ca (g/L)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.fnh3)}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.cnh3)}</td>
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ca)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetSewerWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Sewer Water Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th rowspan="2" style="padding: 7px 8px; text-align: left; border: 1px solid #cbd5e1;">Time</th>
+              <th colspan="2" style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Section 200</th>
+              <th colspan="3" style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Section 400</th>
+              <th colspan="4" style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Final Outlet</th>
+            </tr>
+            <tr style="background-color: #1e3a6e; color: #ffffff; font-size: 11px;">
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">CNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">CNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">HCO3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">FNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">CNH3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">HCO3</th>
+              <th style="padding: 5px 6px; text-align: center; border: 1px solid #cbd5e1;">PCL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sec200?.fnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sec200?.cnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sec400?.fnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sec400?.cnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sec400?.hco3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.finalOutlet?.fnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.finalOutlet?.cnh3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.finalOutlet?.hco3)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.finalOutlet?.pcl)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else if (isOffsetCoolingWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">Cooling Water Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 8px; text-align: left; border: 1px solid #cbd5e1;">Time Slot</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">pH</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">FRC</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">O-PO₄</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">Cl</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">Turbidity</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">TDS</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">Fe</th>
+              <th style="padding: 7px 6px; text-align: center; border: 1px solid #cbd5e1;">SiO₂</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.time || `Slot ${idx + 1}`}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ph)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.frc)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.opo4)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.cl)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.turbidity)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.tds)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.fe)}</td>
+                <td style="padding: 6px 6px; border: 1px solid #e2e8f0; text-align: center;">${formatVal(r.sio2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   } else if (savedRecord?.data || savedRecord?.rows) {
     const rawDataToExtract = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows;
     let dataEntries = [];
@@ -3559,7 +3911,39 @@ const executeSaveAndEmailWorkflow = async ({
   const targetUnit = unit || rawBody.unit || '';
   const resolvedAnalysisType = analysisType || `${plantName} Analysis`;
 
-  if (!savedRecord) {
+  const payloadData =
+    data ||
+    rawBody.shifts ||
+    rawBody.rows ||
+    rawBody.readings ||
+    rawBody.units ||
+    rawBody.data ||
+    rawBody;
+
+  if (savedRecord) {
+    if (payloadData && typeof payloadData === 'object' && Object.keys(payloadData).length > 0) {
+      try {
+        if (typeof savedRecord.save === 'function') {
+          savedRecord.data = payloadData;
+          if (typeof savedRecord.markModified === 'function') {
+            savedRecord.markModified('data');
+          }
+          if (targetShift) savedRecord.shift = targetShift;
+          if (submittedBy) savedRecord.submittedBy = submittedBy;
+          savedRecord.savedAt = new Date();
+          savedRecord = await savedRecord.save();
+        } else if (savedRecord._id) {
+          savedRecord = await PlantAnalysisRecord.findByIdAndUpdate(
+            savedRecord._id,
+            { $set: { data: payloadData, shift: targetShift, submittedBy, savedAt: new Date() } },
+            { new: true }
+          );
+        }
+      } catch (docUpErr) {
+        console.warn(`[SaveAndEmail] Note updating explicitRecord: ${docUpErr.message}`);
+      }
+    }
+  } else {
     try {
       // First, try to find the record that was just saved by the route handler
       const plantCodeVariations = [
@@ -3577,15 +3961,6 @@ const executeSaveAndEmailWorkflow = async ({
         lookupQuery.unit = targetUnit;
       }
       const existingRecord = await PlantAnalysisRecord.findOne(lookupQuery).sort({ createdAt: -1 });
-
-      const payloadData =
-        data ||
-        rawBody.shifts ||
-        rawBody.rows ||
-        rawBody.readings ||
-        rawBody.units ||
-        rawBody.data ||
-        rawBody;
 
       if (existingRecord) {
         // Update the persisted record with the latest exact values entered by the Admin
