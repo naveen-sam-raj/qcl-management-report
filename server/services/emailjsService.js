@@ -244,4 +244,5 @@ const sendEmailJSOffsiteNotification = async ({
 module.exports = {
   getEmailJSConfig,
   sendEmailJSOffsiteNotification,
+  sendEmailJSPlantNotification: sendEmailJSOffsiteNotification,
 };

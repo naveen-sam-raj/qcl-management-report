@@ -3787,11 +3787,11 @@ ${isOffsite ? '' : `Attachment: ${excelFileName}\n`}`;
         <div class="field-label">Record ID</div>
         <div class="field-value" style="font-family: monospace; font-size: 13px; color: #334155;">${recordId}</div>
       </div>
-      ${isOffsite ? '' : `
+      ${excelBuffer && excelFileName ? `
       <div class="attachment-card">
         <span style="font-size: 18px;">📊</span>
         <div class="attachment-name">Attached Excel Report: <strong>${excelFileName}</strong></div>
-      </div>`}
+      </div>` : ''}
     </div>
     <div class="footer">
       Sent to assigned plant operator (${assignedUser.email}). Generated from saved database record.
@@ -3820,9 +3820,11 @@ ${isOffsite ? '' : `Attachment: ${excelFileName}\n`}`;
     };
   }
 
-  // 4. OFFSITE Plant EmailJS HTTPS Route (Port 443 - zero Excel attachments)
-  if (isOffsite) {
-    const { sendEmailJSOffsiteNotification } = require('./emailjsService');
+  // 4. Dispatch Email Notification via EmailJS HTTPS API (Port 443 - zero Excel attachments across all plants)
+  const { sendEmailJSOffsiteNotification, getEmailJSConfig } = require('./emailjsService');
+  const emailjsCfg = getEmailJSConfig();
+
+  if (emailjsCfg.isConfigured || isOffsite) {
     return await sendEmailJSOffsiteNotification({
       recipientEmails: targetRecipients,
       plantName,
@@ -3835,7 +3837,7 @@ ${isOffsite ? '' : `Attachment: ${excelFileName}\n`}`;
       subject,
       recordId,
       saveEventId,
-      isTestMode: false,
+      isTestMode,
     });
   }
 
@@ -4075,7 +4077,12 @@ const executeSaveAndEmailWorkflow = async ({
     ? `${cleanCode}_Plant_${cleanType}_${cleanShift}_${filenameDate}${eventToken}.xlsx`
     : `${cleanCode}_Plant_${cleanType}_${filenameDate}${eventToken}.xlsx`;
 
-  if (!isOffsite) {
+  // 5. Zero Excel Attachments Policy: Excel generation is bypassed for email notifications across all plants
+  // (All plants deliver styled HTML observation tables via EmailJS HTTPS; standalone report downloads remain untouched)
+  const isEmailJSConfigured = require('./emailjsService').getEmailJSConfig().isConfigured;
+  const shouldSkipEmailExcel = isOffsite || isEmailJSConfigured || ['ACL', 'SA', 'CO2'].includes(plantCode);
+
+  if (!shouldSkipEmailExcel) {
   try {
     if (analysisType === 'Pure Salt Sieve Analysis' || cleanType.toLowerCase().includes('pure_salt_sieve')) {
       const { generatePureSaltSieveAnalysisExcel } = require('./excelService');
@@ -4405,7 +4412,23 @@ const executeSaveAndEmailWorkflow = async ({
   }
   }
 
-  // 6. Security Check: Assigned plant user
+  // 6. Idempotency Check: Prevent duplicate notifications for records already successfully sent
+  if (explicitRecord && explicitRecord.emailStatus === 'sent' && (!changedSlotKeys || changedSlotKeys.length === 0)) {
+    console.log(`[SaveAndEmail] ℹ️ Record ${savedRecord._id} is already marked as 'sent' with no new changes. Skipping duplicate notification.`);
+    return {
+      success: true,
+      emailSent: true,
+      emailStatus: 'sent',
+      alreadySent: true,
+      message: 'Notification was already sent successfully for this record.',
+      recipient: assignedUser?.email || explicitRecord.emailRecipient,
+      messageId: explicitRecord.emailMessageId || '',
+      data: savedRecord,
+      excel: null,
+    };
+  }
+
+  // 7. Security Check: Assigned plant user
   if (!primaryEmail || !assignedUser) {
     console.warn(`[SaveAndEmail] No user assigned to plant "${plantName}". Skipping email dispatch.`);
 
@@ -4441,39 +4464,23 @@ const executeSaveAndEmailWorkflow = async ({
     };
   }
 
-  // 7. Dispatch Email (OFFSITE uses EmailJS HTTPS; others use SMTP + Excel)
+  // 8. Dispatch Email (EmailJS HTTPS API - zero Excel attachments across all plants)
   let emailResult = { success: false, emailStatus: 'failed', error: 'Email dispatch failed' };
-  if (isOffsite) {
-    emailResult = await sendPlantAnalysisEmail({
-      plantDoc,
-      assignedUser,
-      recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
-      analysisType: analysisType || `${plantName} Analysis`,
-      shift: targetShift,
-      savedRecord,
-      excelBuffer: null,
-      excelFileName: null,
-      saveEventId,
-      changedSlotKeys,
-      isTestMode,
-    });
-  } else if (excelResult?.buffer) {
-    emailResult = await sendPlantAnalysisEmail({
-      plantDoc,
-      assignedUser,
-      recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
-      analysisType: analysisType || `${plantName} Analysis`,
-      shift: targetShift,
-      savedRecord,
-      excelBuffer: excelResult.buffer,
-      excelFileName: excelResult.filename || excelFileName,
-      saveEventId,
-      changedSlotKeys,
-      isTestMode,
-    });
-  }
+  emailResult = await sendPlantAnalysisEmail({
+    plantDoc,
+    assignedUser,
+    recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
+    analysisType: analysisType || `${plantName} Analysis`,
+    shift: targetShift,
+    savedRecord,
+    excelBuffer: null,
+    excelFileName: null,
+    saveEventId,
+    changedSlotKeys,
+    isTestMode,
+  });
 
-  // 8. Update emailStatus in MongoDB (ONLY "sent" after Nodemailer confirms; otherwise "failed")
+  // 9. Update emailStatus in MongoDB (ONLY "sent" after EmailJS confirms; otherwise "failed")
   const finalEmailStatus = emailResult.success ? 'sent' : 'failed';
   const ModelToUpdate = explicitRecord?.constructor?.findByIdAndUpdate
     ? explicitRecord.constructor
