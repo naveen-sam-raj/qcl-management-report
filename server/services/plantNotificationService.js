@@ -608,6 +608,22 @@ const sendPlantAnalysisEmail = async ({
     String(analysisType || '').toLowerCase().includes('c.w water') ||
     String(analysisType || '').toLowerCase().includes('cw water');
 
+  const isOffsite =
+    plantDoc?.code === 'OFFSITE' ||
+    plantDoc?.code === 'OFFSET' ||
+    String(plantName).toLowerCase().includes('offsite') ||
+    String(plantName).toLowerCase().includes('offset') ||
+    isOffsetDMWater ||
+    isOffsetBFW ||
+    isOffsetRawWater ||
+    isOffsetCBD ||
+    isOffsetBottomAsh ||
+    isOffsetFlyAsh ||
+    isOffsetDistillerWaste ||
+    isOffsetVacuumSealWater ||
+    isOffsetSewerWater ||
+    isOffsetCoolingWater;
+
   // Format sieve-specific values if applicable
   let sieveTextSummary = '';
   let shiftLabel = shift || savedRecord?.shift || '';
@@ -1450,8 +1466,7 @@ Record ID:
 ${recordId}
 
 Timezone: Asia/Kolkata (${fullIST})
-Attachment: ${excelFileName}
-`;
+${isOffsite ? '' : `Attachment: ${excelFileName}\n`}`;
 
   let dataHtml = '';
   if (isTK209Analysis) {
@@ -3772,10 +3787,11 @@ Attachment: ${excelFileName}
         <div class="field-label">Record ID</div>
         <div class="field-value" style="font-family: monospace; font-size: 13px; color: #334155;">${recordId}</div>
       </div>
+      ${isOffsite ? '' : `
       <div class="attachment-card">
         <span style="font-size: 18px;">📊</span>
         <div class="attachment-name">Attached Excel Report: <strong>${excelFileName}</strong></div>
-      </div>
+      </div>`}
     </div>
     <div class="footer">
       Sent to assigned plant operator (${assignedUser.email}). Generated from saved database record.
@@ -3790,7 +3806,7 @@ Attachment: ${excelFileName}
     : [assignedUser.email.trim()];
   const toField = targetRecipients.join(', ');
 
-  // Test mode safeguard: do not dispatch live SMTP emails during automated testing
+  // Test mode safeguard: do not dispatch live SMTP/EmailJS emails during automated testing
   const isTestMode = testModeParam || process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || process.env.MOCK_EMAIL === 'true';
   if (isTestMode) {
     console.log(`[PlantNotification] 🧪 Test mode active: Mocking email dispatch to [${toField}]`);
@@ -3804,7 +3820,26 @@ Attachment: ${excelFileName}
     };
   }
 
-  // 4. Create Nodemailer Transporter
+  // 4. OFFSITE Plant EmailJS HTTPS Route (Port 443 - zero Excel attachments)
+  if (isOffsite) {
+    const { sendEmailJSOffsiteNotification } = require('./emailjsService');
+    return await sendEmailJSOffsiteNotification({
+      recipientEmails: targetRecipients,
+      plantName,
+      analysisType: analysisType || `${plantName} Analysis`,
+      date: recordDate,
+      shift: shiftLabel,
+      htmlBody,
+      textBody,
+      htmlTable: dataHtml,
+      subject,
+      recordId,
+      saveEventId,
+      isTestMode: false,
+    });
+  }
+
+  // 5. Create Nodemailer Transporter (for non-OFFSITE plants)
   const transporter = createNodemailerTransporter();
   if (!transporter) {
     console.warn(`[PlantNotification] SMTP credentials (EMAIL_USER / EMAIL_PASS) not configured. Skipping email dispatch.`);
@@ -4014,7 +4049,23 @@ const executeSaveAndEmailWorkflow = async ({
   const serverTimestamp = savedRecord.createdAt || savedRecord.savedAt || new Date();
   const { dateFormatted, timeFormatted, filenameDate } = formatISTDateTime(serverTimestamp);
 
-  // 5. Generate Excel (.xlsx) using saved database record
+  const isOffsite =
+    plantCode === 'OFFSITE' ||
+    plantCode === 'OFFSET' ||
+    String(plantName).toLowerCase().includes('offsite') ||
+    String(plantName).toLowerCase().includes('offset') ||
+    String(analysisType || '').toLowerCase().includes('dm water') ||
+    String(analysisType || '').toLowerCase().includes('cbd') ||
+    String(analysisType || '').toLowerCase().includes('boiler feed') ||
+    String(analysisType || '').toLowerCase().includes('raw water') ||
+    String(analysisType || '').toLowerCase().includes('cooling water') ||
+    String(analysisType || '').toLowerCase().includes('sewer water') ||
+    String(analysisType || '').toLowerCase().includes('distiller waste') ||
+    String(analysisType || '').toLowerCase().includes('vacuum seal') ||
+    String(analysisType || '').toLowerCase().includes('bottom ash') ||
+    String(analysisType || '').toLowerCase().includes('fly ash');
+
+  // 5. Generate Excel (.xlsx) using saved database record (Skipped for OFFSITE: No Excel attachments)
   let excelResult = null;
   const cleanCode = plantCode.replace(/[^a-zA-Z0-9]/g, '');
   const cleanType = (analysisType || 'Analysis').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
@@ -4024,6 +4075,7 @@ const executeSaveAndEmailWorkflow = async ({
     ? `${cleanCode}_Plant_${cleanType}_${cleanShift}_${filenameDate}${eventToken}.xlsx`
     : `${cleanCode}_Plant_${cleanType}_${filenameDate}${eventToken}.xlsx`;
 
+  if (!isOffsite) {
   try {
     if (analysisType === 'Pure Salt Sieve Analysis' || cleanType.toLowerCase().includes('pure_salt_sieve')) {
       const { generatePureSaltSieveAnalysisExcel } = require('./excelService');
@@ -4351,6 +4403,7 @@ const executeSaveAndEmailWorkflow = async ({
   } catch (excelErr) {
     console.warn(`[SaveAndEmail] ⚠️ Excel generation warning: ${excelErr.message}`);
   }
+  }
 
   // 6. Security Check: Assigned plant user
   if (!primaryEmail || !assignedUser) {
@@ -4388,9 +4441,23 @@ const executeSaveAndEmailWorkflow = async ({
     };
   }
 
-  // 7. Dispatch Email with Excel Attachment via Nodemailer
-  let emailResult = { success: false, emailStatus: 'failed', error: 'Excel generation failed' };
-  if (excelResult?.buffer) {
+  // 7. Dispatch Email (OFFSITE uses EmailJS HTTPS; others use SMTP + Excel)
+  let emailResult = { success: false, emailStatus: 'failed', error: 'Email dispatch failed' };
+  if (isOffsite) {
+    emailResult = await sendPlantAnalysisEmail({
+      plantDoc,
+      assignedUser,
+      recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
+      analysisType: analysisType || `${plantName} Analysis`,
+      shift: targetShift,
+      savedRecord,
+      excelBuffer: null,
+      excelFileName: null,
+      saveEventId,
+      changedSlotKeys,
+      isTestMode,
+    });
+  } else if (excelResult?.buffer) {
     emailResult = await sendPlantAnalysisEmail({
       plantDoc,
       assignedUser,

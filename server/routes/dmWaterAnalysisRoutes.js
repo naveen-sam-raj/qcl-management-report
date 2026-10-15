@@ -174,6 +174,13 @@ router.get('/smtp-diagnostic', async (req, res) => {
       port587: probe587,
     },
     transporterVerify: verifyResult,
+    emailjsConfig: {
+      isConfigured: Boolean(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && (process.env.EMAILJS_PUBLIC_KEY || process.env.EMAILJS_USER_ID)),
+      serviceId: process.env.EMAILJS_SERVICE_ID ? maskEmail(process.env.EMAILJS_SERVICE_ID) : 'NOT_CONFIGURED',
+      templateId: process.env.EMAILJS_TEMPLATE_ID ? maskEmail(process.env.EMAILJS_TEMPLATE_ID) : 'NOT_CONFIGURED',
+      hasPublicKey: Boolean(process.env.EMAILJS_PUBLIC_KEY || process.env.EMAILJS_USER_ID),
+      hasPrivateKey: Boolean(process.env.EMAILJS_PRIVATE_KEY || process.env.EMAILJS_ACCESS_TOKEN),
+    },
   });
 });
 
