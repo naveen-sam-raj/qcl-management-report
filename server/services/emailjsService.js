@@ -124,6 +124,8 @@ const sendEmailJSOffsiteNotification = async ({
     to_email: recipientString,
     recipient_email: recipientString,
     email: recipientString,
+    to: recipientString,
+    recipient: recipientString,
     to_name: `${plantName} Recipient`,
 
     // Subject
@@ -192,11 +194,14 @@ const sendEmailJSOffsiteNotification = async ({
         restPayload.accessToken = privateKey;
       }
 
+      const clientOrigin = process.env.CLIENT_URL || 'https://qcl-management-report.onrender.com';
       const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Node-Fetch/QCL-Management-System',
+          'Origin': clientOrigin,
+          'Referer': `${clientOrigin}/`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
         body: JSON.stringify(restPayload),
       });
