@@ -121,10 +121,10 @@ router.get('/', async (req, res) => {
     let assignedOperatorEmail = null;
     try {
       const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA');
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || 'sa_operator@tfl.com';
+      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
     } catch (recipErr) {
       console.warn('[GasConc] Operator email resolution note:', recipErr.message);
-      assignedOperatorEmail = 'sa_operator@tfl.com';
+      assignedOperatorEmail = null;
     }
 
     const defaultLocks = {
@@ -713,9 +713,9 @@ router.post('/', async (req, res) => {
       console.warn('[GasConc] Activity log warning:', logErr.message);
     }
 
-    // 11. Centralized Email Workflow Dispatch to Registered SA Plant Operator (sa_operator@tfl.com)
+    // 11. Centralized Email Workflow Dispatch to Registered SA Plant Operator
     let emailStatus = 'pending';
-    let emailRecipient = 'sa_operator@tfl.com';
+    let emailRecipient = null;
     let emailMessage = 'Gas Conc. Analysis saved successfully!';
 
     try {
@@ -734,10 +734,10 @@ router.post('/', async (req, res) => {
 
       const workflowResult = await emailPromise;
       emailStatus = workflowResult.emailStatus || (workflowResult.emailSent ? 'sent' : 'failed');
-        emailRecipient = workflowResult.recipient || workflowResult.primaryEmail || 'sa_operator@tfl.com';
-        emailMessage = workflowResult.emailSent
-          ? `Saved and notification dispatched to ${emailRecipient}`
-          : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'SMTP delivery rejected'}`;
+      emailRecipient = workflowResult.recipient || workflowResult.primaryEmail || null;
+      emailMessage = workflowResult.emailSent
+        ? `Saved and notification dispatched to ${emailRecipient}`
+        : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'Delivery rejected'}`;
     } catch (emailWorkflowErr) {
       console.warn('[GasConc] Email workflow warning:', emailWorkflowErr.message);
       emailStatus = 'failed';
@@ -806,7 +806,7 @@ router.post('/:id/retry-email', async (req, res) => {
     });
 
     const isSuccess = result?.emailSent || result?.emailStatus === 'sent';
-    const recipient = result?.recipient || result?.primaryEmail || 'sa_operator@tfl.com';
+    const recipient = result?.recipient || result?.primaryEmail || null;
 
     return res.status(200).json({
       success: true,

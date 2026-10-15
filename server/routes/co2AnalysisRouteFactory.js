@@ -46,12 +46,12 @@ function createCO2ShiftAnalysisRouter({
     try {
       const { date, startDate, endDate } = req.query;
 
-      let assignedOperatorEmail = 'co2_operator@tfl.com';
+      let assignedOperatorEmail = null;
       try {
         const { assignedUser, primaryEmail } = await getPlantAssignedUser('CO2');
-        assignedOperatorEmail = primaryEmail || assignedUser?.email || 'co2_operator@tfl.com';
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
       } catch (e) {
-        assignedOperatorEmail = 'co2_operator@tfl.com';
+        assignedOperatorEmail = null;
       }
 
       const defaultLocks = {
@@ -444,7 +444,7 @@ function createCO2ShiftAnalysisRouter({
 
       const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
       const emailStatus = emailSent ? 'sent' : 'failed';
-      const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || 'co2_operator@tfl.com';
+      const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || null;
 
       return res.status(201).json({
         success: true,
@@ -566,12 +566,12 @@ function createCO2WeeklyAnalysisRouter({
     try {
       const { date, startDate, endDate } = req.query;
 
-      let assignedOperatorEmail = 'co2_operator@tfl.com';
+      let assignedOperatorEmail = null;
       try {
         const { assignedUser, primaryEmail } = await getPlantAssignedUser('CO2');
-        assignedOperatorEmail = primaryEmail || assignedUser?.email || 'co2_operator@tfl.com';
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
       } catch (e) {
-        assignedOperatorEmail = 'co2_operator@tfl.com';
+        assignedOperatorEmail = null;
       }
 
       if (date) {
@@ -851,7 +851,7 @@ function createCO2WeeklyAnalysisRouter({
 
       const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
       const emailStatus = emailSent ? 'sent' : 'failed';
-      const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || 'co2_operator@tfl.com';
+      const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || null;
 
       return res.status(201).json({
         success: true,

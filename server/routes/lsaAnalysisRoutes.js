@@ -538,7 +538,7 @@ router.post('/:id/retry-email', async (req, res) => {
     });
 
     const isSuccess = result?.emailSent || result?.emailStatus === 'sent';
-    const recipient = result?.recipient || result?.primaryEmail || 'sa_operator@tfl.com';
+    const recipient = result?.recipient || result?.primaryEmail || null;
     return res.status(200).json({
       success: true,
       emailSent: isSuccess,

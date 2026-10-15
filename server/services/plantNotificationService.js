@@ -215,15 +215,29 @@ const resolvePlant = async (plantIdentifier, options = {}) => {
   if (targetCode === 'OFFSET') targetCode = 'OFFSITE';
   if (targetCode === 'C02') targetCode = 'CO2';
 
-  // 4. Query MongoDB for exact code or name match
-  const plant = await Plant.findOne({
-    $or: [
-      { code: targetCode },
-      { code: new RegExp(`^${clean}$`, 'i') },
-      { name: new RegExp(`^${clean}$`, 'i') },
-      { name: new RegExp(`^${clean}\\s+Plant$`, 'i') },
-    ],
-  });
+  // 4. Query MongoDB for exact code or name match (scoping to company if provided)
+  const rawCompany = options.company;
+  const companyFilter = (rawCompany && rawCompany._id) ? rawCompany._id : rawCompany;
+  const matchCriteria = [
+    { code: targetCode },
+    { code: new RegExp(`^${clean}$`, 'i') },
+    { name: new RegExp(`^${clean}$`, 'i') },
+    { name: new RegExp(`^${clean}\\s+Plant$`, 'i') },
+  ];
+
+  let plant = null;
+  if (companyFilter) {
+    plant = await Plant.findOne({
+      company: companyFilter,
+      $or: matchCriteria,
+    });
+  }
+
+  if (!plant) {
+    plant = await Plant.findOne({
+      $or: matchCriteria,
+    });
+  }
 
   return plant;
 };
@@ -262,8 +276,8 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
   // 1. Find operators assigned to this plant in MongoDB
   const operatorQuery = {
     plant: plant._id,
-    role: 'user',
-    status: 'active',
+    role: { $in: ['user', 'operator'] },
+    status: { $ne: 'disabled' },
   };
 
   const rawCompany = options.company || plant.company;
@@ -293,7 +307,7 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
   // 2. Resolve registered Admin users (Company Admin or Super Admin) for notification
   const adminQuery = {
     role: { $in: ['admin', 'super_admin', 'company_admin'] },
-    status: 'active',
+    status: { $ne: 'disabled' },
   };
   if (companyFilter) {
     adminQuery.$or = [{ company: companyFilter }, { company: null }];
