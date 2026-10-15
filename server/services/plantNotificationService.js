@@ -266,7 +266,8 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
     status: 'active',
   };
 
-  const companyFilter = options.company || plant.company;
+  const rawCompany = options.company || plant.company;
+  const companyFilter = (rawCompany && rawCompany._id) ? rawCompany._id : rawCompany;
   if (companyFilter) {
     operatorQuery.company = companyFilter;
   }
@@ -367,6 +368,7 @@ const sendPlantAnalysisEmail = async ({
   excelFileName,
   saveEventId = '',
   changedSlotKeys = [],
+  isTestMode: testModeParam = false,
 }) => {
   if (!assignedUser || !assignedUser.email) {
     return {
@@ -3267,6 +3269,42 @@ Attachment: ${excelFileName}
           </tbody>
         </table>
       </div>`;
+  } else if (isOffsetDMWater) {
+    const rawData = Array.isArray(savedRecord?.data?.readings)
+      ? savedRecord.data.readings
+      : (Array.isArray(savedRecord?.readings) ? savedRecord.readings : []);
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    dataHtml = `
+      <div class="field-group">
+        <div class="field-label" style="font-size: 13px; font-weight: 700; color: #0f2e5a; margin-bottom: 8px;">DM Water Analytical Observations</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #0f2e5a; color: #ffffff;">
+              <th style="padding: 7px 10px; text-align: left; border: 1px solid #cbd5e1;">Unit / Stream</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Time</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">pH</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Cond</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">TH</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">Alk</th>
+              <th style="padding: 7px 8px; text-align: center; border: 1px solid #cbd5e1;">SiO₂</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rawData.map((r, idx) => `
+              <tr style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
+                <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #1e293b;">${r.unit || `Stream ${idx + 1}`}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; color: #475569;">${r.time || '—'}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.ph)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.cond)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.th)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.alk)}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.sio2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   } else if (savedRecord?.data || savedRecord?.rows) {
     const rawDataToExtract = savedRecord?.data?.rows || savedRecord?.data || savedRecord?.rows;
     let dataEntries = [];
@@ -3395,6 +3433,25 @@ Attachment: ${excelFileName}
 </html>
 `;
 
+  const targetRecipients = Array.isArray(recipientEmails) && recipientEmails.length > 0
+    ? recipientEmails.filter(Boolean).map(e => e.trim())
+    : [assignedUser.email.trim()];
+  const toField = targetRecipients.join(', ');
+
+  // Test mode safeguard: do not dispatch live SMTP emails during automated testing
+  const isTestMode = testModeParam || process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || process.env.MOCK_EMAIL === 'true';
+  if (isTestMode) {
+    console.log(`[PlantNotification] 🧪 Test mode active: Mocking email dispatch to [${toField}]`);
+    return {
+      success: true,
+      emailStatus: 'sent',
+      messageId: `mock_test_${Date.now()}`,
+      recipient: toField,
+      textBody,
+      htmlBody,
+    };
+  }
+
   // 4. Create Nodemailer Transporter
   const transporter = createNodemailerTransporter();
   if (!transporter) {
@@ -3410,11 +3467,6 @@ Attachment: ${excelFileName}
   const fromName = process.env.SENDER_NAME || 'QCL Management System';
   const senderUser = process.env.EMAIL_USER || process.env.MAIL_USER;
   const fromAddress = `"${fromName}" <${senderUser}>`;
-
-  const targetRecipients = Array.isArray(recipientEmails) && recipientEmails.length > 0
-    ? recipientEmails.filter(Boolean).map(e => e.trim())
-    : [assignedUser.email.trim()];
-  const toField = targetRecipients.join(', ');
 
   try {
     const mailOptions = {
@@ -3481,6 +3533,7 @@ const executeSaveAndEmailWorkflow = async ({
   rawBody = {},
   saveEventId = '',
   changedSlotKeys = [],
+  isTestMode = false,
 }) => {
   // 1. Resolve Plant from MongoDB
   const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit, company });
@@ -3970,6 +4023,7 @@ const executeSaveAndEmailWorkflow = async ({
       excelFileName: excelResult.filename || excelFileName,
       saveEventId,
       changedSlotKeys,
+      isTestMode,
     });
   }
 

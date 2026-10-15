@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 const { connectDB } = require('./config/db');
 
 // Route imports
@@ -245,6 +246,8 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
     message: 'SPIC-TFL-Greenstar Analytics API is operational',
+    database: mongoose.connection?.name || 'none',
+    databaseState: mongoose.connection?.readyState === 1 ? 'connected' : 'disconnected',
     timestamp: new Date(),
   });
 });

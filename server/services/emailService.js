@@ -21,22 +21,37 @@ const createNodemailerTransporter = () => {
 
   const pass = rawPass.trim().replace(/\s+/g, '');
 
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT) || 465;
+  const secure = process.env.SMTP_SECURE !== undefined
+    ? process.env.SMTP_SECURE === 'true'
+    : port === 465;
+
+  const connectionTimeout = Number(process.env.SMTP_CONNECTION_TIMEOUT) || 30000;
+  const greetingTimeout = Number(process.env.SMTP_GREETING_TIMEOUT) || 20000;
+  const socketTimeout = Number(process.env.SMTP_SOCKET_TIMEOUT) || 45000;
+  const usePool = process.env.SMTP_POOL !== 'false';
+
   return nodemailer.createTransport({
-    service: 'gmail',
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    family: 4, // Force IPv4 to prevent ENETUNREACH on environments without IPv6 routing
+    host,
+    port,
+    secure,
+    requireTLS: !secure && port === 587,
+    pool: usePool,
+    maxConnections: Number(process.env.SMTP_MAX_CONNECTIONS) || 3,
+    maxMessages: Number(process.env.SMTP_MAX_MESSAGES) || 50,
+    family: process.env.SMTP_FAMILY ? Number(process.env.SMTP_FAMILY) : 4,
     auth: {
       user: user.trim(),
       pass,
     },
     tls: {
       rejectUnauthorized: false,
+      minVersion: 'TLSv1.2',
     },
-    connectionTimeout: 15000,
-    greetingTimeout: 10000,
-    socketTimeout: 20000,
+    connectionTimeout,
+    greetingTimeout,
+    socketTimeout,
   });
 };
 

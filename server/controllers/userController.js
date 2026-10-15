@@ -1,11 +1,115 @@
-const { User, Plant, ActivityLog } = require('../models');
+const mongoose = require('mongoose');
+const MongooseUser = require('../models/User');
+const MongoosePlant = require('../models/Plant');
+const MongooseCompany = require('../models/Company');
+const MongooseActivityLog = require('../models/ActivityLog');
 const { sendUserWelcomeEmail } = require('../services/emailService');
+
+/**
+ * Ensures a live, confirmed connection to the active MongoDB database.
+ * Never allows silent fallback to volatile in-memory storage for User operations.
+ */
+const ensureDatabaseConnection = async () => {
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    return true;
+  }
+  try {
+    const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
+    if (uri) {
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+      return mongoose.connection && mongoose.connection.readyState === 1;
+    }
+  } catch (err) {
+    console.warn('[User Controller] MongoDB connection attempt failed:', err.message);
+  }
+  return false;
+};
+
+/**
+ * Resiliently resolves a Plant document from MongoDB.
+ * Accepts:
+ *  - MongoDB ObjectId (string or ObjectId)
+ *  - Plant code: 'OFFSITE', 'OFFSET', 'ACL', 'SA', 'CO2'
+ *  - Plant name: 'OFFSITE Plant', 'OFFSET Plant', etc.
+ *  - Frontend mock ID: 'plant_offsite', 'plant_acl', 'plant_sa', 'plant_co2'
+ */
+const resolvePlantDoc = async (plantId) => {
+  if (!plantId) return null;
+
+  // 1. Direct MongoDB ObjectId match
+  if (mongoose.Types.ObjectId.isValid(plantId)) {
+    const p = await MongoosePlant.findById(plantId);
+    if (p) return p;
+  }
+
+  // 2. Normalized code/name match
+  let clean = String(plantId).trim();
+  if (/^plant_offsite$/i.test(clean)) clean = 'OFFSITE';
+  if (/^plant_acl$/i.test(clean)) clean = 'ACL';
+  if (/^plant_sa$/i.test(clean)) clean = 'SA';
+  if (/^plant_co2$/i.test(clean)) clean = 'CO2';
+
+  const baseCode = clean.replace(/\s*plant\s*$/i, '').trim();
+  let targetCode = baseCode.toUpperCase();
+  if (targetCode === 'OFFSET') targetCode = 'OFFSITE';
+
+  return await MongoosePlant.findOne({
+    $or: [
+      { code: targetCode },
+      { code: new RegExp(`^${targetCode}$`, 'i') },
+      { name: new RegExp(`^${baseCode}(\\s+Plant)?$`, 'i') },
+    ],
+  });
+};
+
+/**
+ * Resiliently resolves a Company document from MongoDB.
+ */
+const resolveCompanyDoc = async (companyId, fallbackPlantDoc) => {
+  if (companyId) {
+    if (mongoose.Types.ObjectId.isValid(companyId)) {
+      const c = await MongooseCompany.findById(companyId);
+      if (c) return c;
+    }
+    let clean = String(companyId).trim();
+    if (/^company_tfl$/i.test(clean)) clean = 'TFL';
+    if (/^company_spic$/i.test(clean)) clean = 'SPIC';
+    if (/^company_gsfl$/i.test(clean)) clean = 'GSFL';
+
+    const c = await MongooseCompany.findOne({
+      $or: [
+        { code: new RegExp(`^${clean}$`, 'i') },
+        { name: new RegExp(`^${clean}$`, 'i') },
+      ],
+    });
+    if (c) return c;
+  }
+
+  if (fallbackPlantDoc && fallbackPlantDoc.company) {
+    const compRef = fallbackPlantDoc.company;
+    if (compRef && compRef.name) return compRef;
+    if (mongoose.Types.ObjectId.isValid(compRef)) {
+      const c = await MongooseCompany.findById(compRef);
+      if (c) return c;
+    }
+  }
+
+  return null;
+};
 
 // @desc    Get users (scoped to company for Company Admin, universal for Super Admin)
 // @route   GET /api/users
 // @access  Private (Super Admin, Company Admin)
 const getUsers = async (req, res) => {
   try {
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to retrieve users.',
+      });
+    }
+
     const filter = {};
 
     // Enforce company scoping
@@ -14,12 +118,14 @@ const getUsers = async (req, res) => {
       filter.role = { $ne: 'super_admin' }; // cannot see super admin
     } else if (req.user.role === 'super_admin') {
       if (req.query.companyId) {
-        filter.company = req.query.companyId;
+        const comp = await resolveCompanyDoc(req.query.companyId);
+        filter.company = comp ? comp._id : req.query.companyId;
       }
     }
 
     if (req.query.plantId) {
-      filter.plant = req.query.plantId;
+      const plant = await resolvePlantDoc(req.query.plantId);
+      filter.plant = plant ? plant._id : req.query.plantId;
     }
 
     if (req.query.role) {
@@ -39,7 +145,7 @@ const getUsers = async (req, res) => {
       ];
     }
 
-    const users = await User.find(filter)
+    const users = await MongooseUser.find(filter)
       .select('-password')
       .populate('company')
       .populate('plant')
@@ -48,9 +154,9 @@ const getUsers = async (req, res) => {
     let maxUsers = null;
     let currentUserCount = users.length;
     if (req.user.role === 'company_admin') {
-      const admin = await User.findById(req.user._id);
+      const admin = await MongooseUser.findById(req.user._id);
       maxUsers = admin?.maxUsers !== undefined && admin?.maxUsers !== null ? admin.maxUsers : 10;
-      currentUserCount = await User.countDocuments({
+      currentUserCount = await MongooseUser.countDocuments({
         company: req.user.company?._id || req.user.company,
         role: 'user',
       });
@@ -75,6 +181,15 @@ const getUsers = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const createUser = async (req, res) => {
   try {
+    // 1. Strict MongoDB Connection Check — Never write to in-memory fallback
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is unavailable. User cannot be saved to MongoDB.',
+      });
+    }
+
     const {
       name,
       email,
@@ -83,65 +198,12 @@ const createUser = async (req, res) => {
       confirmPassword,
       mobile,
       plantId,
+      companyId,
       role = 'user',
       status = 'active',
     } = req.body;
 
-    // Company assignment
-    let targetCompanyId = null;
-    let targetCompanyAdmin = null;
-
-    if (req.user.role === 'company_admin') {
-      targetCompanyId = req.user.company?._id || req.user.company;
-      targetCompanyAdmin = req.user;
-    } else if (req.user.role === 'super_admin') {
-      targetCompanyId = req.body.companyId;
-
-      // If companyId not directly passed, derive it from selected plant or default active company
-      if (!targetCompanyId && plantId) {
-        const plantObj = await Plant.findById(plantId);
-        if (plantObj && plantObj.company) {
-          targetCompanyId = plantObj.company;
-        }
-      }
-
-      // If still not found, check company assigned to super_admin or default to company
-      if (!targetCompanyId && (req.user.company?._id || req.user.company)) {
-        targetCompanyId = req.user.company?._id || req.user.company;
-      }
-
-      if (!targetCompanyId) {
-        return res.status(400).json({ success: false, message: 'Please select a company or plant for this user.' });
-      }
-      targetCompanyAdmin = await User.findOne({ company: targetCompanyId, role: 'company_admin' });
-    }
-
-    // ── Requirement 6 & 7: Maximum User Limit Validation in Backend ──
-    if (targetCompanyAdmin) {
-      const adminDoc = await User.findById(targetCompanyAdmin._id || targetCompanyAdmin.id);
-      const effectiveMaxUsers = adminDoc?.maxUsers !== undefined && adminDoc?.maxUsers !== null
-        ? adminDoc.maxUsers
-        : targetCompanyAdmin.maxUsers;
-
-      if (effectiveMaxUsers !== undefined && effectiveMaxUsers !== null && effectiveMaxUsers > 0) {
-        const currentUserCount = await User.countDocuments({
-          company: targetCompanyId,
-          role: 'user',
-        });
-
-        if (currentUserCount >= effectiveMaxUsers) {
-          return res.status(403).json({
-            success: false,
-            message: `User limit reached. Your plan allows a maximum of ${effectiveMaxUsers} users.`,
-            userLimitReached: true,
-            currentUserCount,
-            maxUsers: effectiveMaxUsers,
-          });
-        }
-      }
-    }
-
-    // Validation
+    // 2. Validate required fields
     if (!name || !email || !username || !password) {
       return res.status(400).json({
         success: false,
@@ -166,38 +228,109 @@ const createUser = async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
 
-    // Check unique email and username
-    const existingEmail = await User.findOne({ email: cleanEmail });
+    // 3. Check unique email and username directly in MongoDB
+    const existingEmail = await MongooseUser.findOne({ email: cleanEmail });
     if (existingEmail) {
       return res.status(400).json({ success: false, message: 'Email address is already in use.' });
     }
 
-    const existingUsername = await User.findOne({ username: cleanUsername });
+    const existingUsername = await MongooseUser.findOne({ username: cleanUsername });
     if (existingUsername) {
       return res.status(400).json({ success: false, message: 'Username is already taken.' });
     }
 
-    // Verify plant belongs to target company if plantId supplied
+    // 4. Resilient Plant Resolution
+    let plantDoc = null;
     let verifiedPlantId = null;
     if (plantId) {
-      const plant = await Plant.findById(plantId);
-      if (plant) {
-        if (targetCompanyId && (plant.company?._id || plant.company).toString() !== targetCompanyId.toString()) {
-          return res.status(400).json({
-            success: false,
-            message: 'Selected plant does not belong to the target company.',
-          });
-        }
-        verifiedPlantId = plant._id;
+      plantDoc = await resolvePlantDoc(plantId);
+      if (!plantDoc) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected plant was not found in the database.',
+        });
+      }
+      verifiedPlantId = plantDoc._id;
+    }
+
+    // 5. Company Assignment
+    let targetCompanyId = null;
+    let targetCompanyAdmin = null;
+
+    if (req.user.role === 'company_admin') {
+      targetCompanyId = req.user.company?._id || req.user.company;
+      targetCompanyAdmin = req.user;
+    } else if (req.user.role === 'super_admin') {
+      // First try resolving from explicitly passed companyId
+      const compDoc = await resolveCompanyDoc(companyId, plantDoc);
+      if (compDoc) {
+        targetCompanyId = compDoc._id || compDoc.id;
+      }
+
+      // If not passed or not resolved, derive directly from resolved plant
+      if (!targetCompanyId && plantDoc && plantDoc.company) {
+        targetCompanyId = plantDoc.company?._id || plantDoc.company;
+      }
+
+      // Fallback to super_admin's company if defined
+      if (!targetCompanyId && (req.user.company?._id || req.user.company)) {
+        targetCompanyId = req.user.company?._id || req.user.company;
+      }
+
+      if (!targetCompanyId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please select a company or plant for this user.',
+        });
+      }
+
+      targetCompanyAdmin = await MongooseUser.findOne({ company: targetCompanyId, role: 'company_admin' });
+    }
+
+    // Verify plant belongs to target company
+    if (plantDoc && targetCompanyId) {
+      const plantCompId = (plantDoc.company?._id || plantDoc.company).toString();
+      if (plantCompId !== targetCompanyId.toString()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected plant does not belong to the target company.',
+        });
       }
     }
 
-    const newUser = await User.create({
+    // 6. User Limit Enforcement
+    if (targetCompanyAdmin) {
+      const adminDoc = await MongooseUser.findById(targetCompanyAdmin._id || targetCompanyAdmin.id);
+      const effectiveMaxUsers =
+        adminDoc?.maxUsers !== undefined && adminDoc?.maxUsers !== null
+          ? adminDoc.maxUsers
+          : targetCompanyAdmin.maxUsers;
+
+      if (effectiveMaxUsers !== undefined && effectiveMaxUsers !== null && effectiveMaxUsers > 0) {
+        const currentUserCount = await MongooseUser.countDocuments({
+          company: targetCompanyId,
+          role: 'user',
+        });
+
+        if (currentUserCount >= effectiveMaxUsers) {
+          return res.status(403).json({
+            success: false,
+            message: `User limit reached. Your plan allows a maximum of ${effectiveMaxUsers} users.`,
+            userLimitReached: true,
+            currentUserCount,
+            maxUsers: effectiveMaxUsers,
+          });
+        }
+      }
+    }
+
+    // 7. Persist User Document directly to MongoDB
+    const newUser = await MongooseUser.create({
       name: name.trim(),
-      email: email.trim().toLowerCase(),
-      username: username.trim().toLowerCase(),
-      password,
-      mobile: mobile || '',
+      email: cleanEmail,
+      username: cleanUsername,
+      password, // Password hashed automatically by Mongoose pre('save') hook
+      mobile: mobile ? String(mobile).trim() : '',
       role: role || 'user',
       company: targetCompanyId,
       companyAdmin: targetCompanyAdmin ? (targetCompanyAdmin._id || targetCompanyAdmin.id) : null,
@@ -205,36 +338,47 @@ const createUser = async (req, res) => {
       status: status || 'active',
     });
 
-    // Activity Log
+    // 8. Explicitly verify document write confirmation in MongoDB
+    const confirmedUser = await MongooseUser.findById(newUser._id)
+      .select('-password')
+      .populate('company')
+      .populate('plant');
+
+    if (!confirmedUser) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database persistence error: User document write could not be confirmed in MongoDB.',
+      });
+    }
+
+    // 9. Activity Log in MongoDB
     try {
-      await ActivityLog.create({
-        user: req.user._id,
-        userName: req.user.name,
-        userEmail: req.user.email,
-        role: req.user.role,
+      await MongooseActivityLog.create({
+        user: req.user._id || req.user.id,
+        userName: req.user.name || req.user.username || 'Admin',
+        userEmail: req.user.email || 'admin@spicglobal.com',
+        role: req.user.role || 'company_admin',
         company: targetCompanyId,
-        companyName: req.user.company?.name || 'Enterprise',
+        companyName: confirmedUser.company?.name || 'Company',
         action: 'USER_CREATED',
-        details: `Created new user "${name}" (${username}) assigned to ${role}`,
+        details: `Created new user "${confirmedUser.name}" (${confirmedUser.username}) assigned to ${confirmedUser.plant?.name || 'General User'}`,
         ipAddress: req.ip || '127.0.0.1',
       });
     } catch (e) {
-      console.warn('Audit log error:', e.message);
+      console.warn('[User Controller] Audit log error:', e.message);
     }
 
-    const safeUser = await User.findById(newUser._id).select('-password').populate('company').populate('plant');
-
-    // Send welcome email with login credentials to the user's personal email
+    // 10. Welcome Email with credentials (asynchronous, non-blocking)
     try {
       sendUserWelcomeEmail({
-        to: newUser.email,
-        name: newUser.name,
-        username: newUser.username,
+        to: confirmedUser.email,
+        name: confirmedUser.name,
+        username: confirmedUser.username,
         password: password,
-        role: newUser.role,
-        companyName: safeUser?.company?.name || 'SPIC Group',
+        role: confirmedUser.role,
+        companyName: confirmedUser.company?.name || 'SPIC Group',
       }).catch((emailErr) => {
-        console.warn('[User Controller] Email delivery error:', emailErr.message);
+        console.warn('[User Controller] Email delivery warning:', emailErr.message);
       });
     } catch (emailErr) {
       console.warn('[User Controller] Email dispatch warning:', emailErr.message);
@@ -243,9 +387,24 @@ const createUser = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'User created successfully.',
-      user: safeUser,
+      user: confirmedUser,
     });
   } catch (error) {
+    console.error('[User Controller] Create user error:', error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern || error.keyValue || {})[0] || 'Email or username';
+      return res.status(400).json({
+        success: false,
+        message: `An account with this ${field} already exists in the database.`,
+      });
+    }
+    if (error.name === 'ValidationError') {
+      const msgs = Object.values(error.errors || {}).map((e) => e.message);
+      return res.status(400).json({
+        success: false,
+        message: msgs.join(', ') || 'User validation failed.',
+      });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -255,7 +414,15 @@ const createUser = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const updateUser = async (req, res) => {
   try {
-    const userToUpdate = await User.findById(req.params.id);
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to update user.',
+      });
+    }
+
+    const userToUpdate = await MongooseUser.findById(req.params.id);
     if (!userToUpdate) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -275,18 +442,27 @@ const updateUser = async (req, res) => {
     if (name) updates.name = name.trim();
     if (email) {
       const cleanEmail = email.trim().toLowerCase();
-      const existingEmail = await User.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
+      const existingEmail = await MongooseUser.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
       if (existingEmail) {
         return res.status(400).json({ success: false, message: 'Email address is already in use by another user.' });
       }
       updates.email = cleanEmail;
     }
-    if (mobile !== undefined) updates.mobile = mobile;
-    if (plantId !== undefined) updates.plant = plantId || null;
+    if (mobile !== undefined) updates.mobile = mobile ? String(mobile).trim() : '';
+
+    if (plantId !== undefined) {
+      if (plantId) {
+        const plantDoc = await resolvePlantDoc(plantId);
+        updates.plant = plantDoc ? plantDoc._id : null;
+      } else {
+        updates.plant = null;
+      }
+    }
+
     if (role) updates.role = role;
     if (status) updates.status = status;
 
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true })
+    const updatedUser = await MongooseUser.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true })
       .select('-password')
       .populate('company')
       .populate('plant');
@@ -297,6 +473,13 @@ const updateUser = async (req, res) => {
       user: updatedUser,
     });
   } catch (error) {
+    console.error('[User Controller] Update user error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email address or username is already in use by another user.',
+      });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -306,7 +489,15 @@ const updateUser = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const toggleUserStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to toggle user status.',
+      });
+    }
+
+    const user = await MongooseUser.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -327,6 +518,7 @@ const toggleUserStatus = async (req, res) => {
       success: true,
       message: `User status updated to ${newStatus}.`,
       status: newStatus,
+      user,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -338,6 +530,14 @@ const toggleUserStatus = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const resetPassword = async (req, res) => {
   try {
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to reset password.',
+      });
+    }
+
     const { newPassword, confirmPassword } = req.body;
 
     if (!newPassword || newPassword.length < 6) {
@@ -354,7 +554,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.params.id);
+    const user = await MongooseUser.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -384,7 +584,15 @@ const resetPassword = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const deleteUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to delete user.',
+      });
+    }
+
+    const user = await MongooseUser.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -402,10 +610,10 @@ const deleteUser = async (req, res) => {
       }
     }
 
-    await User.findByIdAndDelete(req.params.id);
+    await MongooseUser.findByIdAndDelete(req.params.id);
 
     try {
-      await ActivityLog.create({
+      await MongooseActivityLog.create({
         user: req.user?._id || req.user?.id,
         userName: req.user?.name || req.user?.username || 'Admin',
         userEmail: req.user?.email || 'admin@spicglobal.com',
@@ -417,7 +625,7 @@ const deleteUser = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
       });
     } catch (e) {
-      console.warn('Audit log error:', e.message);
+      console.warn('[User Controller] Audit log error:', e.message);
     }
 
     return res.status(200).json({
@@ -434,7 +642,15 @@ const deleteUser = async (req, res) => {
 // @access  Private (Super Admin, Company Admin)
 const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
+    const isConnected = await ensureDatabaseConnection();
+    if (!isConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'MongoDB database is not connected. Unable to retrieve user.',
+      });
+    }
+
+    const user = await MongooseUser.findById(req.params.id)
       .select('-password')
       .populate('company')
       .populate('plant');
@@ -457,4 +673,6 @@ module.exports = {
   toggleUserStatus,
   resetPassword,
   deleteUser,
+  resolvePlantDoc,
+  resolveCompanyDoc,
 };

@@ -42,19 +42,19 @@ const TH_LIMIT = OFFSET_DM_WATER_LIMITS.th;
 const ALK_LIMIT = OFFSET_DM_WATER_LIMITS.alk;
 const SIO2_LIMIT = OFFSET_DM_WATER_LIMITS.sio2;
 
-// Zero initial rows for DM Water and Anion Unit (first-time opening display all zeros)
-const createZeroRows = () => [
+// Initial empty rows for DM Water and Anion Unit (first-time opening displays '–')
+const createInitialRows = () => [
   {
     id: 'r_dm_water',
     unit: 'DM WATER',
     time: '',
-    ph: '0',
-    cond: '0',
-    th: '0',
-    alk: '0',
-    sio2: '0',
-    p: '0',
-    m: '0',
+    ph: '–',
+    cond: '–',
+    th: '–',
+    alk: '–',
+    sio2: '–',
+    p: '–',
+    m: '–',
     isDefault: true,
     accent: 'blue',
   },
@@ -62,27 +62,27 @@ const createZeroRows = () => [
     id: 'r_anion_unit',
     unit: 'A.UNIT',
     time: '',
-    ph: '0',
-    cond: '0',
-    th: '0',
-    alk: '0',
-    sio2: '0',
-    p: '0',
-    m: '0',
+    ph: '–',
+    cond: '–',
+    th: '–',
+    alk: '–',
+    sio2: '–',
+    p: '–',
+    m: '–',
     isDefault: true,
     accent: 'indigo',
   },
 ];
 
-const DEFAULT_ROWS = createZeroRows();
+const DEFAULT_ROWS = createInitialRows();
 
 const NUMERIC_FIELDS = ['ph', 'cond', 'th', 'alk', 'sio2'];
 
 const isValidInput = (val, field) => {
-  if (val === '' || val === null || val === undefined) return true;
+  if (val === '' || val === null || val === undefined || val === '–' || val === '-') return true;
   if (field === 'th') {
     const s = String(val).toLowerCase();
-    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-' || s === '0') return true;
+    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-' || s === '–' || s === '0') return true;
   }
   return /^-?\d*\.?\d*$/.test(val);
 };
@@ -96,9 +96,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  // Date strictly initialized to today in Asia/Kolkata
+  // Date initialized to today in Asia/Kolkata
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(() => createZeroRows());
+  const [readings, setReadings] = useState(() => createInitialRows());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -118,8 +118,8 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     if (!date) return;
     let active = true;
 
-    // Immediately reset to clean zero rows on date change so stale values from another date never appear
-    setReadings(createZeroRows());
+    // Immediately reset to initial rows on date change so stale values from another date never appear
+    setReadings(createInitialRows());
     setEditedFields({});
     setRecordId(null);
     setInitialSaved(false);
@@ -156,11 +156,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
           const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
           const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
-          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
 
           setInitialSaved(hasSaved);
           setEditCount(currentEdits);
-          setIsLocked(lockStatus);
+          setIsLocked(false);
           
           let loadedReadings = null;
           if (record.shifts && Array.isArray(record.shifts) && record.shifts.length > 0) {
@@ -181,20 +180,40 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               id: r.id || (idx === 0 ? 'r_dm_water' : idx === 1 ? 'r_anion_unit' : `r_custom_${idx}`),
               unit: r.unit || (idx === 0 ? 'DM WATER' : idx === 1 ? 'A.UNIT' : `Stream ${idx + 1}`),
               time: r.time !== undefined && r.time !== null ? String(r.time) : '',
-              ph: r.ph !== undefined && r.ph !== null && r.ph !== '' ? String(r.ph) : '0',
-              cond: r.cond !== undefined && r.cond !== null && r.cond !== '' ? String(r.cond) : '0',
-              th: r.th !== undefined && r.th !== null && r.th !== '' ? String(r.th) : '0',
-              alk: r.alk !== undefined && r.alk !== null && r.alk !== '' ? String(r.alk) : '0',
-              sio2: r.sio2 !== undefined && r.sio2 !== null && r.sio2 !== '' ? String(r.sio2) : '0',
+              ph: r.ph !== undefined && r.ph !== null && r.ph !== '' && r.ph !== '–' && r.ph !== '-' ? String(r.ph) : '–',
+              cond: r.cond !== undefined && r.cond !== null && r.cond !== '' && r.cond !== '–' && r.cond !== '-' ? String(r.cond) : '–',
+              th: r.th !== undefined && r.th !== null && r.th !== '' && r.th !== '–' && r.th !== '-' ? String(r.th) : '–',
+              alk: r.alk !== undefined && r.alk !== null && r.alk !== '' && r.alk !== '–' && r.alk !== '-' ? String(r.alk) : '–',
+              sio2: r.sio2 !== undefined && r.sio2 !== null && r.sio2 !== '' && r.sio2 !== '–' && r.sio2 !== '-' ? String(r.sio2) : '–',
               isDefault: idx < 2,
               accent: idx % 2 === 0 ? 'blue' : 'indigo',
             }));
+
+            // Keep both standard rows (DM WATER and A.UNIT) visible even if loaded data had only 1 row
+            if (normalized.length === 1) {
+              const firstIsDM = String(normalized[0].unit).toUpperCase().includes('DM');
+              normalized.push({
+                id: firstIsDM ? 'r_anion_unit' : 'r_dm_water',
+                unit: firstIsDM ? 'A.UNIT' : 'DM WATER',
+                time: '',
+                ph: '–',
+                cond: '–',
+                th: '–',
+                alk: '–',
+                sio2: '–',
+                p: '–',
+                m: '–',
+                isDefault: true,
+                accent: firstIsDM ? 'indigo' : 'blue',
+              });
+            }
+
             setReadings(normalized);
           } else {
-            setReadings(createZeroRows());
+            setReadings(createInitialRows());
           }
         } else {
-          setReadings(createZeroRows());
+          setReadings(createInitialRows());
           setEditedFields({});
           setRecordId(null);
           setInitialSaved(false);
@@ -204,7 +223,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
-        setReadings(createZeroRows());
+        setReadings(createInitialRows());
         setEditedFields({});
         setRecordId(null);
         setInitialSaved(false);
@@ -222,10 +241,17 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── Handle cell change ──
   const handleCellChange = useCallback((id, field, value) => {
-    if (NUMERIC_FIELDS.includes(field) && !isValidInput(value, field)) return;
+    let cleanVal = value;
+    if (typeof cleanVal === 'string' && cleanVal.includes('–')) {
+      const withoutDash = cleanVal.replace(/–/g, '');
+      if (withoutDash !== '') {
+        cleanVal = withoutDash;
+      }
+    }
+    if (NUMERIC_FIELDS.includes(field) && !isValidInput(cleanVal, field)) return;
 
     setReadings((prev) =>
-      prev.map((row) => (row.id === id ? { ...row, [field]: value } : row))
+      prev.map((row) => (row.id === id ? { ...row, [field]: cleanVal } : row))
     );
 
     // Clear validation error if any
@@ -248,13 +274,13 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         id: nextId,
         unit: defaultUnitName,
         time: '',
-        ph: '0',
-        cond: '0',
-        th: '0',
-        alk: '0',
-        sio2: '0',
-        p: '0',
-        m: '0',
+        ph: '–',
+        cond: '–',
+        th: '–',
+        alk: '–',
+        sio2: '–',
+        p: '–',
+        m: '–',
         isDefault: false,
         accent: nextIndex % 2 === 1 ? 'blue' : 'indigo',
       },
@@ -274,11 +300,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── Reset ──
   const handleReset = () => {
-    setReadings(createZeroRows());
+    setReadings(createInitialRows());
     setDate(getTodayAsiaKolkata());
     setErrors({});
     setSaveSuccess(false);
-    showToast?.('Values reset to zero.', 'info');
+    showToast?.('Values reset to initial unentered state.', 'info');
   };
 
   // ── Validate ──
@@ -289,10 +315,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     readings.forEach((row) => {
       NUMERIC_FIELDS.forEach((field) => {
         const val = row[field];
-        if (val !== '' && val !== null && val !== undefined) {
+        if (val !== '' && val !== null && val !== undefined && val !== '–' && val !== '-') {
           if (field === 'th') {
             const s = String(val).toLowerCase();
-            if (s === 'nil' || s === 'none' || s === '-' || !isNaN(Number(val))) {
+            if (s === 'nil' || s === 'none' || s === '-' || s === '–' || !isNaN(Number(val))) {
               return;
             }
           }
@@ -317,7 +343,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     }
 
     const hasAnyValue = readings.some((row) =>
-      NUMERIC_FIELDS.some((field) => row[field] !== '' && row[field] !== null && row[field] !== undefined)
+      NUMERIC_FIELDS.some((field) => {
+        const v = row[field];
+        return v !== '' && v !== null && v !== undefined && v !== '–' && v !== '-';
+      })
     );
 
     if (!hasAnyValue) {
@@ -328,11 +357,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     // Build summary items
     const summaryItems = [];
     readings.forEach((r) => {
-      if (r.ph) summaryItems.push({ label: `${r.unit} pH`, value: r.ph });
-      if (r.cond) summaryItems.push({ label: `${r.unit} Cond`, value: r.cond });
-      if (r.th) summaryItems.push({ label: `${r.unit} TH`, value: r.th });
-      if (r.alk) summaryItems.push({ label: `${r.unit} Alk`, value: r.alk });
-      if (r.sio2) summaryItems.push({ label: `${r.unit} SiO₂`, value: r.sio2 });
+      if (r.ph && r.ph !== '–' && r.ph !== '-') summaryItems.push({ label: `${r.unit} pH`, value: r.ph });
+      if (r.cond && r.cond !== '–' && r.cond !== '-') summaryItems.push({ label: `${r.unit} Cond`, value: r.cond });
+      if (r.th && r.th !== '–' && r.th !== '-') summaryItems.push({ label: `${r.unit} TH`, value: r.th });
+      if (r.alk && r.alk !== '–' && r.alk !== '-') summaryItems.push({ label: `${r.unit} Alk`, value: r.alk });
+      if (r.sio2 && r.sio2 !== '–' && r.sio2 !== '-') summaryItems.push({ label: `${r.unit} SiO₂`, value: r.sio2 });
     });
 
     setConfirmData({
@@ -354,8 +383,15 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       unit: 'DM Water',
       readings: readings.map((r) => ({
         ...r,
-        p: r.p !== undefined && r.p !== '' ? r.p : '0',
-        m: r.alk !== undefined && r.alk !== '' ? r.alk : (r.m || '0'),
+        ph: r.ph === '–' || r.ph === '-' ? '' : r.ph,
+        cond: r.cond === '–' || r.cond === '-' ? '' : r.cond,
+        th: r.th === '–' || r.th === '-' ? '' : r.th,
+        alk: r.alk === '–' || r.alk === '-' ? '' : r.alk,
+        sio2: r.sio2 === '–' || r.sio2 === '-' ? '' : r.sio2,
+        p: r.p !== undefined && r.p !== '' && r.p !== '–' && r.p !== '-' ? r.p : '0',
+        m: r.alk !== undefined && r.alk !== '' && r.alk !== '–' && r.alk !== '-'
+          ? r.alk
+          : (r.m && r.m !== '–' && r.m !== '-' ? r.m : '0'),
       })),
       submittedBy: user?.name || 'Shift Chemist',
     };
@@ -377,13 +413,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         setRecipientEmail(response.data.emailRecipient);
       }
 
-      // Update one-time edit state
-      const nextEdits = initialSaved ? editCount + 1 : 0;
       setInitialSaved(true);
-      setEditCount(nextEdits);
-      if (initialSaved || nextEdits >= 1) {
-        setIsLocked(true);
-      }
+      setEditCount((prev) => prev + 1);
+      setIsLocked(false);
 
       const emailStatus = response.data?.emailStatus;
       if (emailStatus === 'sent' || response.data?.emailSent) {
@@ -450,19 +482,42 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="dmwater-locked-date" />
+            {/* Interactive Date Picker for Date Isolation & Safe Navigation */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+              <label
+                htmlFor="dmwater-date-picker"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="dmwater-date-picker"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  title="Select date to view or enter DM Water analysis"
+                />
+              </div>
+              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                {formatDateDisplay(date)}
+              </span>
+            </div>
 
             <RecordStatusBadge
-              status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
-              subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+              status={initialSaved ? 'SAVED' : 'NEW'}
+              subLabel={initialSaved ? 'saved record' : 'unsaved'}
             />
 
             <button
               id="btn-dm-reset"
               onClick={handleReset}
-              disabled={saving || isLocked}
+              disabled={saving}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-              title="Reset to default reference values"
+              title="Reset to default unentered values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
@@ -472,7 +527,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               <StatusSaveButton
                 id="btn-dm-save"
                 saving={saving}
-                isLocked={isLocked}
+                isLocked={false}
                 savePhase={savePhase}
                 onClick={handleSaveClick}
                 title="Save DM Water analysis"
@@ -639,10 +694,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     {/* 1. pH: Direct Valid Range 7.0 – 9.5 */}
                     <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const valRes = validateCellValue(row.ph, PH_LIMIT);
-                        const hasVal = row.ph !== '' && row.ph !== null && row.ph !== undefined;
-                        const isOutOfLimit = valRes.isOutOfLimit;
-                        const isNormal = valRes.isNormal;
+                        const valRes = validateCellValue(row.ph === '–' ? '' : row.ph, PH_LIMIT);
+                        const hasVal = row.ph !== '' && row.ph !== null && row.ph !== undefined && row.ph !== '–' && row.ph !== '-';
+                        const isOutOfLimit = hasVal && valRes.isOutOfLimit;
+                        const isNormal = hasVal && valRes.isNormal;
 
                         return (
                           <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
@@ -653,6 +708,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 inputMode="decimal"
                                 value={row.ph}
                                 onChange={(e) => handleCellChange(row.id, 'ph', e.target.value)}
+                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="7.0 – 9.5"
                                 title={
                                   hasVal
@@ -664,14 +720,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
                                   errors[`${row.id}_ph`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
-                                    : isOutOfLimit
+                                    : hasVal && isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
                                     : hasVal && isNormal
                                     ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
                                     : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
                                 }`}
                               />
-                              {isOutOfLimit && (
+                              {hasVal && isOutOfLimit && (
                                 <span
                                   className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
                                   title="Out of limit: 7.0 – 9.5"
@@ -709,10 +765,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     {/* 2. Cond: Target 10 umho/cm, Tolerance ±5 -> Valid Range 5 – 15 umho/cm */}
                     <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const valRes = validateCellValue(row.cond, COND_LIMIT);
-                        const hasVal = row.cond !== '' && row.cond !== null && row.cond !== undefined;
-                        const isOutOfLimit = valRes.isOutOfLimit;
-                        const isNormal = valRes.isNormal;
+                        const valRes = validateCellValue(row.cond === '–' ? '' : row.cond, COND_LIMIT);
+                        const hasVal = row.cond !== '' && row.cond !== null && row.cond !== undefined && row.cond !== '–' && row.cond !== '-';
+                        const isOutOfLimit = hasVal && valRes.isOutOfLimit;
+                        const isNormal = hasVal && valRes.isNormal;
 
                         return (
                           <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
@@ -723,6 +779,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 inputMode="decimal"
                                 value={row.cond}
                                 onChange={(e) => handleCellChange(row.id, 'cond', e.target.value)}
+                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="5 – 15"
                                 title={
                                   hasVal
@@ -734,14 +791,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
                                   errors[`${row.id}_cond`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
-                                    : isOutOfLimit
+                                    : hasVal && isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
                                     : hasVal && isNormal
                                     ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
                                     : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100'
                                 }`}
                               />
-                              {isOutOfLimit && (
+                              {hasVal && isOutOfLimit && (
                                 <span
                                   className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
                                   title="Out of limit: 5 – 15 umho/cm"
@@ -779,7 +836,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     {/* 3. TH: Limit Nil (Keep input field available, treat Nil exactly as provided) */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const hasVal = row.th !== '' && row.th !== null && row.th !== undefined;
+                        const hasVal = row.th !== '' && row.th !== null && row.th !== undefined && row.th !== '–' && row.th !== '-';
 
                         return (
                           <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
@@ -788,6 +845,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                               type="text"
                               value={row.th}
                               onChange={(e) => handleCellChange(row.id, 'th', e.target.value)}
+                              onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                               placeholder="Nil"
                               title="Limit: Nil"
                               className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
@@ -815,10 +873,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     {/* 4. Alk: Target 5 ppm, Tolerance ±4 -> Valid Range 1 – 9 ppm */}
                     <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const valRes = validateCellValue(row.alk, ALK_LIMIT);
-                        const hasVal = row.alk !== '' && row.alk !== null && row.alk !== undefined;
-                        const isOutOfLimit = valRes.isOutOfLimit;
-                        const isNormal = valRes.isNormal;
+                        const valRes = validateCellValue(row.alk === '–' ? '' : row.alk, ALK_LIMIT);
+                        const hasVal = row.alk !== '' && row.alk !== null && row.alk !== undefined && row.alk !== '–' && row.alk !== '-';
+                        const isOutOfLimit = hasVal && valRes.isOutOfLimit;
+                        const isNormal = hasVal && valRes.isNormal;
 
                         return (
                           <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
@@ -829,6 +887,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 inputMode="decimal"
                                 value={row.alk}
                                 onChange={(e) => handleCellChange(row.id, 'alk', e.target.value)}
+                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="1 – 9"
                                 title={
                                   hasVal
@@ -840,14 +899,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
                                   errors[`${row.id}_alk`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
-                                    : isOutOfLimit
+                                    : hasVal && isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
                                     : hasVal && isNormal
                                     ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
                                     : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
                                 }`}
                               />
-                              {isOutOfLimit && (
+                              {hasVal && isOutOfLimit && (
                                 <span
                                   className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
                                   title="Out of limit: 1 – 9 ppm"
@@ -885,10 +944,10 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     {/* 5. SiO2: Reference 0.20 ppm, Tolerance ±5 (Preserved exactly as given) */}
                     <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const valRes = validateCellValue(row.sio2, SIO2_LIMIT);
-                        const hasVal = row.sio2 !== '' && row.sio2 !== null && row.sio2 !== undefined;
-                        const isOutOfLimit = valRes.isOutOfLimit;
-                        const isNormal = valRes.isNormal;
+                        const valRes = validateCellValue(row.sio2 === '–' ? '' : row.sio2, SIO2_LIMIT);
+                        const hasVal = row.sio2 !== '' && row.sio2 !== null && row.sio2 !== undefined && row.sio2 !== '–' && row.sio2 !== '-';
+                        const isOutOfLimit = hasVal && valRes.isOutOfLimit;
+                        const isNormal = hasVal && valRes.isNormal;
 
                         return (
                           <div className="flex flex-col items-center gap-1 w-full max-w-[200px] 2xl:max-w-[260px] mx-auto">
@@ -899,6 +958,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 inputMode="decimal"
                                 value={row.sio2}
                                 onChange={(e) => handleCellChange(row.id, 'sio2', e.target.value)}
+                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="0.20 ± 5"
                                 title={
                                   hasVal
@@ -910,14 +970,14 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
                                   errors[`${row.id}_sio2`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
-                                    : isOutOfLimit
+                                    : hasVal && isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
                                     : hasVal && isNormal
                                     ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
                                     : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'
                                 }`}
                               />
-                              {isOutOfLimit && (
+                              {hasVal && isOutOfLimit && (
                                 <span
                                   className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-3.5 h-3.5 shadow-xs flex items-center justify-center pointer-events-none"
                                   title="Out of limit: 0.20 ± 5 ppm"

@@ -511,7 +511,7 @@ const UserManagementPage = () => {
                       {u.plant ? (
                         <span className="inline-flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px]">
                           <Factory className="w-3 h-3 text-blue-600" />
-                          {u.plant.name}
+                          {u.plant?.name || (typeof u.plant === 'string' ? (plants.find((p) => (p._id || p.id) === u.plant)?.name || u.plant) : 'Unassigned')}
                         </span>
                       ) : (
                         <span className="text-slate-400 font-italic">Unassigned</span>

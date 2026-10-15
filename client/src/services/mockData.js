@@ -99,8 +99,8 @@ export const MOCK_PLANTS = [
   {
     _id: 'plant_offsite',
     company: { _id: 'company_tfl', name: 'TFL', code: 'TFL' },
-    name: 'OFFSET Plant',
-    code: 'OFFSET',
+    name: 'OFFSITE Plant',
+    code: 'OFFSITE',
     description: 'Utility, water treatment, effluent management, and warehousing operations.',
     status: 'operational',
     capacity: 100,
