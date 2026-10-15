@@ -176,12 +176,139 @@ router.get('/smtp-diagnostic', async (req, res) => {
     transporterVerify: verifyResult,
     emailjsConfig: {
       isConfigured: Boolean(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && (process.env.EMAILJS_PUBLIC_KEY || process.env.EMAILJS_USER_ID)),
-      serviceId: process.env.EMAILJS_SERVICE_ID ? maskEmail(process.env.EMAILJS_SERVICE_ID) : 'NOT_CONFIGURED',
-      templateId: process.env.EMAILJS_TEMPLATE_ID ? maskEmail(process.env.EMAILJS_TEMPLATE_ID) : 'NOT_CONFIGURED',
+      serviceId: process.env.EMAILJS_SERVICE_ID ? (process.env.EMAILJS_SERVICE_ID.slice(0, 4) + '***' + process.env.EMAILJS_SERVICE_ID.slice(-3)) : 'NOT_CONFIGURED',
+      templateId: process.env.EMAILJS_TEMPLATE_ID ? (process.env.EMAILJS_TEMPLATE_ID.slice(0, 4) + '***' + process.env.EMAILJS_TEMPLATE_ID.slice(-3)) : 'NOT_CONFIGURED',
       hasPublicKey: Boolean(process.env.EMAILJS_PUBLIC_KEY || process.env.EMAILJS_USER_ID),
       hasPrivateKey: Boolean(process.env.EMAILJS_PRIVATE_KEY || process.env.EMAILJS_ACCESS_TOKEN),
     },
   });
+});
+
+/**
+ * @desc    Send one controlled test email to a designated test recipient via EmailJS
+ * @route   POST /api/dm-water-analysis/test-emailjs
+ * @access  Public / Safe Controlled Test
+ */
+router.post('/test-emailjs', async (req, res) => {
+  try {
+    const targetRecipient = (req.body?.recipient || 'naveensamraj2003@gmail.com').trim();
+    if (!targetRecipient || !targetRecipient.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Invalid recipient email' });
+    }
+
+    // 1. Fetch confirmed saved DM Water record from MongoDB Atlas
+    const dmDoc = await PlantAnalysisRecord.findOne({
+      analysisType: { $in: ['Analysis For DM Water / Anion unit', 'DM Water Analysis'] },
+      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+    }).sort({ createdAt: -1 });
+
+    if (!dmDoc) {
+      return res.status(404).json({ success: false, message: 'No DM Water record found in MongoDB' });
+    }
+
+    const readings = dmDoc.data?.readings || [];
+    const formatVal = (v) => (v !== null && v !== undefined && v !== '' && v !== '–' && v !== '-' ? String(v) : '—');
+
+    // 2. Build readable HTML observation table
+    const htmlTable = `
+      <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px;">
+        <thead>
+          <tr style="background-color: #0369a1; color: #ffffff;">
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #bae6fd;">Unit / Stream</th>
+            <th style="padding: 8px 10px; text-align: center; border: 1px solid #bae6fd;">Time</th>
+            <th style="padding: 8px 10px; text-align: center; border: 1px solid #bae6fd;">pH</th>
+            <th style="padding: 8px 10px; text-align: center; border: 1px solid #bae6fd;">Cond (µS/cm)</th>
+            <th style="padding: 8px 10px; text-align: center; border: 1px solid #bae6fd;">Alk (ppm)</th>
+            <th style="padding: 8px 10px; text-align: center; border: 1px solid #bae6fd;">SiO2 (ppm)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${readings.map((r, idx) => `
+            <tr style="background-color: ${idx % 2 === 1 ? '#f0f9ff' : '#ffffff'};">
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; font-weight: 700; color: #0c4a6e;">${r.unit || `Row ${idx + 1}`}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; text-align: center; color: #334155;">${formatVal(r.time)}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; text-align: center; font-weight: 700; color: #0369a1;">${formatVal(r.ph)}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.cond)}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.alk || r.m)}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e0f2fe; text-align: center; font-weight: 700; color: #0f172a;">${formatVal(r.sio2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: Arial, sans-serif; background-color: #f1f5f9; padding: 20px;">
+        <div style="max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
+          <div style="background-color: #0369a1; padding: 18px 24px; color: #ffffff;">
+            <h2 style="margin: 0; font-size: 18px;">OFFSITE Plant — DM Water Analysis Saved</h2>
+            <p style="margin: 4px 0 0; font-size: 13px; opacity: 0.9;">SPIC / TFL Plant Management System</p>
+          </div>
+          <div style="padding: 20px 24px;">
+            <p><strong>Analysis:</strong> DM Water Analysis</p>
+            <p><strong>Date:</strong> ${dmDoc.date}</p>
+            <p><strong>Record ID:</strong> <code>${dmDoc._id}</code></p>
+            <h4 style="margin: 16px 0 6px; color: #0f2e5a;">Analytical Observations</h4>
+            ${htmlTable}
+            <div style="margin-top: 20px; padding: 10px 14px; background-color: #ecfdf5; border-left: 4px solid #10b981; font-size: 13px; color: #065f46;">
+              ✅ Confirmed saved in MongoDB Atlas. Email notification delivered via EmailJS HTTPS API (zero Excel attachments).
+            </div>
+          </div>
+          <div style="background-color: #f8fafc; padding: 12px 24px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+            Sent to designated test recipient (${targetRecipient}).
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const textBody = `Company: SPIC / TFL
+Plant: OFFSITE Plant
+Analysis: DM Water Analysis
+Analysis Date: ${dmDoc.date}
+Record ID: ${dmDoc._id}
+Readings:
+${readings.map(r => ` - ${r.unit}: pH=${formatVal(r.ph)}, Cond=${formatVal(r.cond)}, Alk=${formatVal(r.alk || r.m)}, SiO2=${formatVal(r.sio2)}`).join('\n')}
+Status: Saved Successfully (EmailJS HTTPS API - No Excel Attachment)
+`;
+
+    // 3. Dispatch to ONLY the single designated test recipient
+    const { sendEmailJSOffsiteNotification } = require('../services/emailjsService');
+    const start = Date.now();
+    const result = await sendEmailJSOffsiteNotification({
+      recipientEmails: [targetRecipient],
+      plantName: 'OFFSITE Plant',
+      analysisType: 'DM Water Analysis',
+      date: dmDoc.date,
+      shift: 'Day',
+      htmlBody,
+      textBody,
+      htmlTable,
+      subject: `[OFFSITE Plant] DM Water Analysis Saved - ${dmDoc.date} (EmailJS Test)`,
+      recordId: String(dmDoc._id),
+      saveEventId: `test_emailjs_${Date.now()}`,
+      isTestMode: false,
+    });
+    const elapsed = Date.now() - start;
+
+    return res.status(result.success ? 200 : 502).json({
+      success: result.success,
+      elapsedMs: elapsed,
+      provider: result.provider || 'EmailJS',
+      recipient: targetRecipient,
+      messageId: result.messageId,
+      error: result.error,
+      hasExcelAttachment: false,
+      recordId: dmDoc._id,
+      analysisDate: dmDoc.date,
+      readingsSummary: readings.map(r => ({ unit: r.unit, ph: r.ph, cond: r.cond, alk: r.alk || r.m, sio2: r.sio2 })),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Apply authentication middleware
