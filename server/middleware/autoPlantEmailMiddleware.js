@@ -146,7 +146,8 @@ const autoPlantEmailMiddleware = (req, res, next) => {
     url.includes('/sewar-water') ||
     url.includes('/cooling-water') ||
     url.includes('/notify-update') ||
-    url.includes('/retry-email')
+    url.includes('/retry-email') ||
+    url.includes('/test-emailjs')
   ) {
     return next();
   }
