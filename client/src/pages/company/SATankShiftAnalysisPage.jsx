@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
 import api from "../../services/api";
-import { ArrowLeft, Calendar, Save, RotateCcw, CheckCircle2, AlertCircle, ChevronRight, Flame, Database } from "lucide-react";
+import { ArrowLeft, Calendar, Save, RotateCcw, CheckCircle2, AlertCircle, ChevronRight, Flame, Database } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 const SHIFTS = [
   { key: "s1", label: "I", title: "I Shift (07:00 - 15:00)", rowClass: "bg-sky-50/40 hover:bg-sky-100/60 border-l-4 border-l-blue-600", badgeClass: "bg-sky-100 text-sky-800 border-sky-300", inputFocus: "border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900 font-bold hover:border-slate-400" },
@@ -39,6 +40,9 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [dateError, setDateError] = useState(false);
 
   // Fetch existing data when date changes
@@ -82,6 +86,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
     setData((prev) => ({ ...prev, [shiftKey]: { ...prev[shiftKey], [paramKey]: value } }));
     setErrors((prev) => { const next = { ...prev }; delete next[shiftKey + "_" + paramKey]; return next; });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, []);
 
   const handleReset = useCallback(() => {
@@ -89,6 +94,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
     setErrors({});
     setDateError(false);
     setSaveSuccess(false);
+    setSavePhase('idle');
     showToast(tankName + " form cleared successfully.", "info");
   }, [showToast, parameters, tankName]);
 
@@ -110,15 +116,34 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
     if (!validateForm()) { showToast("Please correct highlighted errors before saving.", "error"); return; }
     const hasData = SHIFTS.some((s) => parameters.some((p) => data[s.key][p.key] !== ""));
     if (!hasData) { showToast("Please enter at least one measurement value.", "warning"); return; }
-    setSaving(true); setSaveSuccess(false);
+    setSaving(true);
+    setSaveSuccess(false);
+    setSavePhase('saving');
     try {
       const payload = { date, plant: "SA", analysisType: tankName + " Analysis", tank: tankName, shifts: data, submittedBy: user?.name || "Plant Operator" };
       const response = await api.post("/api/" + tankKey + "-analysis", payload);
+      const isEmailSent = response.data?.emailNotification?.status === 'sent' ||
+                          response.data?.emailDeliveryStatus === 'delivered' ||
+                          response.data?.emailDeliveryStatus === 'sent';
+      const isEmailFailed = response.data?.emailNotification?.status === 'failed' ||
+                            response.data?.emailDeliveryStatus === 'failed';
+      const recipient = response.data?.emailNotification?.recipient ||
+                        response.data?.notificationRecipient ||
+                        response.data?.recipientEmail ||
+                        response.data?.emailRecipient ||
+                        response.data?.recipient || '';
+      setRecipientEmail(recipient);
+      setEmailStatusDetail(response.data?.emailNotification?.error || response.data?.emailStatus || '');
       setSaveSuccess(true);
+      setSavePhase(isEmailFailed ? 'email_failed' : 'completed');
       showToast(response.data?.message || tankName + " Analysis data saved successfully!", "success");
     } catch (err) {
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       showToast(err.response?.data?.message || err.response?.data?.errors?.[0] || "Failed to save " + tankName + " Analysis data.", "error");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const displayTitle = tankName.toUpperCase() + " ANALYSIS";
@@ -147,7 +172,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
               </label>
               <div className="relative">
                 <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input id={tankKey + "-date-input"} type="date" value={date} onChange={(e) => { setDate(e.target.value); setDateError(false); setSaveSuccess(false); }} className={"pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white " + (dateError ? "border-red-400 bg-red-50 focus:ring-red-400" : "border-slate-300 hover:border-slate-400")} />
+                <input id={tankKey + "-date-input"} type="date" value={date} onChange={(e) => { setDate(e.target.value); setDateError(false); setSaveSuccess(false); setSavePhase('idle'); }} className={"pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white " + (dateError ? "border-red-400 bg-red-50 focus:ring-red-400" : "border-slate-300 hover:border-slate-400")} />
               </div>
               {date && <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">{formatDateDisplay(date)}</span>}
               {dateError && <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium"><AlertCircle className="w-3 h-3" /> Required</span>}
@@ -157,22 +182,32 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
             <button id={"btn-" + tankKey + "-reset"} onClick={handleReset} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200" title="Clear all fields">
               <RotateCcw className="w-3.5 h-3.5" /><span>Reset</span>
             </button>
-            <button id={"btn-" + tankKey + "-save"} onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60" title={"Save " + tankName + " data"}>
-              {saving ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              <span>{saving ? "Saving..." : "Save / Submit"}</span>
-            </button>
+            <StatusSaveButton
+              id={"btn-" + tankKey + "-save"}
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
+              onClick={handleSave}
+              defaultLabel="Save / Submit"
+              title={"Save " + tankName + " data"}
+            />
           </div>
         </div>
       </div>
-      {saveSuccess && (
-        <div id={tankKey + "-success-banner"} className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs"><span className="font-bold text-emerald-800">Analysis Saved Successfully:</span>{" "}
-            <span className="text-emerald-700">{tankName} Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.</span>
-          </div>
-          <button onClick={() => setSaveSuccess(false)} className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0" aria-label="Dismiss">x</button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id={tankKey + "-success-banner"}
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName={tankName + " Analysis"}
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
         <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
           <div className="flex items-center gap-2">

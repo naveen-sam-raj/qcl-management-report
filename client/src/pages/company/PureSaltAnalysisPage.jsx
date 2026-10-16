@@ -9,6 +9,7 @@ import {
   validateCellValue,
   validateFullDataset,
 } from '../../services/analysisValidation';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
   ArrowLeft,
   Calendar,
@@ -251,6 +252,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
     // Clear global success on any edit
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [lockedShifts, activeEditingShift]);
 
   const handleReset = () => {
@@ -471,22 +473,21 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       setSavePhase('emailing');
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Stage 4: Final Status Messaging (Section 3, 9 & 12)
-      if (response.data.emailSent || response.data.emailStatus === 'processing' || response.data.success) {
+      // Stage 4: Final Status Messaging (truthful save & email outcome)
+      const emailSent = Boolean(response.data?.emailSent || response.data?.emailStatus === 'sent');
+      if (response.data?.emailRecipient) {
+        setRecipientEmail(response.data.emailRecipient);
+      }
+      setSaveSuccess(true);
+      if (emailSent) {
         setSavePhase('completed');
-        setSaveSuccess(true);
-        showToast(response.data.message || 'Saved & Emailed Successfully ✓', 'success');
-
-        // Reset phase back to idle after feedback display
-        setTimeout(() => {
-          setSavePhase('idle');
-        }, 3000);
+        showToast(response.data.message || 'Saved — Email Sent ✓', 'success');
       } else {
-        // MongoDB save succeeded, but email sending failed
         setSavePhase('email_failed');
-        setSaveSuccess(true);
-        const warnMsg = response.data.message || 'Data saved and Excel generated, but email sending failed.';
-        showToast(warnMsg, 'warning');
+        showToast(
+          response.data?.message || 'Data saved to database, but email delivery failed.',
+          'warning'
+        );
       }
     } catch (err) {
       setSavePhase('idle');
@@ -553,6 +554,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                   onChange={(e) => {
                     setDate(e.target.value);
                     setSaveSuccess(false);
+                    setSavePhase('idle');
                   }}
                   className="pl-2.5 pr-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700 bg-white shadow-2xs hover:border-slate-400 transition"
                   required
@@ -582,52 +584,14 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                   <span>Reset</span>
                 </button>
 
-                {savePhase === 'email_failed' && (
-                  <button
-                    id="btn-psa-retry-email"
-                    type="button"
-                    onClick={handleRetryEmail}
-                    disabled={saving}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition shadow-2xs cursor-pointer"
-                    title="Retry sending report email with attached Excel file"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${saving ? 'animate-spin' : ''}`} />
-                    <span>Retry Email</span>
-                  </button>
-                )}
-
-                <button
+                <StatusSaveButton
                   id="btn-psa-save"
+                  saving={saving}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-75 cursor-pointer ${
-                    savePhase === 'completed'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : savePhase === 'email_failed'
-                      ? 'bg-slate-700 hover:bg-slate-800'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
                   title="Save analysis data and dispatch automated Excel report"
-                >
-                  {saving ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
-                  ) : savePhase === 'completed' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  ) : (
-                    <Save className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>
-                    {savePhase === 'saving'
-                      ? 'Saving...'
-                      : savePhase === 'generating'
-                      ? 'Generating Report...'
-                      : savePhase === 'emailing'
-                      ? 'Sending Email...'
-                      : savePhase === 'completed'
-                      ? 'Saved & Emailed Successfully ✓'
-                      : 'Save / Submit'}
-                  </span>
-                </button>
+                />
               </div>
             ) : (
               <div className="flex items-center gap-2 shrink-0">
@@ -642,61 +606,21 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Status Banner (Success or Partial Email Failure) ────────────────── */}
-      {saveSuccess && (
-        <div
-          id="psa-status-banner"
-          className={`flex items-start gap-3 p-3 rounded-xl border shadow-xs animate-fadeIn ${
-            savePhase === 'email_failed'
-              ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          }`}
-        >
-          {savePhase === 'email_failed' ? (
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          )}
-          <div className="text-xs flex-1">
-            <div className="font-bold">
-              {savePhase === 'email_failed'
-                ? 'Data saved and Excel generated, but email sending failed.'
-                : 'Saved & Emailed Successfully ✓'}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-600 text-[11px]">
-              <span>
-                Pure Salt Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
-              </span>
-              {lastExcelData?.fileName && (
-                <span className="inline-flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  <FileSpreadsheet className="w-3 h-3 text-blue-600" />
-                  <span>Attached: {lastExcelData.fileName}</span>
-                </span>
-              )}
-              {recipientEmail && (
-                <span className="text-slate-500">
-                  Recipient: <strong>{recipientEmail}</strong>
-                </span>
-              )}
-            </div>
-          </div>
-          {savePhase === 'email_failed' && (
-            <button
-              onClick={handleRetryEmail}
-              disabled={saving}
-              className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 rounded border border-amber-400/50 transition cursor-pointer shrink-0"
-            >
-              Retry Email
-            </button>
-          )}
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="text-slate-400 hover:text-slate-600 transition text-base leading-none shrink-0"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="psa-status-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Pure Salt Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={savePhase === 'email_failed' ? 'Email delivery failed' : ''}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

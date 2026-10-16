@@ -18,6 +18,7 @@ import {
   Factory,
   Database,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── SA Plant TK 419 Parameters & Validation Limits ──────────────────────────
 // Plant: SA Plant
@@ -141,6 +142,9 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
   const [errors, setErrors]           = useState({});
   const [saving, setSaving]           = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [dateError, setDateError]     = useState(false);
 
   // Fetch existing data when date changes
@@ -197,6 +201,7 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
       return next;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, []);
 
   // ── Reset form ──
@@ -362,49 +367,35 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
               <span>Reset</span>
             </button>
 
-            <button
+            <StatusSaveButton
               id="btn-tk419-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
               onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60"
+              defaultLabel="Save / Submit"
               title="Save TK 419 data"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
+            />
           </div>
           </div>
         </div>
       </div>
 
       {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && (
-        <div
-          id="tk419-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              TK 419 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
-          </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="tk419-success-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="TK 419 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">

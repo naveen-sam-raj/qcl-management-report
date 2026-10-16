@@ -19,6 +19,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── Raw Salt Chemical Parameters ─────────────────────────────────────────────
 
@@ -202,6 +203,7 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
     });
 
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [canEdit]);
 
   // ── Reset Handler ──
@@ -214,6 +216,7 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
     }
     setErrors({});
     setSaveSuccess(false);
+    setSavePhase('idle');
     showToast?.('Raw Salt analysis form reset.', 'info');
   }, [canEdit, originalFormData, showToast]);
 
@@ -326,7 +329,8 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
         }
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[RawSaltAnalysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -455,30 +459,17 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
               )}
 
               {!isViewOnly && (
-                <button
+                <StatusSaveButton
                   id="btn-rawsalt-save"
+                  saving={saving || emailRetrying}
+                  isLocked={isLocked}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving || emailRetrying || !canEdit}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+                  disabled={!canEdit}
+                  defaultLabel={editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}
                   title="Save Raw Salt Data"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : isLocked ? (
-                    <>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Locked</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>{editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}</span>
-                    </>
-                  )}
-                </button>
+                />
               )}
             </div>
           </div>
@@ -486,73 +477,21 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Status Banner for Email Dispatch State ── */}
-      {savePhase === 'completed' && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-emerald-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Sent ✓</span>
-              <span className="text-emerald-700 ml-1.5">
-                Delivered to registered ACL operator ({recipientEmail || 'assigned user'}).
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
-            {emailStatusDetail}
-          </span>
-        </div>
-      )}
-
-      
-
-      {savePhase === 'email_failed' && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between text-rose-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Failed</span>
-              <span className="text-rose-700 ml-1.5">
-                Analysis data is safely saved in the database, but email delivery to{' '}
-                <strong>{recipientEmail || 'operator'}</strong> encountered an issue: {emailStatusDetail}
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={handleRetryEmail}
-            disabled={emailRetrying}
-            className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition shadow-2xs cursor-pointer shrink-0 disabled:opacity-60"
-            title="Retry sending notification email"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${emailRetrying ? 'animate-spin' : ''}`} />
-            <span>{emailRetrying ? 'Retrying...' : 'Retry Email'}</span>
-          </button>
-        </div>
-      )}
-
-      {/* ── Success Banner ─────────────────────────────────────────────────── */}
-      {saveSuccess && savePhase !== 'email_failed' && savePhase !== 'completed' && (
-        <div
-          id="rawsalt-success-banner"
-          className="flex items-start gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl shadow-xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <span className="font-bold text-emerald-800">
-              Analysis Saved Successfully:
-            </span>{' '}
-            <span className="text-emerald-700">
-              Raw Salt Chemical Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded.
-            </span>
-          </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 transition text-base leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="rawsalt-success-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Raw Salt Chemical Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving || emailRetrying}
+      />
 
       {/* ── Main Data Entry Section ────────────────────────────────────────── */}
       <div className="w-full">

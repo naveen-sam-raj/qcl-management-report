@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Mail,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
   validateCellValue,
   SA_E501_LIMITS,
@@ -440,63 +441,31 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
           )}
 
           {!isViewOnly && (
-            <button
+            <StatusSaveButton
+              id="btn-e501-save"
+              saving={saving}
+              savePhase={savePhase}
               onClick={handleSaveClick}
-              disabled={saving}
-              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
-            >
-              {saving ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save E 501 / T 501 Data</span>
-                </>
-              )}
-            </button>
+              defaultLabel="Save E 501 / T 501 Data"
+              title="Save E 501 / T 501 observations"
+            />
           )}
         </div>
       </div>
 
       {/* ── Status Banner (Email / Save Status) ── */}
-      {savePhase === 'completed' && (
-        <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-2xs">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>
-              <strong>Saved — Email Sent</strong>: {emailStatusDetail || `Notification sent to registered SA Plant Operator (${recipientEmail || 'operator'}).`}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {savePhase === 'email_failed' && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <div>
-              <span><strong>Saved — Email Failed</strong>: Database record persisted. {emailStatusDetail}</span>
-              {recipientEmail && <span className="block text-[11px] text-amber-700 font-normal">Target recipient: {recipientEmail}</span>}
-            </div>
-          </div>
-          <button
-            onClick={handleRetryEmail}
-            disabled={retryingEmail || isPermanentMailError}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs shrink-0 ${
-              isPermanentMailError
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                : 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer'
-            }`}
-            title={isPermanentMailError ? 'Permanent recipient rejection. Update recipient in User Management.' : 'Retry sending notification email'}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
-            <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="e501-status-banner"
+        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        savePhase={savePhase}
+        date={date}
+        analysisName="E 501 / T 501 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSavePhase('idle')}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── MAIN ANALYSIS TABLE ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -1242,7 +1211,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Recipient Operator:</span>
-                  <span className="font-bold text-slate-800">{recipientEmail || 'sa_operator@tfl.com'}</span>
+                  <span className="font-bold text-slate-800">{recipientEmail || ''}</span>
                 </div>
               </div>
               <p className="text-[11px] text-slate-500">

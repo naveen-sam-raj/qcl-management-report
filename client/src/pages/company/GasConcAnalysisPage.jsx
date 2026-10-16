@@ -24,6 +24,7 @@ import {
   X,
   AlertTriangle,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
   validateCellValue,
   SA_GAS_CONC_LIMITS,
@@ -108,6 +109,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
   const [recordId, setRecordId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [retryingEmail, setRetryingEmail] = useState(false);
   const [errors, setErrors] = useState({});
   const [lastSavedTime, setLastSavedTime] = useState(null);
@@ -130,7 +132,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
 
   // Email state
   const [emailStatus, setEmailStatus] = useState(null); // 'sent' | 'pending' | 'failed' | null
-  const [emailRecipient, setEmailRecipient] = useState('sa_operator@tfl.com');
+  const [emailRecipient, setEmailRecipient] = useState('');
   const [emailMessage, setEmailMessage] = useState('');
 
   // Save confirmation modal
@@ -205,7 +207,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         setEditedFields(d.editedFields || {});
         setEditAuditHistory(d.editAuditHistory || []);
         setEmailStatus(d.emailStatus || null);
-        setEmailRecipient(d.emailRecipient || res.data.assignedOperatorEmail || 'sa_operator@tfl.com');
+        setEmailRecipient(d.emailRecipient || res.data.assignedOperatorEmail || '');
       } else {
         // Initialize clean record for today
         setRecordId(null);
@@ -222,7 +224,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         setEditedFields({});
         setEditAuditHistory([]);
         setEmailStatus(null);
-        setEmailRecipient(res.data?.assignedOperatorEmail || 'sa_operator@tfl.com');
+        setEmailRecipient(res.data?.assignedOperatorEmail || '');
       }
     } catch (err) {
       console.warn('[GasConc] Fetch warning:', err.message);
@@ -405,7 +407,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         }
 
         setEmailStatus(res.data.emailDeliveryStatus || res.data.emailStatus || 'sent');
-        setEmailRecipient(res.data.emailRecipient || 'sa_operator@tfl.com');
+        setEmailRecipient(res.data.emailRecipient || '');
         setEmailMessage(res.data.message || 'Gas Conc. Analysis saved successfully!');
         setLastSavedTime(new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }));
 
@@ -415,6 +417,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       }
     } catch (err) {
       console.error('[GasConc] Save error:', err);
+      setSaveSuccess(false);
       const errMsg = err.response?.data?.message || err.message || 'Failed to save analysis.';
       showToast?.(errMsg, 'error');
     } finally {
@@ -564,20 +567,16 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             </button>
 
             {/* Save / Submit Button */}
-            <button
+            <StatusSaveButton
               id="btn-gas-conc-save"
+              saving={saving}
+              savePhase={emailStatus === 'failed' ? 'email_failed' : (emailStatus === 'sent' || saveSuccess) ? 'completed' : 'idle'}
+              saveSuccess={saveSuccess}
               onClick={handleInitiateSave}
-              disabled={loading || saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+              disabled={loading}
+              defaultLabel="Save / Submit"
               title="Save Gas Conc. observations with sequential shift-locking"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -638,67 +637,21 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* ── EMAIL NOTIFICATION STATUS BANNER ── */}
-      {emailStatus && (
-        <div
-          id="gas-conc-email-banner"
-          className={`p-3.5 rounded-xl border shadow-xs animate-fadeIn flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-            emailStatus === 'sent'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : emailStatus === 'failed'
-              ? 'bg-rose-50 border-rose-200 text-rose-900'
-              : 'bg-blue-50 border-blue-200 text-blue-900'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {emailStatus === 'sent' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            ) : emailStatus === 'failed' ? (
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-            ) : (
-              <Send className="w-5 h-5 text-blue-600 shrink-0 animate-pulse" />
-            )}
-            <div className="text-xs">
-              <span className="font-extrabold">
-                {emailStatus === 'sent'
-                  ? 'Saved — Email Sent:'
-                  : 'Saved — Email Delivery Failed:'}
-              </span>{' '}
-              <span>
-                {emailMessage ||
-                  (emailStatus === 'sent'
-                    ? `Notification and Excel report dispatched to registered SA Plant Operator (${emailRecipient}).`
-                    : `Could not deliver notification to ${emailRecipient}.`)}
-              </span>
-              {lastSavedTime && (
-                <span className="ml-1 text-[11px] opacity-75">Saved at {lastSavedTime} IST.</span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {emailStatus === 'failed' && (
-              <button
-                onClick={handleRetryEmail}
-                disabled={retryingEmail}
-                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:opacity-60 shadow-2xs"
-              >
-                {retryingEmail ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Send className="w-3.5 h-3.5" />
-                )}
-                <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-              </button>
-            )}
-            <button
-              onClick={() => setEmailStatus(null)}
-              className="text-slate-400 hover:text-slate-600 text-xs font-bold px-1"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="gas-conc-email-banner"
+        saveSuccess={saveSuccess || emailStatus === 'sent' || emailStatus === 'failed'}
+        savePhase={emailStatus === 'failed' ? 'email_failed' : (emailStatus === 'sent' || saveSuccess) ? 'completed' : 'idle'}
+        date={selectedDate}
+        analysisName="Gas Conc. Analysis"
+        recipientEmail={emailRecipient}
+        emailStatusDetail={emailMessage}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setEmailStatus(null);
+          setSaveSuccess(false);
+        }}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── DATA ENTRY TABLE CARD ── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">

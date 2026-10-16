@@ -24,6 +24,7 @@ import {
   X,
   Lock,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
   getCellLimit,
   validateCellValue,
@@ -727,7 +728,7 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
 
       setRecordId(newRecordId || recordId);
       setEditedFields(newEdited);
-      const recipient = response.data.emailRecipient || returnedDoc.emailRecipient || 'sa_operator@tfl.com';
+      const recipient = response.data.emailRecipient || returnedDoc.emailRecipient || '';
       setRecipientEmail(recipient);
 
       if (response.data.lockedShifts || returnedDoc.lockedShifts) {
@@ -900,26 +901,15 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
               )}
 
               {!isViewOnly && (
-                <button
+                <StatusSaveButton
                   id="btn-lsa-bagging-save"
+                  saving={saving}
+                  isLocked={allShiftsLocked}
+                  savePhase={savePhase}
                   onClick={handleSaveAllClick}
-                  disabled={saving || allShiftsLocked}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg transition shadow-xs ${
-                    allShiftsLocked
-                      ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60'
-                      : 'text-white bg-blue-600 hover:bg-blue-700 cursor-pointer disabled:opacity-60'
-                  }`}
+                  defaultLabel="Save / Submit"
                   title={allShiftsLocked ? 'All shifts are permanently locked' : 'Save all LSA Bagging changes'}
-                >
-                  {saving ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : allShiftsLocked ? (
-                    <Lock className="w-3.5 h-3.5" />
-                  ) : (
-                    <Save className="w-3.5 h-3.5" />
-                  )}
-                  <span>{saving ? 'Saving...' : allShiftsLocked ? 'All Shifts Locked' : 'Save / Submit'}</span>
-                </button>
+                />
               )}
             </div>
           </div>
@@ -927,69 +917,18 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* ── Status Banner (Email / Save Status) ─────────────────────────────── */}
-      {savePhase !== 'idle' && (
-        <div
-          id="lsa-bagging-status-banner"
-          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
-            savePhase === 'completed'
-              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              : savePhase === 'saving'
-              ? 'bg-blue-50 border-blue-200 text-blue-900'
-              : 'bg-amber-50 border-amber-300 text-amber-900'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {savePhase === 'completed' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            )}
-            <div>
-              <span className="font-bold">
-                {savePhase === 'completed'
-                  ? 'Saved — Email Sent: '
-                  : savePhase === 'saving'
-                  ? 'Saving Data: '
-                  : 'Saved — Email Failed: '}
-              </span>
-              <span>
-                {emailStatusDetail ||
-                  (savePhase === 'completed'
-                    ? `Notification sent to registered SA Plant user (${recipientEmail || 'sa_operator@tfl.com'})`
-                    : 'Saving data to MongoDB...')}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-            {savePhase === 'email_failed' && (
-              <button
-                id="btn-retry-email"
-                type="button"
-                onClick={handleRetryEmail}
-                disabled={retryingEmail}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition shadow-2xs disabled:opacity-50 cursor-pointer"
-                title="Retry sending notification email without re-saving"
-              >
-                {retryingEmail ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Mail className="w-3.5 h-3.5" />
-                )}
-                <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setSavePhase('idle')}
-              className="text-slate-400 hover:text-slate-600 transition text-base leading-none p-1 cursor-pointer"
-              aria-label="Dismiss banner"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="lsa-bagging-status-banner"
+        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        savePhase={savePhase}
+        date={date}
+        analysisName="LSA Bagging Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSavePhase('idle')}
+        saving={saving || retryingEmail}
+      />
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* ── SECTION 1: SHIFT COMPOSITE ANALYSIS (ONCE IN A SHIFT) ─────────────── */}
@@ -1828,7 +1767,7 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
               <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-900 text-[11px]">
                 <Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span>
-                  Notification recipient: <strong>{recipientEmail || 'sa_operator@tfl.com'}</strong> (SA Plant Assigned User)
+                  Notification recipient: <strong>{recipientEmail || ''}</strong> (SA Plant Assigned User)
                 </span>
               </div>
             </div>

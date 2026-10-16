@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Send,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── TK 207 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
 // Frequency: SHIFT TWICE
@@ -333,6 +334,7 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     });
 
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [isShiftDisabled]);
 
   const handleReset = () => {
@@ -343,6 +345,7 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     }
     setErrors({});
     setSaveSuccess(false);
+    setSavePhase('idle');
     showToast('TK 207 analysis form reset.', 'info');
   };
 
@@ -519,7 +522,8 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
         showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[TK207Analysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast('Save Error: ' + serverMessage, 'error');
@@ -683,26 +687,15 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
               )}
 
               {!isViewOnly && (
-                <button
-                  type="button"
+                <StatusSaveButton
                   id="btn-tk207-save"
+                  saving={saving}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-blue-700 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  defaultLabel="Save Shift"
                   title="Save active shift data and notify assigned user"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>Save Shift</span>
-                    </>
-                  )}
-                </button>
+                />
               )}
             </div>
           </div>
@@ -710,55 +703,21 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Status Banner (Persistence & Email Result) ────────────────────────── */}
-      {savePhase !== 'idle' && (
-        <div
-          id="tk207-status-banner"
-          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all shadow-xs ${
-            savePhase === 'completed'
-              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              : savePhase === 'saving'
-              ? 'bg-blue-50 border-blue-200 text-blue-900'
-              : 'bg-amber-50 border-amber-300 text-amber-900'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {savePhase === 'completed' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            )}
-            <div>
-              <span className="font-extrabold text-sm">
-                {savePhase === 'completed'
-                  ? 'Saved & Emailed Successfully ✓'
-                  : savePhase === 'saving'
-                  ? 'Saving to MongoDB & preparing notification...'
-                  : 'Saved to Database — Email Delivery Alert ⚠️'}
-              </span>
-              <div className="text-slate-600 mt-0.5 flex items-center gap-2 flex-wrap">
-                {recipientEmail && (
-                  <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
-                    <Mail className="w-3 h-3 text-slate-500" />
-                    Recipient: {recipientEmail}
-                  </span>
-                )}
-                {emailStatusDetail && <span>Detail: {emailStatusDetail}</span>}
-              </div>
-            </div>
-          </div>
-
-          {savePhase === 'email_failed' && recordId && !isViewOnly && (
-            <button
-              onClick={handleRetryEmail}
-              disabled={saving}
-              className="inline-flex items-center gap-1 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded shadow-xs transition cursor-pointer self-start sm:self-auto shrink-0"
-            >
-              <RefreshCw className="w-3 h-3" />
-              <span>Retry Email</span>
-            </button>
-          )}
-        </div>
-      )}
+      <SaveStatusBanner
+        id="tk207-status-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="TK 207 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Shift Status Tracker Bar ───────────────────────────────────────── */}
       <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">

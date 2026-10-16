@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Mail,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 const DEFAULT_ROWS = [
   { id: 'r1',  time: '06:30', nacl: '', bd: '', turbidity: '', isDefault: true },
@@ -309,7 +310,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
       console.error('Error saving LSA AT 500# data:', err);
       const msg = err?.response?.data?.message || 'Failed to save LSA AT 500# Analysis data.';
       showToast(msg, 'error');
-      setSavePhase('idle');
+      setSavePhase('save_failed');
     } finally {
       setSaving(false);
     }
@@ -445,69 +446,32 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
             )}
 
             {!isViewOnly && (
-              <button
-                onClick={handleSaveClick}
+              <StatusSaveButton
                 id="btn-lsa500-save"
-                disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition shadow-sm disabled:opacity-50 cursor-pointer"
+                saving={saving}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                defaultLabel="Save Analysis"
                 title="Save LSA AT 500# data"
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save Analysis</span>
-                  </>
-                )}
-              </button>
+              />
             )}
           </div>
         </div>
       </div>
 
       {/* ── Status Banner (Email / Save Status) ── */}
-      {savePhase === 'completed' && (
-        <div id="lsa500-success-banner" className="flex items-center justify-between p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 shadow-xs animate-fadeIn">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <div>
-              <span className="font-bold text-sm">Saved — Email Sent!</span>
-              <p className="text-xs text-emerald-700">
-                {emailStatusDetail || `LSA AT 500# Analysis for ${formatDateDisplay(date)} has been recorded and dispatched to registered operator (${recipientEmail || 'operator'}).`}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {savePhase === 'email_failed' && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <div>
-              <span><strong>Saved — Email Failed</strong>: Database record persisted. {emailStatusDetail}</span>
-              {recipientEmail && <span className="block text-[11px] text-amber-700 font-normal">Target recipient: {recipientEmail}</span>}
-            </div>
-          </div>
-          <button
-            onClick={handleRetryEmail}
-            disabled={retryingEmail || isPermanentMailError}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs shrink-0 ${
-              isPermanentMailError
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                : 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer'
-            }`}
-            title={isPermanentMailError ? 'Permanent recipient rejection. Update recipient in User Management.' : 'Retry sending notification email'}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
-            <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="lsa500-success-banner"
+        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        savePhase={savePhase}
+        date={date}
+        analysisName="LSA AT 500# Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSavePhase('idle')}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── Table Container ── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
@@ -734,7 +698,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Recipient Operator:</span>
-                  <span className="font-bold text-slate-800">{recipientEmail || 'sa_operator@tfl.com'}</span>
+                  <span className="font-bold text-slate-800">{recipientEmail || ''}</span>
                 </div>
               </div>
               <p className="text-[11px] text-slate-500">

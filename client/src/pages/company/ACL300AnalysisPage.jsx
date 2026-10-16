@@ -19,6 +19,7 @@ import {
   Mail,
   RefreshCw,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── Shift & Component Parameters ─────────────────────────────────────────────
 
@@ -457,7 +458,8 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
         showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[ACL 300#] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -573,46 +575,17 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
                   <span>Reset</span>
                 </button>
 
-                <button
+                <StatusSaveButton
                   id="btn-acl300-save"
+                  saving={saving}
+                  isLocked={isAllLocked}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving || isAllLocked}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer ${
-                    savePhase === 'completed'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : savePhase === 'email_failed'
-                      ? 'bg-rose-600 hover:bg-rose-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
+                  disabled={!canEdit || isAllLocked}
+                  defaultLabel="Save / Submit"
                   title="Save permitted shift data and notify registered user"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : isAllLocked ? (
-                    <>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Locked (All Shifts Saved)</span>
-                    </>
-                  ) : savePhase === 'completed' ? (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Saved & Emailed ✓</span>
-                    </>
-                  ) : savePhase === 'email_failed' ? (
-                    <>
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span>Saved — Email Failed</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>Save / Submit</span>
-                    </>
-                  )}
-                </button>
+                />
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
@@ -625,47 +598,21 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Status Banner for Email Dispatch State ── */}
-      {savePhase === 'completed' && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-emerald-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Sent ✓</span>
-              <span className="text-emerald-700 ml-1.5">
-                Delivered to registered ACL operator ({recipientEmail || 'assigned user'}).
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
-            {emailStatusDetail}
-          </span>
-        </div>
-      )}
-
-      
-
-      {savePhase === 'email_failed' && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between text-rose-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Failed</span>
-              <span className="text-rose-700 ml-1.5">
-                Database persistence confirmed, but email delivery was rejected: {emailStatusDetail}
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleRetryEmail}
-            disabled={emailRetrying}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-          >
-            <RefreshCw className={`w-3 h-3 ${emailRetrying ? 'animate-spin' : ''}`} />
-            <span>{emailRetrying ? 'Retrying Email...' : 'Retry Email'}</span>
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="acl300-status-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="ACL 300# Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving || emailRetrying}
+      />
 
       {/* ── SINGLE UNIFIED BOX: Shift 1, 2, 3 Rows with Fixed Top Parameters ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

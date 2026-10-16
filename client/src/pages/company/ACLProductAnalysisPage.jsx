@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Lock,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── Chemical & Physical Parameters ──────────────────────────────────────────
 
@@ -255,6 +256,7 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
       return next;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [canEdit]);
 
   const handleBssChange = useCallback((key, value) => {
@@ -272,6 +274,7 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
       return next;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [canEdit, bssData]);
 
   // ── Reset Form ──
@@ -411,7 +414,8 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
         }
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[ACLProductAnalysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -538,30 +542,17 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
               )}
 
               {!isViewOnly && (
-                <button
+                <StatusSaveButton
                   id="btn-aclproduct-save"
+                  saving={saving}
+                  isLocked={isLocked}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving || !canEdit}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+                  disabled={!canEdit}
+                  defaultLabel={editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}
                   title="Save ACL Product data"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : isLocked ? (
-                    <>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Locked</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>{editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}</span>
-                    </>
-                  )}
-                </button>
+                />
               )}
             </div>
           </div>
@@ -569,47 +560,21 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Status Banner for Email Dispatch State ── */}
-      {savePhase === 'completed' && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-emerald-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Sent ✓</span>
-              <span className="text-emerald-700 ml-1.5">
-                Delivered to registered ACL operator ({recipientEmail || 'assigned user'}).
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
-            {emailStatusDetail}
-          </span>
-        </div>
-      )}
-
-      
-
-      {savePhase === 'email_failed' && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between text-rose-900 text-xs animate-fadeIn shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-extrabold">Saved — Email Failed</span>
-              <span className="text-rose-700 ml-1.5">
-                Database persistence confirmed, but email delivery was rejected: {emailStatusDetail}
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleRetryEmail}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-          >
-            <RefreshCw className={`w-3 h-3 ${saving ? 'animate-spin' : ''}`} />
-            <span>Retry Email</span>
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="aclproduct-status-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="ACL Product Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Main Data Entry Section (2 Columns: Chemical Specs & BSS Sieve) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">

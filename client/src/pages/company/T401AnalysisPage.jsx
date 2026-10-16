@@ -23,6 +23,7 @@ import {
   Send,
   Mail,
 } from "lucide-react";
+import { StatusSaveButton, SaveStatusBanner } from "../../components/common/AnalysisStatusBanner";
 
 // ─── SA Plant T 401 Parameters & Validation Limits ───────────────────────────
 // Plant: SA Plant
@@ -329,6 +330,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
       return next;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [isShiftDisabled]);
 
   // ── Reset ──
@@ -609,98 +611,36 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
             )}
 
             {!isViewOnly && (
-              <button
+              <StatusSaveButton
                 id="btn-t401-save"
+                saving={saving}
+                savePhase={savePhase}
+                saveSuccess={saveSuccess}
                 onClick={handleSaveClick}
-                disabled={saving}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer h-7 ${
-                  savePhase === 'completed'
-                    ? "bg-emerald-600 hover:bg-emerald-700"
-                    : savePhase === 'email_failed'
-                    ? "bg-amber-600 hover:bg-amber-700"
-                    : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
-                } disabled:opacity-60 disabled:cursor-not-allowed`}
+                defaultLabel="Save / Submit"
                 title="Save T 401 data"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : savePhase === 'completed' ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Saved!</span>
-                  </>
-                ) : savePhase === 'email_failed' ? (
-                  <>
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Saved (Email Failed)</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save / Submit</span>
-                  </>
-                )}
-              </button>
+              />
             )}
           </div>
         </div>
       </div>
 
       {/* ── Status Banners (Email Sent / Pending / Failed) ── */}
-      {savePhase === 'completed' && (
-        <div
-          id="t401-success-banner"
-          className="flex items-center gap-2.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <div className="text-xs text-emerald-800 font-medium">
-            <span className="font-bold">Saved — Email Sent:</span> {emailStatusDetail || `T 401 Analysis recorded and email sent.`}
-          </div>
-          <button
-            onClick={() => setSavePhase('idle')}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 text-sm leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {savePhase === 'email_failed' && (
-        <div
-          id="t401-failed-banner"
-          className="flex items-center gap-2.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg shadow-2xs animate-fadeIn justify-between flex-wrap"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <div className="text-xs text-amber-900 font-medium">
-              <span className="font-bold">Saved — Email Failed:</span> {emailStatusDetail}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 ml-auto">
-            {!isPermanentMailError && (
-              <button
-                onClick={handleRetryEmail}
-                disabled={retryingEmail}
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-400 rounded-md transition cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3 h-3 ${retryingEmail ? 'animate-spin' : ''}`} />
-                <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-              </button>
-            )}
-            <button
-              onClick={() => setSavePhase('idle')}
-              className="text-amber-600 hover:text-amber-800 text-sm leading-none cursor-pointer"
-              aria-label="Dismiss"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="t401-success-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="T 401 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── Selectable Options Tabs (A, B, C, D, E, F) ── */}
       <div className="bg-white px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-2">

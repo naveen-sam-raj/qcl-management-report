@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Mail,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // Default initial readings matching the standard 12 time slots
 const DEFAULT_READINGS = [
@@ -298,8 +299,8 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
 
       if (deliveryStatus === 'sent') {
         setSavePhase('completed');
-        setEmailStatusDetail(`Notification email delivered successfully to ${recipient || 'SA Plant operator'}.`);
-        showToast?.(`Bi Carbonate Analysis saved & notification sent to ${recipient || 'operator'}!`, 'success');
+        setEmailStatusDetail(`Notification email delivered successfully to ${recipient || ''}.`);
+        showToast?.(`Bi Carbonate Analysis saved & notification sent to ${recipient || ''}!`, 'success');
       } else if (deliveryStatus === 'failed') {
         setSavePhase('email_failed');
         const smtpErr = res.data?.emailError || res.data?.message || 'SMTP delivery rejected';
@@ -409,115 +410,31 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
           )}
 
           {!isViewOnly && (
-            <button
+            <StatusSaveButton
+              id="btn-bicarbonate-save"
+              saving={saving}
+              savePhase={savePhase}
               onClick={handleSaveClick}
-              disabled={saving}
-              className={`px-4 py-1.5 rounded-lg text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer ${
-                savePhase === 'completed'
-                  ? 'bg-emerald-600 hover:bg-emerald-700'
-                  : savePhase === 'email_failed'
-                  ? 'bg-amber-600 hover:bg-amber-700'
-                  : 'bg-teal-600 hover:bg-teal-700'
-              }`}
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : savePhase === 'completed' ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
-                </>
-              ) : savePhase === 'email_failed' ? (
-                <>
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Saved (Email Failed)</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Bi Carbonate Data</span>
-                </>
-              )}
-            </button>
+              defaultLabel="Save Bi Carbonate Data"
+              title="Save Bi Carbonate observations"
+            />
           )}
         </div>
       </div>
 
       {/* ── Status Banners (Email Sent / Pending / Failed) ── */}
-      {savePhase === 'completed' && (
-        <div
-          id="bicarb-success-banner"
-          className="flex items-center gap-2.5 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs animate-fadeIn"
-        >
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <div className="text-xs text-emerald-800 font-medium">
-            <span className="font-bold">Saved — Email Sent:</span> {emailStatusDetail || 'Bi Carbonate Analysis recorded and email sent.'}
-          </div>
-          <button
-            onClick={() => setSavePhase('idle')}
-            className="ml-auto text-emerald-500 hover:text-emerald-700 text-sm leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {savePhase === 'email_failed' && (
-        <div
-          id="bicarb-failed-banner"
-          className="flex items-center gap-2.5 px-3.5 py-2 bg-amber-50 border border-amber-300 rounded-lg shadow-2xs animate-fadeIn justify-between flex-wrap"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <div className="text-xs text-amber-900 font-medium">
-              <span className="font-bold">Saved — Email Failed:</span> {emailStatusDetail}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 ml-auto">
-            {!isPermanentMailError && (
-              <button
-                onClick={handleRetryEmail}
-                disabled={retryingEmail}
-                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-400 rounded-md transition cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3 h-3 ${retryingEmail ? 'animate-spin' : ''}`} />
-                <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-              </button>
-            )}
-            <button
-              onClick={() => setSavePhase('idle')}
-              className="text-amber-600 hover:text-amber-800 text-sm leading-none cursor-pointer"
-              aria-label="Dismiss"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Summary KPI Tiles ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Readings</div>
-          <div className="text-xl font-black text-slate-800 mt-1">{stats.count}</div>
-        </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Average (%)</div>
-          <div className="text-xl font-black text-teal-600 mt-1">{stats.avg}</div>
-        </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Min Value (%)</div>
-          <div className="text-xl font-black text-slate-700 mt-1">{stats.min}</div>
-        </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Max Value (%)</div>
-          <div className="text-xl font-black text-slate-700 mt-1">{stats.max}</div>
-        </div>
-      </div>
+      <SaveStatusBanner
+        id="bicarb-success-banner"
+        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Bi Carbonate Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => setSavePhase('idle')}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── MAIN ANALYSIS TABLE ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

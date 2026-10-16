@@ -16,6 +16,7 @@ import {
   FlaskConical,
   Layers,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // Screenshot values for TK 204 / TK 209 (Date: 14/09/2026)
 const DEFAULT_PARAMETERS = {
@@ -94,6 +95,9 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
   }, [date]);
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
 
   // ── Handle field change ──
   const handleCellChange = useCallback((paramKey, tankKey, value) => {
@@ -225,36 +229,34 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
               <span>Reset</span>
             </button>
 
-            <button
+            <StatusSaveButton
               id="btn-tk204-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
               onClick={handleSave}
-              disabled={saving}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs ${
-                saveSuccess
-                  ? 'bg-emerald-600 hover:bg-emerald-700'
-                  : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Analysis</span>
-                </>
-              )}
-            </button>
+              defaultLabel="Save Analysis"
+              title="Save TK 204 / TK 209 analysis"
+            />
           </div>
         </div>
       </div>
+
+      {/* ── Status Banner ── */}
+      <SaveStatusBanner
+        id="tk204-tk209-status-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="TK 204 / TK 209 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Main Comparison Table Matching Screenshot ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">

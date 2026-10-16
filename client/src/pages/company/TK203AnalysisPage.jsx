@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
   getCellLimit,
   validateCellValue,
@@ -273,6 +274,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
     });
 
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [isShiftDisabled]);
 
   const handleReset = () => {
@@ -283,6 +285,7 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
     }
     setErrors({});
     setSaveSuccess(false);
+    setSavePhase('idle');
     showToast('TK 203 analysis form reset.', 'info');
   };
 
@@ -461,7 +464,8 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
         showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[TK203Analysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast('Save Error: ' + serverMessage, 'error');
@@ -619,34 +623,14 @@ const TK203AnalysisPage = ({ plantId = 'acl' }) => {
                   <span>Reset</span>
                 </button>
 
-                <button
+                <StatusSaveButton
                   id="btn-tk203-save"
+                  saving={saving}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-75 cursor-pointer ${
-                    savePhase === 'completed'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
                   title="Save permitted shift data and notify registered user"
-                >
-                  {saving ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
-                  ) : savePhase === 'completed' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  ) : (
-                    <Save className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>
-                    {savePhase === 'saving'
-                      ? 'Saving...'
-                      : savePhase === 'completed'
-                      ? 'Saved & Emailed ✓'
-                      : savePhase === 'email_failed'
-                      ? 'Saved — Email Failed'
-                      : 'Save / Submit'}
-                  </span>
-                </button>
+                />
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">

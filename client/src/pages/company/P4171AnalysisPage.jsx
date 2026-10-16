@@ -18,7 +18,8 @@ import {
   Flame,
   Database,
   FlaskConical,
-} from "lucide-react";
+} from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── SA Plant P417 Parameters & Validation Limits ────────────────────────────
 // Plant: SA Plant ONLY
@@ -142,6 +143,9 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [emailStatusDetail, setEmailStatusDetail] = useState('');
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -197,6 +201,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       return copy;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, []);
 
   // ── Reset Handler ──
@@ -259,6 +264,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
 
     setSaving(true);
     setSaveSuccess(false);
+    setSavePhase('saving');
 
     try {
       const payload = {
@@ -274,10 +280,25 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       };
 
       const response = await api.post("/api/sa-p417-1-analysis", payload);
+      const isEmailSent = response.data?.emailNotification?.status === 'sent' ||
+                          response.data?.emailDeliveryStatus === 'delivered' ||
+                          response.data?.emailDeliveryStatus === 'sent';
+      const isEmailFailed = response.data?.emailNotification?.status === 'failed' ||
+                            response.data?.emailDeliveryStatus === 'failed';
+      const recipient = response.data?.emailNotification?.recipient ||
+                        response.data?.notificationRecipient ||
+                        response.data?.recipientEmail ||
+                        response.data?.emailRecipient ||
+                        response.data?.recipient || '';
+      setRecipientEmail(recipient);
+      setEmailStatusDetail(response.data?.emailNotification?.error || response.data?.emailStatus || '');
       setSaveSuccess(true);
+      setSavePhase(isEmailFailed ? 'email_failed' : 'completed');
       showToast?.(response.data?.message || "P417 Analysis data saved successfully!", "success");
     } catch (err) {
       console.error("[P417Analysis] Save failed:", err);
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       const serverMessage =
         err.response?.data?.message ||
         err.response?.data?.errors?.[0] ||
@@ -334,55 +355,34 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
               <span>Reset</span>
             </button>
 
-            <button
+            <StatusSaveButton
               id="btn-p417-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
               onClick={handleSave}
-              disabled={saving}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs cursor-pointer ${
-                saveSuccess
-                  ? "bg-emerald-600 hover:bg-emerald-700"
-                  : "bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {saving ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Saved!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Analysis</span>
-                </>
-              )}
-            </button>
+              defaultLabel="Save Analysis"
+              title="Save P417 Analysis"
+            />
           </div>
         </div>
       </div>
 
-      {/* Success banner */}
-      {saveSuccess && (
-        <div
-          id="p417-success-banner"
-          className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-2.5 rounded-xl flex items-center justify-between text-xs font-bold shadow-xs animate-fadeIn"
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>P417 Analysis data saved successfully to database!</span>
-          </div>
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="text-emerald-700 hover:text-emerald-900 font-extrabold cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* ── Status Banner ── */}
+      <SaveStatusBanner
+        id="p417-success-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="P417 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Main Data Card ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

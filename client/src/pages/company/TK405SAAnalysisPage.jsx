@@ -20,6 +20,7 @@ import {
   FlaskConical,
   Lock,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── SA Plant TK 405 Parameters & Validation Limits ──────────────────────────
 // Plant: SA Plant ONLY
@@ -322,6 +323,7 @@ const TK405SAAnalysisPage = ({ plantId = 'sa' }) => {
       return copy;
     });
     setSaveSuccess(false);
+    setSavePhase('idle');
   }, [isShiftDisabled]);
 
   // ── Reset Handler ──
@@ -507,7 +509,8 @@ const TK405SAAnalysisPage = ({ plantId = 'sa' }) => {
         showToast?.('Data saved to database. Email delivery failed: ' + (emailErrMsg || 'Server error'), 'warning');
       }
     } catch (err) {
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      setSaveSuccess(false);
       console.error('[TK405SAAnalysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -664,34 +667,15 @@ const TK405SAAnalysisPage = ({ plantId = 'sa' }) => {
                   <span>Reset</span>
                 </button>
 
-                <button
+                <StatusSaveButton
                   id="btn-tk405-save"
+                  saving={saving}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={saving}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg transition shadow-xs disabled:opacity-75 cursor-pointer ${
-                    savePhase === 'completed'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
+                  defaultLabel="Save / Submit"
                   title="Save permitted shift data and notify registered user"
-                >
-                  {saving ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
-                  ) : savePhase === 'completed' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  ) : (
-                    <Save className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>
-                    {savePhase === 'saving'
-                      ? 'Saving...'
-                      : savePhase === 'completed'
-                      ? 'Saved & Emailed ✓'
-                      : savePhase === 'email_failed'
-                      ? 'Saved — Email Failed'
-                      : 'Save / Submit'}
-                  </span>
-                </button>
+                />
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
@@ -704,69 +688,21 @@ const TK405SAAnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
-      {saveSuccess && (
-        <div
-          id="tk405-success-banner"
-          className={`flex items-start gap-3 p-3.5 border rounded-xl shadow-xs animate-fadeIn ${
-            savePhase === 'email_failed'
-              ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          }`}
-        >
-          {savePhase === 'email_failed' ? (
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          )}
-          <div className="text-xs flex-1 space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold">
-                {savePhase === 'email_failed'
-                  ? 'Saved — Email Failed ⚠️'
-                  : 'Saved — Email Sent ✓'}
-              </span>
-              <span className="text-slate-600">
-                TK 405 Analysis for <strong>{formatDateDisplay(date)}</strong> has been recorded in database.
-              </span>
-            </div>
-            {recipientEmail && (
-              <div className="text-[11.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="font-semibold">Notification Recipient:</span>
-                <span className="font-mono bg-white/70 border px-1.5 py-0.2 rounded font-bold">
-                  {recipientEmail}
-                </span>
-                <span className="text-slate-500">(Registered SA Plant Operator)</span>
-                {emailStatusDetail && (
-                  <span className={`italic ${savePhase === 'email_failed' ? 'text-rose-700 font-semibold' : 'text-slate-600'}`}>
-                    — {emailStatusDetail}
-                  </span>
-                )}
-              </div>
-            )}
-            {isPermanentMailError && (
-              <div className="text-[11px] text-rose-800 bg-rose-100/80 border border-rose-200 rounded p-1.5 font-medium">
-                <strong>Permanent Recipient Error (550 / Access Denied):</strong> The mail server rejected this recipient address. Do not repeatedly retry without updating the active SA Plant user's registered email address in User Management.
-              </div>
-            )}
-          </div>
-          {savePhase === 'email_failed' && !isPermanentMailError && (
-            <button
-              onClick={handleRetryEmail}
-              disabled={saving}
-              className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/90 hover:bg-amber-300 rounded border border-amber-400/50 transition cursor-pointer shrink-0 shadow-2xs"
-            >
-              Retry Email
-            </button>
-          )}
-          <button
-            onClick={() => setSaveSuccess(false)}
-            className="ml-auto text-slate-400 hover:text-slate-600 transition text-base leading-none shrink-0 cursor-pointer"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <SaveStatusBanner
+        id="tk405-success-banner"
+        saveSuccess={saveSuccess}
+        savePhase={savePhase}
+        date={date}
+        analysisName="TK 405 Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+        }}
+        saving={saving}
+      />
 
       {/* ── Main Data Card ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

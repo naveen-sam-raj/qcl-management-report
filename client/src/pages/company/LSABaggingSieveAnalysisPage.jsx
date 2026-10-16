@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Lock,
 } from 'lucide-react';
+import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 /**
  * Returns current date string formatted as YYYY-MM-DD in Asia/Kolkata timezone
@@ -97,6 +98,8 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
   const [initialRows, setInitialRows] = useState(DEFAULT_ROWS);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
   const [loading, setLoading] = useState(true);
   const [recordId, setRecordId] = useState(null);
   const [editedFields, setEditedFields] = useState({});
@@ -120,7 +123,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
         if (res.data?.emailStatus || payload.emailStatus) {
           setEmailDelivery({
             status: res.data?.emailStatus || payload.emailStatus,
-            recipient: res.data?.emailRecipient || payload.emailRecipient || res.data?.assignedOperatorEmail || 'sa_operator@tfl.com',
+            recipient: res.data?.emailRecipient || payload.emailRecipient || res.data?.assignedOperatorEmail || '',
             message: payload.emailMessage || '',
           });
         }
@@ -311,15 +314,19 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
 
       setEmailDelivery({
         status: resData.emailDeliveryStatus || resData.emailStatus || 'pending',
-        recipient: resData.emailRecipient || 'sa_operator@tfl.com',
+        recipient: resData.emailRecipient || '',
         message: resData.message || '',
       });
 
       setInitialRows(JSON.parse(JSON.stringify(rows)));
+      setSaveSuccess(true);
+      setSavePhase(resData.emailDeliveryStatus === 'failed' ? 'email_failed' : 'completed');
       showToast(resData.message || 'LSA Bagging Sieve Analysis data saved successfully!', 'success');
       setShowConfirmModal(false);
     } catch (err) {
       console.error('[LSABaggingSieve] Save failed:', err);
+      setSaveSuccess(false);
+      setSavePhase('save_failed');
       const serverMessage = err.response?.data?.message || err.message;
       showToast('Save Error: ' + serverMessage, 'error');
     } finally {
@@ -341,7 +348,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
       if (res.data?.success) {
         setEmailDelivery({
           status: res.data?.emailDeliveryStatus || 'sent',
-          recipient: res.data?.emailRecipient || res.data?.recipient || 'sa_operator@tfl.com',
+          recipient: res.data?.emailRecipient || res.data?.recipient || '',
           message: res.data?.message || '',
         });
         showToast(res.data?.message || 'Notification email re-sent successfully!', 'success');
@@ -440,72 +447,37 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
                 <span>Reset</span>
               </button>
 
-              <button
+              <StatusSaveButton
                 id="btn-lsa-sieve-save"
+                saving={saving}
+                savePhase={savePhase}
+                saveSuccess={saveSuccess}
                 onClick={handleInitiateSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs disabled:opacity-60 cursor-pointer"
+                defaultLabel="Save / Submit"
                 title="Save LSA Bagging Sieve data"
-              >
-                {saving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>{saving ? 'Saving...' : 'Save / Submit'}</span>
-              </button>
+              />
             </div>
           </div>
         </div>
       </div>
 
       {/* ── Email Notification Status Banner ─────────────────────────────────── */}
-      {emailDelivery && (
-        <div
-          id="lsa-sieve-notification-banner"
-          className={`flex items-center justify-between p-3.5 rounded-xl border shadow-xs animate-fadeIn ${
-            emailDelivery.status === 'sent'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : emailDelivery.status === 'failed'
-              ? 'bg-rose-50 border-rose-200 text-rose-800'
-              : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 text-xs">
-            {emailDelivery.status === 'sent' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : emailDelivery.status === 'failed' ? (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            ) : (
-              <Mail className="w-4 h-4 text-blue-600 shrink-0" />
-            )}
-            <div>
-              <span className="font-extrabold uppercase tracking-wide">
-                {emailDelivery.status === 'sent'
-                  ? 'Saved — Email Sent'
-                  : 'Saved — Email Failed'}
-              </span>
-              <span className="mx-1.5 text-slate-400">|</span>
-              <span>Recipient: <strong>{emailDelivery.recipient || 'sa_operator@tfl.com'}</strong></span>
-              {emailDelivery.message && (
-                <div className="text-[11px] opacity-90 mt-0.5">{emailDelivery.message}</div>
-              )}
-            </div>
-          </div>
-
-          {emailDelivery.status === 'failed' && (
-            <button
-              id="btn-retry-sieve-email"
-              onClick={handleRetryEmail}
-              disabled={retryingEmail}
-              className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-bold transition shadow-xs disabled:opacity-60 cursor-pointer shrink-0 ml-4"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
-              <span>{retryingEmail ? 'Retrying...' : 'Retry Email'}</span>
-            </button>
-          )}
-        </div>
-      )}
+      <SaveStatusBanner
+        id="lsa-sieve-notification-banner"
+        saveSuccess={saveSuccess || emailDelivery.status === 'sent' || emailDelivery.status === 'failed'}
+        savePhase={emailDelivery.status === 'failed' ? 'email_failed' : (emailDelivery.status === 'sent' || saveSuccess) ? 'completed' : 'idle'}
+        date={date}
+        analysisName="LSA Bagging Sieve Analysis"
+        recipientEmail={emailDelivery.recipient}
+        emailStatusDetail={emailDelivery.message}
+        onRetryEmail={handleRetryEmail}
+        onDismiss={() => {
+          setSaveSuccess(false);
+          setSavePhase('idle');
+          setEmailDelivery({ status: null, recipient: '', message: '' });
+        }}
+        saving={saving || retryingEmail}
+      />
 
       {/* ── Main Data Table starting from the Left Side ─────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
@@ -777,7 +749,7 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
               </div>
               <div className="flex justify-between">
                 <span className="font-semibold text-slate-500">Assigned Recipient:</span>
-                <span className="font-bold text-blue-700">sa_operator@tfl.com</span>
+                <span className="font-bold text-blue-700">{emailDelivery.recipient || 'Registered SA Operator'}</span>
               </div>
               <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
                 Data will be persisted to MongoDB Atlas and an automated report email will be dispatched to the registered SA Plant operator.
