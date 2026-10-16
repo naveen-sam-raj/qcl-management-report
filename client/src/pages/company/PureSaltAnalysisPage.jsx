@@ -49,6 +49,14 @@ const ROWS = [
   { key: 'composition', label: 'COMPOSITION', highlight: true, highlightType: 'comp' },
 ];
 
+const SHIFT_DISPLAY_NAMES = {
+  rawSalt: 'RAW SALT',
+  shift1: 'I SHIFT',
+  shift2: 'II SHIFT',
+  shift3: 'III SHIFT',
+  composition: 'COMPOSITION',
+};
+
 const buildEmptyData = () =>
   Object.fromEntries(
     ROWS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
@@ -145,6 +153,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
+
+  // Shift display names mapping for header badges, modals, and toasts
+  const shiftDisplayNames = SHIFT_DISPLAY_NAMES;
 
   // ── State (Date is locked strictly to Today's date in Asia/Kolkata) ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
@@ -636,7 +647,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
               {activeEditingShift ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
                   <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-                  Editing {shiftDisplayNames[activeEditingShift]}
+                  Editing {shiftDisplayNames[activeEditingShift] || activeEditingShift}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-slate-200 text-slate-700 shadow-2xs">
