@@ -144,7 +144,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           }
 
           if (!record) {
-             // Leave default
+            setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -153,14 +153,38 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
+          } else {
+            setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
           }
         } else {
+          setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
+          setInitialSaved(false);
+          setEditCount(0);
+          setIsLocked(false);
+          setLockedShifts({
+            shift1Saved: false,
+            shift2Saved: false,
+            shift1Locked: false,
+            shift2Locked: false,
+            shift2Edits: 0,
+          });
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing Cooling Water data', err);
+        setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
+        setInitialSaved(false);
+        setEditCount(0);
+        setIsLocked(false);
+        setLockedShifts({
+          shift1Saved: false,
+          shift2Saved: false,
+          shift1Locked: false,
+          shift2Locked: false,
+          shift2Edits: 0,
+        });
         setEditedFields({});
         setRecordId(null);
       }

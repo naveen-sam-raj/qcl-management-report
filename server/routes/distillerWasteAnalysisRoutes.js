@@ -44,21 +44,7 @@ const SEED_READINGS = [
 ];
 
 // In-memory fallback cache
-const distillerWasteRecords = [
-  {
-    id: 'distiller_seed_1',
-    date: '2026-09-13',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'Distiller waste',
-    analysisType: 'Distiller Waste Analysis',
-    readings: SEED_READINGS,
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-13T12:00:00Z').toISOString(),
-  },
-];
+const distillerWasteRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -111,7 +97,7 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              readings: readings.length > 0 ? readings : SEED_READINGS,
+              readings: readings || [],
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',

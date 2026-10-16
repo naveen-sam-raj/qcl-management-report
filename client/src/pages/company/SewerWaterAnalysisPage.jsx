@@ -29,49 +29,49 @@ import {
   Waves,
 } from 'lucide-react';
 
-// Default initial readings matching the laboratory shifts / hourly schedule
+// Default initial readings with empty measurement fields
 const DEFAULT_READINGS = [
   {
     id: 't11',
     time: '11:00',
-    sec200: { fnh3: '3', cnh3: '0' },
-    sec400: { fnh3: '6664', cnh3: '4284', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
   {
     id: 't13',
     time: '13:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
   {
     id: 't15',
     time: '15:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
   {
     id: 't17',
     time: '17:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
   {
     id: 't19',
     time: '19:00',
-    sec200: { fnh3: '1020', cnh3: '2244' },
-    sec400: { fnh3: '5780', cnh3: '2720', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '38.5' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
   {
     id: 't21',
     time: '21:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
   },
 ];
 
@@ -87,7 +87,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(DEFAULT_READINGS);
+  const [readings, setReadings] = useState(() => DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -137,7 +137,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
           }
 
           if (!record) {
-             // Leave default
+            setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -146,14 +146,20 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
+          } else {
+            setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
           }
         } else {
+          setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
+          setLockedSlots({});
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing Sewer Water data', err);
+        setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
+        setLockedSlots({});
         setEditedFields({});
         setRecordId(null);
       }

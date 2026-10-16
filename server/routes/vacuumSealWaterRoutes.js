@@ -50,30 +50,7 @@ const SEED_READINGS = [
 ];
 
 // In-memory fallback cache
-const vacuumSealRecords = [
-  {
-    id: 'vacuum_seed_1',
-    date: '2026-09-11',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'Vaccum seal water',
-    analysisType: 'Vacuum Seal Water Analysis',
-    readings: SEED_READINGS,
-    lockedShifts: {
-      shift1Saved: true,
-      shift2Saved: false,
-      shift3Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift3Locked: false,
-      shift3Edits: 0,
-    },
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-11T08:00:00Z').toISOString(),
-  },
-];
+const vacuumSealRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -137,7 +114,7 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              readings: readings.length > 0 ? readings : SEED_READINGS,
+              readings: readings || [],
               lockedShifts: payloadData.lockedShifts || defaultLocks,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],

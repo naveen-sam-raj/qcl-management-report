@@ -78,32 +78,7 @@ const SEED_ROWS = [
 ];
 
 // In-memory fallback cache
-const gasConcRecords = [
-  {
-    id: 'gas_conc_seed_1',
-    date: '2022-05-26',
-    endDate: '2022-05-27',
-    plant: 'SA',
-    plantName: 'Soda Ash Plant',
-    plantCode: 'SA',
-    unit: 'Gas Conc.',
-    analysisType: 'Gas Conc. Analysis',
-    rows: SEED_ROWS,
-    lockedShifts: {
-      shift1Saved: true,
-      shift2Saved: true,
-      shift3Saved: true,
-      shift1Locked: true,
-      shift2Locked: true,
-      shift3Locked: true,
-      shift3Edits: 1,
-    },
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2022-05-27T22:00:00Z').toISOString(),
-  },
-];
+const gasConcRecords = [];
 
 // Apply auth middleware
 router.use(protect);
@@ -836,7 +811,7 @@ router.get('/export', async (req, res) => {
   try {
     const { date } = req.query;
 
-    let targetRows = SEED_ROWS;
+    let targetRows = [];
     if (date) {
       const doc = await PlantAnalysisRecord.findOne({
         plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
@@ -850,7 +825,7 @@ router.get('/export', async (req, res) => {
         if (found && found.rows) targetRows = found.rows;
       }
     } else if (gasConcRecords.length > 0) {
-      targetRows = gasConcRecords[0]?.rows || SEED_ROWS;
+      targetRows = gasConcRecords[0]?.rows || [];
     }
 
     const excelResult = await generateGasConcExcel({

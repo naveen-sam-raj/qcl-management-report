@@ -76,10 +76,14 @@ const buildEmptyData = () => ({
   iiiShift: { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
 });
 
-const SCREENSHOT_DATA = {
-  iShift:   { ph: '11.0', po4: '26', na2so3: '68', talk: '234', tfe: '3', sio2: '7', ss: '20', tds: '938' },
-  iiShift:  { ph: '',     po4: '',   na2so3: '',   talk: '',    tfe: '',  sio2: '',  ss: '',   tds: '' },
-  iiiShift: { ph: '',     po4: '',   na2so3: '',   talk: '',    tfe: '',  sio2: '',  ss: '',   tds: '' },
+const DEFAULT_LOCKS = {
+  shift1Saved: false,
+  shift2Saved: false,
+  shift3Saved: false,
+  shift1Locked: false,
+  shift2Locked: false,
+  shift3Locked: false,
+  shift3Edits: 0,
 };
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -94,7 +98,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [data, setData] = useState(SCREENSHOT_DATA);
+  const [data, setData] = useState(buildEmptyData);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -102,15 +106,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
-  const [lockedShifts, setLockedShifts] = useState({
-    shift1Saved: false,
-    shift2Saved: false,
-    shift3Saved: false,
-    shift1Locked: false,
-    shift2Locked: false,
-    shift3Locked: false,
-    shift3Edits: 0,
-  });
+  const [lockedShifts, setLockedShifts] = useState(DEFAULT_LOCKS);
   const [editedFields, setEditedFields] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
@@ -169,7 +165,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
           }
           
           if (!record) {
-             // Leave default
+            setData(buildEmptyData());
           } else if (record.shifts) {
             setData(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -178,14 +174,20 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
             setData(record.rows);
           } else if (record.data && !Array.isArray(record.data)) {
             setData(record.data);
+          } else {
+            setData(buildEmptyData());
           }
         } else {
+          setData(buildEmptyData());
+          setLockedShifts(DEFAULT_LOCKS);
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing CBD data', err);
+        setData(buildEmptyData());
+        setLockedShifts(DEFAULT_LOCKS);
         setEditedFields({});
         setRecordId(null);
       }

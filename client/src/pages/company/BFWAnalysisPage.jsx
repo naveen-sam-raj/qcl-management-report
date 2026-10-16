@@ -34,19 +34,19 @@ import {
   retryAnalysisEmail,
 } from '../../utils/offsetAnalysisHelper';
 
-// Default initial readings matching laboratory reference (Date: 13/09/2026)
+// Default initial readings with empty measurement fields
 const DEFAULT_BFW_READINGS = [
   {
     id: 'bfw_1',
     stream: 'Boiler Feed Water (BFW)',
     frequency: 'Day',
     time: '15:00',
-    ph: '9',
-    cond: '36.8',
-    th: '0',
-    alk: '10',
-    tAlk: '10',
-    sio2: '0.26',
+    ph: '',
+    cond: '',
+    th: '',
+    alk: '',
+    tAlk: '',
+    sio2: '',
     fe2o3: '',
   },
 ];
@@ -57,12 +57,12 @@ const DEFAULT_SHS_READINGS = [
     stream: 'Super Heated Steam (SHS)',
     frequency: 'Day',
     time: '15:00',
-    ph: '7.6',
-    cond: '7.3',
+    ph: '',
+    cond: '',
     th: '',
-    alk: '6',
-    tAlk: '6',
-    sio2: '0.14',
+    alk: '',
+    tAlk: '',
+    sio2: '',
     fe2o3: '',
   },
 ];
@@ -91,8 +91,8 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [bfwReadings, setBfwReadings] = useState(DEFAULT_BFW_READINGS);
-  const [shsReadings, setShsReadings] = useState(DEFAULT_SHS_READINGS);
+  const [bfwReadings, setBfwReadings] = useState(() => DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
+  const [shsReadings, setShsReadings] = useState(() => DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -153,7 +153,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
           setEditCount(currentEdits);
           setIsLocked(lockStatus);
 
-          const rawReadings = record.readings || record.data?.readings || record.shifts || [];
+          const rawReadings = record?.readings || record?.data?.readings || record?.shifts || [];
           if (Array.isArray(rawReadings) && rawReadings.length > 0) {
             const bfw = rawReadings.filter((r) =>
               String(r.stream || '').toLowerCase().includes('boiler') || String(r.stream || '').toLowerCase().includes('bfw')
@@ -162,16 +162,29 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
               String(r.stream || '').toLowerCase().includes('super') || String(r.stream || '').toLowerCase().includes('shs')
             );
 
-            if (bfw.length > 0) setBfwReadings(bfw);
-            if (shs.length > 0) setShsReadings(shs);
+            setBfwReadings(bfw.length > 0 ? bfw : DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
+            setShsReadings(shs.length > 0 ? shs : DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
+          } else {
+            setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
+            setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
           }
         } else {
+          setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
+          setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
+          setInitialSaved(false);
+          setEditCount(0);
+          setIsLocked(false);
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing BFW data', err);
+        setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
+        setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
+        setInitialSaved(false);
+        setEditCount(0);
+        setIsLocked(false);
         setEditedFields({});
         setRecordId(null);
       }

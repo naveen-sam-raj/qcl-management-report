@@ -4,23 +4,7 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 
 // In-memory cache storage for TK 204 / TK 209 Analysis records
-const tk204Tk209Records = [
-  {
-    id: 'tk204_209_seed_1',
-    date: '2026-09-14',
-    plant: 'ACL',
-    unit: 'TK 204 / TK 209',
-    analysisType: 'TK 204 / TK 209 Analysis',
-    parameters: {
-      fnh3: { tk204: '2.92', tk209: '1.64' },
-      cnh3: { tk204: '3.60', tk209: '3.20' },
-      tcl:  { tk204: '5.28', tk209: '4.40' },
-      pcl:  { tk204: '1.68', tk209: '1.20' },
-    },
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-14T10:00:00Z').toISOString(),
-  },
-];
+const tk204Tk209Records = [];
 
 // Apply authentication middleware
 router.use(protect);

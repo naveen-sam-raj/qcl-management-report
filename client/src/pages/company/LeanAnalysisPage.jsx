@@ -292,6 +292,12 @@ const LeanAnalysisPage = ({ plantId = 'co2' }) => {
             setLockedShifts({});
             setEditedFields({});
           }
+        } else {
+          setData(buildEmptyData());
+          setOriginalData(null);
+          setLockedShifts({});
+          setEditedFields({});
+          setRecordId(null);
         }
       } catch (err) {
         if (!active) return;

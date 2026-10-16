@@ -91,8 +91,8 @@ const formatDateDisplay = (isoDate) => {
 };
 
 const DEFAULT_ROWS_TEMPLATE = (todayDate) => [
-  { id: `gc-1-${Date.now()}`, date: todayDate, time: '08:00', seal: 'OK', recoveryCo2Con: '80.0', cleaningGas: '10.0', bottomGas: '85.0' },
-  { id: `gc-2-${Date.now()}`, date: '',        time: '12:00', seal: 'OK', recoveryCo2Con: '81.5', cleaningGas: '10.2', bottomGas: '84.5' },
+  { id: `gc-1-${Date.now()}`, date: todayDate, time: '08:00', seal: 'OK', recoveryCo2Con: '', cleaningGas: '', bottomGas: '' },
+  { id: `gc-2-${Date.now()}`, date: '',        time: '12:00', seal: 'OK', recoveryCo2Con: '', cleaningGas: '', bottomGas: '' },
 ];
 
 const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
@@ -228,7 +228,21 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       }
     } catch (err) {
       console.warn('[GasConc] Fetch warning:', err.message);
+      setRecordId(null);
       setRows(DEFAULT_ROWS_TEMPLATE(dateToLoad));
+      setLockedShifts({
+        shift1Saved: false,
+        shift2Saved: false,
+        shift3Saved: false,
+        shift1Locked: false,
+        shift2Locked: false,
+        shift3Locked: false,
+        shift3Edits: 0,
+      });
+      setEditedFields({});
+      setEditAuditHistory([]);
+      setEmailStatus(null);
+      setEmailRecipient('');
     } finally {
       setLoading(false);
     }

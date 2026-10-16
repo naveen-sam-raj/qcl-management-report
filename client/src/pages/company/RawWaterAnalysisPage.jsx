@@ -30,23 +30,23 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-// Screenshot values for Raw Water
-const SCREENSHOT_DATA = {
-  ph: '7.6',
-  cond: '211',
-  turbidity: '8',
-  tds: '137',
-  freeCl2: '0',
-  fe: '0.30',
-  sio2: '5',
-  mAlk: '56',
-  th: '60',
-  caH: '36',
-  mgH: '24',
-  cl: '30',
-  so4: '15',
-  ema: '45',
-};
+// Default empty values for Raw Water
+const buildEmptyData = () => ({
+  ph: '',
+  cond: '',
+  turbidity: '',
+  tds: '',
+  freeCl2: '',
+  fe: '',
+  sio2: '',
+  mAlk: '',
+  th: '',
+  caH: '',
+  mgH: '',
+  cl: '',
+  so4: '',
+  ema: '',
+});
 
 // Left Column Parameters: Physical & Dissolved Solids
 const LEFT_PARAMETERS = [
@@ -83,7 +83,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
   const [time, setTime] = useState('08:00');
-  const [data, setData] = useState(SCREENSHOT_DATA);
+  const [data, setData] = useState(buildEmptyData);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -142,7 +142,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
           }
           
           if (!record) {
-             // Leave default
+            setData(buildEmptyData());
           } else if (record.parameters) {
             setData(record.parameters);
           } else if (record.shifts) {
@@ -155,14 +155,26 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
             setData(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setData(record);
+          } else {
+            setData(buildEmptyData());
           }
         } else {
+          setData(buildEmptyData());
+          setTime('08:00');
+          setInitialSaved(false);
+          setEditCount(0);
+          setIsLocked(false);
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing Raw Water data', err);
+        setData(buildEmptyData());
+        setTime('08:00');
+        setInitialSaved(false);
+        setEditCount(0);
+        setIsLocked(false);
         setEditedFields({});
         setRecordId(null);
       }

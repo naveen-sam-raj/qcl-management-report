@@ -15,62 +15,7 @@ const getTodayKolkata = () => {
 };
 
 // In-memory cache storage for LSA Shift Analysis records
-const lsaShiftRecords = [
-  // Seed with sample matching screenshot for demonstration if table is empty
-  {
-    id: 'lsa_shift_seed_1',
-    date: '2026-06-20',
-    plant: 'SA',
-    plantCode: 'SA',
-    unit: 'LSA',
-    analysisType: 'LSA Shift Analysis',
-    userId: '231',
-    shifts: {
-      iShift: {
-        na2co3: '99.1',
-        nacl: '0.71',
-        fe: '0.0030',
-        na2so4: '0.000',
-        vm: '0.14',
-        ir: '',
-        bd: '635',
-        turbidity: '63',
-      },
-      iiShift: {
-        na2co3: '99.1',
-        nacl: '0.71',
-        fe: '0.0029',
-        na2so4: '0.000',
-        vm: '0.16',
-        ir: '',
-        bd: '641',
-        turbidity: '66',
-      },
-      iiiShift: {
-        na2co3: '99.0',
-        nacl: '0.81',
-        fe: '0.0032',
-        na2so4: '0.000',
-        vm: '0.12',
-        ir: '',
-        bd: '628',
-        turbidity: '66',
-      },
-      composite: {
-        na2co3: '99.1',
-        nacl: '0.74',
-        fe: '0.0030',
-        na2so4: '0.064',
-        vm: '0.14',
-        ir: '0.100',
-        bd: '635',
-        turbidity: '65',
-      },
-    },
-    submittedBy: 'Shift Chemist (231)',
-    submittedAt: new Date('2026-06-20T08:00:00Z').toISOString(),
-  },
-];
+const lsaShiftRecords = [];
 
 // Apply authentication middleware
 router.use(protect);

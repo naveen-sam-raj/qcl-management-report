@@ -186,6 +186,14 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
             setEditCount(0);
             setEditedFields({});
           }
+        } else {
+          setData(buildEmptyData());
+          setOriginalData(null);
+          setIsLocked(false);
+          setInitialSaved(false);
+          setEditCount(0);
+          setEditedFields({});
+          setRecordId(null);
         }
       } catch (err) {
         if (!active) return;

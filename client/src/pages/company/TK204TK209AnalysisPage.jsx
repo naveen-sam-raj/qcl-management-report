@@ -18,12 +18,21 @@ import {
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
-// Screenshot values for TK 204 / TK 209 (Date: 14/09/2026)
+const getTodayAsiaKolkata = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+};
+
+// Default empty parameters for TK 204 / TK 209
 const DEFAULT_PARAMETERS = {
-  fnh3: { tk204: '2.92', tk209: '1.64' },
-  cnh3: { tk204: '3.60', tk209: '3.20' },
-  tcl:  { tk204: '5.28', tk209: '4.40' },
-  pcl:  { tk204: '1.68', tk209: '1.20' },
+  fnh3: { tk204: '', tk209: '' },
+  cnh3: { tk204: '', tk209: '' },
+  tcl:  { tk204: '', tk209: '' },
+  pcl:  { tk204: '', tk209: '' },
 };
 
 const PARAM_CONFIG = [
@@ -57,9 +66,8 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  // Default date matching user's laboratory screenshot (14/09/2026)
-  const [date, setDate] = useState('2026-09-14');
-  const [parameters, setParameters] = useState(DEFAULT_PARAMETERS);
+  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [parameters, setParameters] = useState(() => JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -74,7 +82,7 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             setParameters(DEFAULT_PARAMETERS);
+             setParameters(JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
           } else if (record.parameters) {
             setParameters(record.parameters);
           } else if (record.data && Array.isArray(record.data)) {
@@ -84,11 +92,14 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
           } else if (record.data && record.data.parameters) {
             setParameters(record.data.parameters);
           } else {
-            setParameters(DEFAULT_PARAMETERS);
+            setParameters(JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
           }
+        } else {
+          setParameters(JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
+        setParameters(JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
       }
     };
     fetchExistingData();

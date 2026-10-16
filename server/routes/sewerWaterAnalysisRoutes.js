@@ -77,21 +77,7 @@ const SEED_READINGS = [
 ];
 
 // In-memory fallback cache
-const sewerWaterRecords = [
-  {
-    id: 'sewer_seed_1',
-    date: '2026-09-14',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'Sewer Water',
-    analysisType: 'Sewer Water Analysis',
-    readings: SEED_READINGS,
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-14T21:30:00Z').toISOString(),
-  },
-];
+const sewerWaterRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -144,7 +130,7 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              readings: readings.length > 0 ? readings : SEED_READINGS,
+              readings: readings || [],
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',

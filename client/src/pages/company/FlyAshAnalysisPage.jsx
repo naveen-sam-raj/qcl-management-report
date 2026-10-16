@@ -28,12 +28,22 @@ import {
   Flame,
 } from 'lucide-react';
 
-// Default initial readings matching the laboratory shifts (07:00, 15:00, 23:00)
+// Default initial readings with empty measurement fields
 const DEFAULT_READINGS = [
-  { id: '1', time: '07:00', combustible: '1.2', gcv: '94' },
+  { id: '1', time: '07:00', combustible: '', gcv: '' },
   { id: '2', time: '15:00', combustible: '', gcv: '' },
   { id: '3', time: '23:00', combustible: '', gcv: '' },
 ];
+
+const DEFAULT_LOCKS = {
+  shift1Saved: false,
+  shift2Saved: false,
+  shift3Saved: false,
+  shift1Locked: false,
+  shift2Locked: false,
+  shift3Locked: false,
+  shift3Edits: 0,
+};
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -47,7 +57,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(DEFAULT_READINGS);
+  const [readings, setReadings] = useState(() => DEFAULT_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -55,15 +65,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
-  const [lockedShifts, setLockedShifts] = useState({
-    shift1Saved: false,
-    shift2Saved: false,
-    shift3Saved: false,
-    shift1Locked: false,
-    shift2Locked: false,
-    shift3Locked: false,
-    shift3Edits: 0,
-  });
+  const [lockedShifts, setLockedShifts] = useState(DEFAULT_LOCKS);
   const [editedFields, setEditedFields] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
@@ -123,7 +125,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
           }
           
           if (!record) {
-             // Leave default
+            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -132,14 +134,20 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
+          } else {
+            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
           }
         } else {
+          setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
+          setLockedShifts(DEFAULT_LOCKS);
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing Fly Ash data', err);
+        setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
+        setLockedShifts(DEFAULT_LOCKS);
         setEditedFields({});
         setRecordId(null);
       }

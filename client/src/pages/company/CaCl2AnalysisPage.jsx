@@ -26,18 +26,18 @@ import {
   ACL_CACL2_LIMITS,
 } from '../../services/analysisValidation';
 
-// Default initial readings matching laboratory reference (Frequency: Day)
+// Default initial readings with empty measurement fields (Frequency: Day)
 const DEFAULT_READINGS = [
   {
     id: 'cacl2_1',
     sample: 'CaCl2 Solution',
     frequency: 'Day',
     time: '08:00',
-    ph: '7.7',
-    conc: '20',
-    fnh3: '1000',
-    cnh3: '500',
-    ss: '60',
+    ph: '',
+    conc: '',
+    fnh3: '',
+    cnh3: '',
+    ss: '',
   },
 ];
 

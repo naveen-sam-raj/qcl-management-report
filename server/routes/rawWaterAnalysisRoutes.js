@@ -50,22 +50,7 @@ const SEED_PARAMETERS = {
 };
 
 // In-memory fallback cache
-const rawWaterRecords = [
-  {
-    id: 'rawwater_seed_1',
-    date: '2026-09-14',
-    time: '08:00',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'Raw Water',
-    analysisType: 'Raw Water Analysis',
-    parameters: SEED_PARAMETERS,
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-14T08:30:00Z').toISOString(),
-  },
-];
+const rawWaterRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -119,7 +104,7 @@ router.get('/', async (req, res) => {
               id: doc._id,
               date: doc.date,
               time: payloadData.time || '08:00',
-              parameters: params || SEED_PARAMETERS,
+              parameters: params || {},
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',

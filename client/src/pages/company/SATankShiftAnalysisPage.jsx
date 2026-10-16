@@ -50,13 +50,13 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
     if (!date) return;
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/?date=${date}`);
+        const response = await api.get(`/${tankKey}-analysis?date=${date}`);
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
           if (!record) {
-             // Leave default
+            setData(buildEmptyData(parameters));
           } else if (record.shifts) {
             setData(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -70,15 +70,18 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           } else if (record.data && record.data.rows) {
             setData(record.data.rows);
           } else {
-            // Leave default
+            setData(buildEmptyData(parameters));
           }
+        } else {
+          setData(buildEmptyData(parameters));
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
+        setData(buildEmptyData(parameters));
       }
     };
     fetchExistingData();
-  }, [date]);
+  }, [date, tankKey, parameters]);
 
 
   const handleChange = useCallback((shiftKey, paramKey, value) => {

@@ -30,14 +30,14 @@ import {
   Lock,
 } from 'lucide-react';
 
-// Default initial readings matching the user's legacy screenshot
+// Default initial readings with empty measurement fields
 const DEFAULT_READINGS = [
-  { id: 't0630', time: '06:30', exCao: '00.00', fnh3: '272', cnh3: '1190', tnh3: '1462', nahco3: '0' },
-  { id: 't0730', time: '07:30', exCao: '00.00', fnh3: '340', cnh3: '1870', tnh3: '2210', nahco3: '0' },
-  { id: 't0830', time: '08:30', exCao: '00.00', fnh3: '425', cnh3: '8330', tnh3: '8755', nahco3: '0' },
-  { id: 't0930', time: '09:30', exCao: '00.00', fnh3: '510', cnh3: '4420', tnh3: '4930', nahco3: '0' },
-  { id: 't1030', time: '10:30', exCao: '00.00', fnh3: '238', cnh3: '13090', tnh3: '13328', nahco3: '0' },
-  { id: 't1130', time: '11:30', exCao: '00.00', fnh3: '442', cnh3: '21250', tnh3: '21692', nahco3: '0' },
+  { id: 't0630', time: '06:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
+  { id: 't0730', time: '07:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
+  { id: 't0830', time: '08:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
+  { id: 't0930', time: '09:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
+  { id: 't1030', time: '10:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
+  { id: 't1130', time: '11:30', exCao: '', fnh3: '', cnh3: '', tnh3: '', nahco3: '' },
 ];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -52,7 +52,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── States ──
   const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(DEFAULT_READINGS);
+  const [readings, setReadings] = useState(() => DEFAULT_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -102,7 +102,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
           }
 
           if (!record) {
-             // Leave default
+            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
           } else if (record.shifts) {
             setReadings(record.shifts);
           } else if (record.readings && Object.keys(record.readings).length > 0) {
@@ -111,14 +111,20 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
             setReadings(record.data);
           } else if (Array.isArray(record) && record.length > 0) {
             setReadings(record);
+          } else {
+            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
           }
         } else {
+          setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
+          setLockedSlots({});
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing Distiller Waste data', err);
+        setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
+        setLockedSlots({});
         setEditedFields({});
         setRecordId(null);
       }
@@ -168,11 +174,11 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
       {
         id: nextId,
         time: '12:30',
-        exCao: '00.00',
+        exCao: '',
         fnh3: '',
         cnh3: '',
         tnh3: '',
-        nahco3: '0',
+        nahco3: '',
       },
     ]);
   };

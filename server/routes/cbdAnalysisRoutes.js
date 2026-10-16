@@ -41,30 +41,7 @@ const SEED_SHIFTS = {
 };
 
 // In-memory fallback cache
-const cbdRecords = [
-  {
-    id: 'cbd_seed_1',
-    date: '2026-09-13',
-    plant: 'OFFSET',
-    plantCode: 'OFFSITE',
-    unit: 'CBD',
-    analysisType: 'CBD Analysis',
-    shifts: SEED_SHIFTS,
-    lockedShifts: {
-      shift1Saved: true,
-      shift2Saved: false,
-      shift3Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift3Locked: false,
-      shift3Edits: 0,
-    },
-    editedFields: {},
-    editAuditHistory: [],
-    submittedBy: 'Shift Chemist',
-    submittedAt: new Date('2026-09-13T10:00:00Z').toISOString(),
-  },
-];
+const cbdRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -128,7 +105,7 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              shifts: shifts || SEED_SHIFTS,
+              shifts: shifts || {},
               lockedShifts: payloadData.lockedShifts || defaultLocks,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],

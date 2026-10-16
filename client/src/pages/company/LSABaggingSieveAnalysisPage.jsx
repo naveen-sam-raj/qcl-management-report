@@ -48,18 +48,18 @@ const PARAMETERS = [
 
 // Pre-configured sampling time slots based on laboratory schedule (1 Hour Once frequency)
 const DEFAULT_ROWS = [
-  { id: 'r1',  time: '09:30', bss10: '0.1', bss30: '1.8', m30: '4.0', bss60: '5.8', p10: '0.1', p30: '1.8', p60: '4.0', m60: '5.8', isDefault: true },
-  { id: 'r2',  time: '10:30', bss10: '0.1', bss30: '1.7', m30: '4.1', bss60: '5.7', p10: '0.1', p30: '1.7', p60: '4.1', m60: '5.7', isDefault: true },
-  { id: 'r3',  time: '11:30', bss10: '0.1', bss30: '1.9', m30: '4.0', bss60: '5.9', p10: '0.1', p30: '1.9', p60: '4.0', m60: '5.9', isDefault: true },
-  { id: 'r4',  time: '14:30', bss10: '0.1', bss30: '1.6', m30: '4.2', bss60: '5.6', p10: '0.1', p30: '1.6', p60: '4.2', m60: '5.6', isDefault: true },
-  { id: 'r5',  time: '16:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r6',  time: '18:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r7',  time: '20:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r8',  time: '22:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r9',  time: '00:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r10', time: '02:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r11', time: '04:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
-  { id: 'r12', time: '06:30', bss10: '',    bss30: '',    m30: '',    bss60: '',    p10: '',    p30: '',    p60: '',    m60: '',    isDefault: true },
+  { id: 'r1',  time: '09:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r2',  time: '10:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r3',  time: '11:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r4',  time: '14:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r5',  time: '16:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r6',  time: '18:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r7',  time: '20:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r8',  time: '22:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r9',  time: '00:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r10', time: '02:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r11', time: '04:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
+  { id: 'r12', time: '06:30', bss10: '', bss30: '', m30: '', bss60: '', p10: '', p30: '', p60: '', m60: '', isDefault: true },
 ];
 
 const buildEmptyRows = () =>
@@ -165,6 +165,12 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
       }
     } catch (err) {
       console.warn('[LSABaggingSieve] Fetch note:', err);
+      setRows(DEFAULT_ROWS);
+      setInitialRows(JSON.parse(JSON.stringify(DEFAULT_ROWS)));
+      setRecordId(null);
+      setEditedFields({});
+      setEditAuditHistory([]);
+      setEmailDelivery(null);
     } finally {
       setLoading(false);
     }
