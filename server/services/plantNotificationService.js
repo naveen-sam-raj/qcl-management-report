@@ -318,7 +318,8 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
     const adminDocs = await User.find(adminQuery).select('email').lean();
     adminEmails = adminDocs
       .map((a) => (a.email && typeof a.email === 'string' && a.email.includes('@') ? a.email.trim().toLowerCase() : null))
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((email) => !email.endsWith('@spicglobal.com') && !email.includes('spicglobal.com'));
   } catch (aErr) {
     console.warn('[PlantNotification] Could not query admin recipients:', aErr.message);
   }
@@ -4480,10 +4481,13 @@ const executeSaveAndEmailWorkflow = async ({
 
   // 8. Dispatch Email (EmailJS HTTPS API - zero Excel attachments across all plants)
   let emailResult = { success: false, emailStatus: 'failed', error: 'Email dispatch failed' };
+  const targetEmailRecipients = (plantCode === 'CO2' || String(plantName).toUpperCase().includes('CO2'))
+    ? [assignedUser.email]
+    : (recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email]);
   emailResult = await sendPlantAnalysisEmail({
     plantDoc,
     assignedUser,
-    recipientEmails: recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email],
+    recipientEmails: targetEmailRecipients,
     analysisType: analysisType || `${plantName} Analysis`,
     shift: targetShift,
     savedRecord,
