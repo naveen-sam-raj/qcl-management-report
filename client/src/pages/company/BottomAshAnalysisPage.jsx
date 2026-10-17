@@ -351,7 +351,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
         return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
       }
       if (lockedShifts.shift1Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
+        return <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
       }
       return <RecordStatusBadge status="NEW" subLabel="first entry" />;
     }
@@ -363,7 +363,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
         return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
       }
       if (lockedShifts.shift2Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
+        return <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
       }
       return <RecordStatusBadge status="NEW" subLabel="first entry" />;
     }
@@ -433,7 +433,7 @@ const BottomAshAnalysisPage = ({ plantId = 'offset' }) => {
             <StatusSaveButton
               id="btn-bottomash-save"
               saving={saving}
-              isLocked={Boolean(lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked)}
+              isLocked={Boolean(lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))}
               savePhase={savePhase}
               onClick={handleSaveClick}
               title="Save Bottom Ash analysis"

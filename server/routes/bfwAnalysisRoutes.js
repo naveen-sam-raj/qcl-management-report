@@ -61,8 +61,8 @@ const SEED_READINGS = [
   },
 ];
 
-// In-memory fallback cache
-const bfwRecords = [];
+// In-memory fallback cache (cleared on restart)
+let bfwRecords = [];
 
 // Apply authentication middleware
 router.use(protect);
@@ -270,6 +270,13 @@ router.post('/', async (req, res) => {
     };
     if (req.user && req.user.company) {
       query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+    }
+
+    let existingDoc = null;
+    try {
+      existingDoc = await PlantAnalysisRecord.findOne(query);
+    } catch (findErr) {
+      console.warn('[BFW POST] Error querying existingDoc:', findErr.message);
     }
 
     // Check one-time edit restriction policy

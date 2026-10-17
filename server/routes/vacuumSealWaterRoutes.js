@@ -320,44 +320,52 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Check if shift1/shift2/shift3 values changed
+    const s1Changed = s1Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+    const s2Changed = s2Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+    const s3Changed = s3Rows.some((newRow) => {
+      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
+      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    });
+
     // Check Lock Violations
-    if (lockedShifts.shift1Locked) {
-      const s1Violated = s1Rows.some((newRow) => {
-        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-        return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    const isAllPermanentlyLocked = Boolean(
+      lockedShifts.shift3Locked ||
+      (lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked) ||
+      (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)
+    );
+    if (isAllPermanentlyLocked) {
+      return res.status(400).json({
+        success: false,
+        message: 'All shifts for this date are permanently locked. No further edits permitted.',
       });
-      if (s1Violated) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 1 is permanently locked. Modifications to Shift 1 are not permitted.',
-        });
-      }
     }
 
-    if (lockedShifts.shift2Locked) {
-      const s2Violated = s2Rows.some((newRow) => {
-        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-        return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    if ((lockedShifts.shift1Locked || lockedShifts.shift2Saved) && s1Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'I SHIFT is permanently locked because II SHIFT has already been saved.',
       });
-      if (s2Violated) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 2 is permanently locked. Modifications to Shift 2 are not permitted.',
-        });
-      }
     }
 
-    if (lockedShifts.shift3Locked) {
-      const s3Violated = s3Rows.some((newRow) => {
-        const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-        return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
+    if ((lockedShifts.shift2Locked || lockedShifts.shift3Saved) && s2Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'II SHIFT is permanently locked because III SHIFT has already been saved.',
       });
-      if (s3Violated) {
-        return res.status(400).json({
-          success: false,
-          message: 'Shift 3 has exhausted its permitted edits and is permanently locked.',
-        });
-      }
+    }
+
+    if ((lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) && s3Changed) {
+      return res.status(400).json({
+        success: false,
+        message: 'III SHIFT has exhausted its single permitted correction edit and all shifts for this date are permanently locked.',
+      });
     }
 
     // Field-level edit audit
@@ -368,15 +376,21 @@ router.post('/', async (req, res) => {
       readings.forEach((newRow, idx) => {
         const rowId = newRow.id || `row_${idx}`;
         const oldRow = oldReadings.find((r) => r.id === rowId || r.time === newRow.time);
+        const shiftType = getShiftFromTime(newRow.time);
+        const wasPriorSaved =
+          (shiftType === 'shift1' && existingDoc.data.lockedShifts?.shift1Saved) ||
+          (shiftType === 'shift2' && existingDoc.data.lockedShifts?.shift2Saved) ||
+          (shiftType === 'shift3' && existingDoc.data.lockedShifts?.shift3Saved);
 
-        if (oldRow) {
+        if (oldRow && wasPriorSaved) {
           [...NUMERIC_FIELDS, 'ca'].forEach((f) => {
             const oldVal = oldRow[f];
             const newVal = newRow[f];
 
             if (isValDiff(oldVal, newVal)) {
-              const fieldKey = `${rowId}_${f}`;
-              editedFields[fieldKey] = true;
+              editedFields[`${rowId}_${f}`] = true;
+              editedFields[`${newRow.time}_${f}`] = true;
+              editedFields[`${idx + 1}_${f}`] = true;
               editAuditHistory.push({
                 rowId,
                 time: newRow.time,
@@ -392,53 +406,29 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Check if shift1/shift2/shift3 values changed
-    const s1Changed = s1Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-    const s2Changed = s2Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-    const s3Changed = s3Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-
-    // Update Shift Lock State Machine (One-time edit per shift)
+    // Update Shift Lock State Machine
     if (hasS1) {
-      if (lockedShifts.shift1Saved && s1Changed) {
-        lockedShifts.shift1Edits = (lockedShifts.shift1Edits || 0) + 1;
-        if (lockedShifts.shift1Edits >= 1) {
-          lockedShifts.shift1Locked = true;
-        }
-      } else {
-        lockedShifts.shift1Saved = true;
-      }
+      lockedShifts.shift1Saved = true;
+      // Shift 1 remains editable until Shift 2 is saved
     }
 
     if (hasS2) {
+      lockedShifts.shift2Saved = true;
       lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
-      if (lockedShifts.shift2Saved && s2Changed) {
-        lockedShifts.shift2Edits = (lockedShifts.shift2Edits || 0) + 1;
-        if (lockedShifts.shift2Edits >= 1) {
-          lockedShifts.shift2Locked = true;
-        }
-      } else {
-        lockedShifts.shift2Saved = true;
-      }
+      // Shift 2 remains editable until Shift 3 is saved
     }
 
     if (hasS3) {
+      lockedShifts.shift1Locked = true;
       lockedShifts.shift2Locked = true; // Lock Shift 2 permanently when Shift 3 is saved
       if (lockedShifts.shift3Saved && s3Changed) {
+        // Permitted single correction edit
         lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-        if (lockedShifts.shift3Edits >= 1) {
-          lockedShifts.shift3Locked = true;
-        }
-      } else {
+        lockedShifts.shift3Locked = true; // Permanently lock all 3 shifts
+      } else if (!lockedShifts.shift3Saved) {
         lockedShifts.shift3Saved = true;
+        lockedShifts.shift3Edits = 0;
+        lockedShifts.shift3Locked = false; // 1 correction edit permitted
       }
     }
 

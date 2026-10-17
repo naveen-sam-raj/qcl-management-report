@@ -105,23 +105,25 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
         if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
           setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
         }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
+        const effectiveEmailStatus = response.data?.emailStatus || (Array.isArray(response.data?.data) ? response.data?.data[0]?.emailStatus : null);
+        if (effectiveEmailStatus) {
+          if (effectiveEmailStatus === 'sent') setSavePhase('completed');
+          else if (effectiveEmailStatus === 'failed') setSavePhase('email_failed');
           else setSavePhase('idle');
         }
 
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          if (record && (record._id || record.id)) {
-            setRecordId(record._id || record.id);
+          const rId = response.data?.recordId || (record && (record._id || record.id));
+          if (rId) {
+            setRecordId(rId);
           }
-          if (record?.lockedShifts) {
-            setLockedShifts(record.lockedShifts);
+          if (record?.lockedShifts || record?.data?.lockedShifts) {
+            setLockedShifts(record.lockedShifts || record.data.lockedShifts);
           }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
+          if (record?.editedFields || record?.data?.editedFields) {
+            setEditedFields(record.editedFields || record.data.editedFields);
           } else {
             setEditedFields({});
           }
@@ -249,8 +251,9 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
       if (res.data?.success) {
         setSaveSuccess(true);
         const record = res.data.data;
-        if (record?._id || record?.id) {
-          setRecordId(record._id || record.id);
+        const recId = res.data?.recordId || (record && (record._id || record.id));
+        if (recId) {
+          setRecordId(recId);
         }
         if (record?.lockedShifts) {
           setLockedShifts(record.lockedShifts);
@@ -481,31 +484,31 @@ const VacuumSealWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 const time = String(row.time || '');
                 if (idx === 0 || time === '07:00') {
                   if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="locked" />;
+                    shiftBadge = <RecordStatusBadge status="locked" subLabel="shift locked" />;
                   } else if (lockedShifts.shift1Saved) {
-                    shiftBadge = <RecordStatusBadge status="editable" />;
+                    shiftBadge = <RecordStatusBadge status="editable" subLabel="saved" />;
                   } else {
-                    shiftBadge = <RecordStatusBadge status="new" />;
+                    shiftBadge = <RecordStatusBadge status="new" subLabel="first entry" />;
                   }
                 } else if (idx === 1 || time === '15:00') {
                   if (!lockedShifts.shift1Saved) {
-                    shiftBadge = <RecordStatusBadge status="waiting" />;
+                    shiftBadge = <RecordStatusBadge status="waiting" subLabel="pending shift 1" />;
                   } else if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) {
-                    shiftBadge = <RecordStatusBadge status="locked" />;
+                    shiftBadge = <RecordStatusBadge status="locked" subLabel="shift locked" />;
                   } else if (lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="editable" />;
+                    shiftBadge = <RecordStatusBadge status="editable" subLabel="saved" />;
                   } else {
-                    shiftBadge = <RecordStatusBadge status="new" />;
+                    shiftBadge = <RecordStatusBadge status="new" subLabel="first entry" />;
                   }
                 } else if (idx === 2 || time === '23:00') {
                   if (!lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="waiting" />;
+                    shiftBadge = <RecordStatusBadge status="waiting" subLabel="pending shift 2" />;
                   } else if (lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) {
-                    shiftBadge = <RecordStatusBadge status="locked" />;
+                    shiftBadge = <RecordStatusBadge status="locked" subLabel="shift locked" />;
                   } else if (lockedShifts.shift3Saved) {
-                    shiftBadge = <RecordStatusBadge status="editable" />;
+                    shiftBadge = <RecordStatusBadge status="editable" subLabel="1 edit left" />;
                   } else {
-                    shiftBadge = <RecordStatusBadge status="new" />;
+                    shiftBadge = <RecordStatusBadge status="new" subLabel="first entry" />;
                   }
                 }
 

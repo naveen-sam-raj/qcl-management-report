@@ -84,7 +84,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
     if (idx === 2 || time === '23:00') {
       if (!lockedShifts.shift2Saved) return true; // Waiting for Shift 2
       if (lockedShifts.shift3Locked) return true;
-      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 2) return true;
+      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
       return false;
     }
     return false;
@@ -396,7 +396,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
             <StatusSaveButton
               id="btn-flyash-save"
               saving={saving}
-              isLocked={Boolean(lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked)}
+              isLocked={Boolean(lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))}
               savePhase={savePhase}
               onClick={initiateSave}
               title="Save Fly Ash Analysis"
@@ -494,7 +494,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                   if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
                     shiftBadge = <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
                   } else if (lockedShifts.shift1Saved) {
-                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
+                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
                   } else {
                     shiftBadge = <RecordStatusBadge status="NEW" subLabel="first entry" />;
                   }
@@ -504,7 +504,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                   } else if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) {
                     shiftBadge = <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
                   } else if (lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
+                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
                   } else {
                     shiftBadge = <RecordStatusBadge status="NEW" subLabel="first entry" />;
                   }
