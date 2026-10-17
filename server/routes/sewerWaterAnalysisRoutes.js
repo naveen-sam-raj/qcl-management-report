@@ -395,6 +395,8 @@ router.post('/', async (req, res) => {
       }
     });
 
+    const saveCount = (existingDoc?.data?.saveCount || 0) + 1;
+
     const recordData = {
       id: existingDoc?.data?.id || `sewer_${Date.now()}`,
       date: payload.date,
@@ -503,7 +505,7 @@ router.post('/', async (req, res) => {
       emailRecipient,
       emailMessageId: emailResult.messageId || '',
       emailError: isEmailDelivered ? undefined : (emailResult.error || emailResult.emailError || emailResult.message),
-      lockedShifts,
+      lockedSlots,
       editedFields,
       editAuditHistory,
       data: recordData,
