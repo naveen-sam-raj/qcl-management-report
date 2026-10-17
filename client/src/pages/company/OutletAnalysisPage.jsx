@@ -126,15 +126,15 @@ const OutletAnalysisPage = ({ plantId = 'co2' }) => {
     (shiftKey) => {
       if (isViewOnly) return true;
       if (shiftKey === 'shift1') {
-        return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+        return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
       }
       if (shiftKey === 'shift2') {
         if (!lockedShifts.shift1Saved) return true;
-        return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+        return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
       }
       if (shiftKey === 'shift3') {
         if (!lockedShifts.shift2Saved) return true;
-        if (lockedShifts.shift3) return true;
+        if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
         if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
         return false;
       }
@@ -146,18 +146,18 @@ const OutletAnalysisPage = ({ plantId = 'co2' }) => {
   const getShiftStatus = useCallback(
     (shiftKey) => {
       if (shiftKey === 'shift1') {
-        if (lockedShifts.shift1 || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
         if (lockedShifts.shift1Saved) return 'EDITABLE';
         return 'NEW';
       }
       if (shiftKey === 'shift2') {
-        if (lockedShifts.shift2 || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
         if (lockedShifts.shift2Saved) return 'EDITABLE';
         if (lockedShifts.shift1Saved) return 'EDITABLE';
         return 'WAITING';
       }
       if (shiftKey === 'shift3') {
-        if (lockedShifts.shift3 || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
+        if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
           return 'LOCKED';
         if (lockedShifts.shift3Saved) return 'EDITABLE';
         if (lockedShifts.shift2Saved) return 'EDITABLE';
@@ -735,6 +735,16 @@ const OutletAnalysisPage = ({ plantId = 'co2' }) => {
                                 </span>
                               )}
                             </div>
+
+                            {/* EDITED label directly below the corresponding edited value */}
+                            {isFieldEdited && (
+                              <span
+                                className="inline-flex items-center text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 mt-1 shadow-2xs select-none"
+                                title="Field modified in permitted edit"
+                              >
+                                Edited
+                              </span>
+                            )}
 
                             {isFormatError && (
                               <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
