@@ -688,49 +688,18 @@ router.post('/', async (req, res) => {
       console.warn('[GasConc] Activity log warning:', logErr.message);
     }
 
-    // 11. Centralized Email Workflow Dispatch to Registered SA Plant Operator
-    let emailStatus = 'pending';
-    let emailRecipient = null;
-    let emailMessage = 'Gas Conc. Analysis saved successfully!';
-
-    try {
-      const emailPromise = executeSaveAndEmailWorkflow({
-        plantIdentifier: 'SA',
-        analysisType: 'Gas Conc. Analysis',
-        unit: 'Gas Conc.',
-        shift: targetShift !== 'all' ? SHIFT_DISPLAY_NAMES[targetShift] || targetShift : 'All Shifts',
-        date: submissionDate,
-        data: recordPayload,
-        submittedBy: recordPayload.submittedBy,
-        submittedById: recordPayload.submittedById,
-        explicitRecord: savedRecordDoc,
-        saveEventId,
-      });
-
-      const workflowResult = await emailPromise;
-      emailStatus = workflowResult.emailStatus || (workflowResult.emailSent ? 'sent' : 'failed');
-      emailRecipient = workflowResult.recipient || workflowResult.primaryEmail || null;
-      emailMessage = workflowResult.emailSent
-        ? `Saved and notification dispatched to ${emailRecipient}`
-        : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'Delivery rejected'}`;
-    } catch (emailWorkflowErr) {
-      console.warn('[GasConc] Email workflow warning:', emailWorkflowErr.message);
-      emailStatus = 'failed';
-      emailMessage = `Saved, but email delivery encountered an error: ${emailWorkflowErr.message}`;
-    }
-
     return res.status(200).json({
       success: true,
-      message: emailMessage,
+      message: 'Gas Conc. Analysis saved successfully in MongoDB ✓',
       data: recordPayload,
       record: recordPayload,
       recordId: savedRecordDoc?._id || recordPayload.id,
       lockedShifts: updatedLockedShifts,
       editedFields,
       editAuditHistory,
-      emailStatus,
-      emailDeliveryStatus: emailStatus === 'sent' ? 'sent' : (emailStatus === 'failed' ? 'failed' : 'pending'),
-      emailRecipient,
+      emailStatus: 'disabled',
+      emailDeliveryStatus: 'disabled',
+      emailRecipient: null,
       saveEventId,
     });
   } catch (error) {
@@ -749,57 +718,12 @@ router.post('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    let record = null;
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
-      record = await PlantAnalysisRecord.findById(id);
-    }
-    if (!record) {
-      record = gasConcRecords.find((r) => (r._id || r.id).toString() === id.toString());
-    }
-
-    if (!record) {
-      return res.status(404).json({
-        success: false,
-        message: 'Gas Conc. Analysis record not found.',
-      });
-    }
-
-    const result = await executeSaveAndEmailWorkflow({
-      plantIdentifier: record.plantCode || 'SA',
-      analysisType: record.analysisType || 'Gas Conc. Analysis',
-      unit: 'Gas Conc.',
-      shift: record.shift || 'All Shifts',
-      date: record.date,
-      data: record.data || record,
-      submittedBy: record.submittedBy || req.user?.name,
-      submittedById: record.submittedById || req.user?._id,
-      explicitRecord: record,
-      saveEventId: `gc_retry_${Date.now()}`,
-    });
-
-    const isSuccess = result?.emailSent || result?.emailStatus === 'sent';
-    const recipient = result?.recipient || result?.primaryEmail || null;
-
-    return res.status(200).json({
-      success: true,
-      emailSent: isSuccess,
-      emailDeliveryStatus: isSuccess ? 'sent' : 'failed',
-      emailRecipient: recipient,
-      recipient,
-      message: isSuccess
-        ? `Notification email successfully re-sent to ${recipient}.`
-        : `Email delivery failed: ${result?.emailError || result?.message || 'SMTP delivery rejected'}`,
-    });
-  } catch (error) {
-    console.error('[GasConc] Retry email error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to re-send notification email: ' + error.message,
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 /**

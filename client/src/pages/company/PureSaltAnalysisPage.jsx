@@ -171,8 +171,18 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [confirmData, setConfirmData] = useState(null);
 
   // Shift-Wise Input Locking: null | 'shift1' | 'shift2' | 'shift3'
-  // When null, all shifts are read-only until Admin explicitly selects an available shift
-  const [activeEditingShift, setActiveEditingShift] = useState(null);
+  // Defaults to 'shift1' so Shift 1 is immediately open and editable on load
+  const [activeEditingShift, setActiveEditingShift] = useState('shift1');
+
+  // Helper to determine the active editable shift based on lock state
+  const resolveActiveShift = useCallback((lShifts = {}) => {
+    const areAllShiftsLocked = Boolean(lShifts.shift3Saved && (lShifts.shift3Edits || 0) >= 1);
+    if (areAllShiftsLocked) return null;
+    if (!lShifts.shift1Saved || !lShifts.shift1) return 'shift1';
+    if (!lShifts.shift2Saved || !lShifts.shift2) return 'shift2';
+    if (!lShifts.shift3Saved || (lShifts.shift3Edits || 0) === 0) return 'shift3';
+    return null;
+  }, []);
 
   // EmailJS & Excel Reporting States
   const [recipientEmail, setRecipientEmail] = useState(
@@ -183,13 +193,13 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
   const [lastExcelData, setLastExcelData] = useState(null);
 
-    // Fetch existing data when date changes
+  // Fetch existing data when date changes
   useEffect(() => {
     if (!date) return;
     
     let active = true;
     setData(buildEmptyData()); // Clear stale data immediately while loading
-    setActiveEditingShift(null); // When date changes, all shifts default to read-only until explicitly selected
+    setActiveEditingShift('shift1'); // Default to shift1 for fresh input
 
     const fetchExistingData = async () => {
       try {
@@ -205,27 +215,32 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
             setOriginalData(JSON.parse(JSON.stringify(record.rows)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
+            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
             setOriginalData(JSON.parse(JSON.stringify(record.data)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
+            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
             setOriginalData(JSON.parse(JSON.stringify(record)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
+            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
             setLockedShifts({});
             setEditedFields({});
+            setActiveEditingShift('shift1');
           }
         } else {
           setData(buildEmptyData());
           setOriginalData(null);
           setLockedShifts({});
           setEditedFields({});
+          setActiveEditingShift('shift1');
         }
       } catch (err) {
         if (!active) return;
@@ -234,6 +249,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         setOriginalData(null);
         setLockedShifts({});
         setEditedFields({});
+        setActiveEditingShift('shift1');
       }
     };
     fetchExistingData();
@@ -241,7 +257,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, resolveActiveShift]);
 
 
   // ── Real-time input change (Accepts exact values without limits/tolerances) ──
@@ -269,7 +285,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const handleReset = () => {
     setData(buildEmptyData());
     setDate(getTodayAsiaKolkata());
-    setActiveEditingShift(null);
+    setActiveEditingShift('shift1');
     setErrors({});
     setSaveSuccess(false);
     setDateError(false);
@@ -473,33 +489,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
       }
-      setActiveEditingShift(null); // Return to read-only state upon successful save
+      setActiveEditingShift(resolveActiveShift(savedRecord?.lockedShifts || {}));
       setShowConfirmModal(false);
 
-      // Stage 2: "Generating Report..."
-      setSavePhase('generating');
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Stage 3: "Sending Email..."
-      setSavePhase('emailing');
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Stage 4: Final Status Messaging (truthful save & email outcome)
-      const emailSent = Boolean(response.data?.emailSent || response.data?.emailStatus === 'sent');
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
-      }
       setSaveSuccess(true);
-      if (emailSent) {
-        setSavePhase('completed');
-        showToast(response.data.message || 'Saved — Email Sent ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        showToast(
-          response.data?.message || 'Data saved to database, but email delivery failed.',
-          'warning'
-        );
-      }
+      setSavePhase('completed');
+      showToast(response.data?.message || 'Saved in MongoDB successfully ✓', 'success');
     } catch (err) {
       setSavePhase('idle');
       console.error('[PureSaltAnalysis] Database save failed:', err);

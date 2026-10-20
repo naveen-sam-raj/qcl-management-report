@@ -419,19 +419,8 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         setRecipientEmail(response.data.emailRecipient);
       }
 
-      const emailNotification = response.data?.emailNotification;
-      const statusFromApi = response.data?.emailStatus || savedRecord?.emailStatus;
-
-      if (response.data?.emailSent || statusFromApi === 'sent') {
-        setSavePhase('completed');
-        setEmailStatusDetail('Email accepted by SMTP server ✓');
-        showToast('Saved — Email Sent ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        const errDetail = emailNotification?.error || emailNotification?.message || 'Email delivery failed to mail server';
-        setEmailStatusDetail('Saved — Email Failed: ' + errDetail);
-        showToast('Saved — Email Failed: ' + errDetail, 'warning');
-      }
+      setSavePhase('completed');
+      showToast('Saved in MongoDB successfully ✓', 'success');
       setSaveSuccess(true);
     } catch (err) {
       setSavePhase('save_failed');

@@ -239,40 +239,8 @@ export const EditedBadge = ({ isEdited }) => {
 };
 
 /**
- * Retry email utility helper
+ * Retry email utility helper (Decommissioned)
  */
-export const retryAnalysisEmail = async ({
-  endpoint,
-  recordId,
-  setSavePhase,
-  setEmailStatusDetail,
-  showToast,
-  setSaving,
-}) => {
-  if (!recordId) {
-    showToast?.('No saved record found to retry email for.', 'warning');
-    return;
-  }
-  setSaving?.(true);
-  try {
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const res = await api.post(`${cleanEndpoint}/retry-email`, { recordId });
-    if (res.data?.success) {
-      setSavePhase?.('completed');
-      setEmailStatusDetail?.('Email delivered successfully upon retry ✓');
-      showToast?.('Email notification sent successfully!', 'success');
-    } else {
-      setSavePhase?.('email_failed');
-      setEmailStatusDetail?.(res.data?.message || 'SMTP retry rejected');
-      showToast?.(res.data?.message || 'Email retry failed.', 'error');
-    }
-  } catch (err) {
-    console.error('Email retry error:', err);
-    setSavePhase?.('email_failed');
-    const msg = err.response?.data?.message || err.message || 'SMTP Connection failed';
-    setEmailStatusDetail?.(msg);
-    showToast?.('Email retry failed: ' + msg, 'error');
-  } finally {
-    setSaving?.(false);
-  }
+export const retryAnalysisEmail = async () => {
+  return false;
 };

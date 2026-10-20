@@ -506,14 +506,12 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isEmailDelivered
-        ? `${is200 ? 'Cooling Water / 200#' : 'Cooling Water'} Analysis saved and email sent successfully.`
-        : `${is200 ? 'Cooling Water / 200#' : 'Cooling Water'} Analysis saved successfully in MongoDB. Email delivery failed: ` + (emailResult.error || emailResult.emailError || emailResult.message || 'No registered recipient available'),
+      message: `${is200 ? 'Cooling Water / 200#' : 'Cooling Water'} Analysis saved successfully in MongoDB ✓`,
       recordId: savedDoc._id,
-      emailStatus,
-      emailRecipient,
-      emailMessageId: emailResult.messageId || '',
-      emailError: isEmailDelivered ? undefined : (emailResult.error || emailResult.emailError || emailResult.message),
+      emailStatus: 'disabled',
+      emailRecipient: null,
+      emailSent: false,
+      emailPending: false,
       lockedShifts,
       editedFields,
       editAuditHistory,
@@ -535,82 +533,12 @@ router.post('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-    let doc = null;
-
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      doc = await PlantAnalysisRecord.findById(id);
-    }
-    if (!doc) {
-      doc = await PlantAnalysisRecord.findOne({
-        'data.id': id,
-        analysisType: 'Cooling Water (C.W Water) Analysis',
-      });
-    }
-
-    if (!doc) {
-      return res.status(404).json({
-        success: false,
-        message: 'Analysis record not found for email retry.',
-      });
-    }
-
-    // Do not resend duplicate notifications if already confirmed successful
-    if (doc.emailStatus === 'sent') {
-      return res.status(200).json({
-        success: true,
-        alreadySent: true,
-        emailSent: true,
-        emailStatus: 'sent',
-        emailRecipient: doc.emailRecipient || null,
-        message: `Notification email has already been successfully sent to ${doc.emailRecipient}.`,
-      });
-    }
-
-    const is200 = String(doc.unit || '').toLowerCase().includes('200');
-    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || req.headers['x-test-mode'] === 'true';
-    const retryEventId = `retry_coolingwater_${Date.now()}`;
-
-    const emailResult = await executeSaveAndEmailWorkflow({
-      plantIdentifier: 'OFFSITE',
-      analysisType: doc.analysisType || (is200 ? 'Cooling Water / 200#' : 'Cooling Water (C.W Water) Analysis'),
-      unit: doc.unit || (is200 ? 'cooling water 200#' : 'cooling water'),
-      shift: doc.shift || (is200 ? 'Shift Wise' : 'Day'),
-      date: doc.date,
-      data: doc.data,
-      submittedBy: req.user?.name || doc.submittedBy,
-      submittedById: req.user?._id || doc.submittedById,
-      company: doc.company,
-      explicitRecord: doc,
-      rawBody: doc.data,
-      saveEventId: retryEventId,
-      isTestMode,
-    });
-
-    const isEmailDelivered = emailResult.emailSent === true || (emailResult.success === true && emailResult.emailStatus === 'sent');
-    const status = isEmailDelivered ? 'sent' : 'failed';
-    doc.emailStatus = status;
-    if (emailResult.recipient) doc.emailRecipient = emailResult.recipient;
-    await doc.save();
-
-    return res.status(200).json({
-      success: true,
-      emailSent: isEmailDelivered,
-      emailStatus: status,
-      emailRecipient: doc.emailRecipient || null,
-      emailError: isEmailDelivered ? undefined : (emailResult.error || emailResult.emailError || emailResult.message),
-      message: isEmailDelivered
-        ? `Notification email successfully sent to ${doc.emailRecipient}.`
-        : `Email retry failed: ${emailResult.error || emailResult.emailError || emailResult.message || 'Delivery rejected'}.`,
-    });
-  } catch (err) {
-    console.error('Error in POST /api/cooling-water-analysis/:id/retry-email:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to retry email: ' + err.message,
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;

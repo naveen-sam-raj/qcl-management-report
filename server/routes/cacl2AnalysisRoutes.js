@@ -249,17 +249,15 @@ router.post('/', async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: emailSent
-        ? `Successfully saved CaCl2 Analysis & email sent ✓`
-        : `Successfully saved CaCl2 Analysis — Email delivery failed: ${lastEmailResult?.error || 'Unknown error'}`,
+      message: `Successfully saved CaCl2 Analysis in MongoDB ✓`,
       data: updatedRecordData,
       recordId: savedDoc?._id || updatedRecordData.id,
       saveEventId,
-      emailSent,
+      emailSent: false,
       emailPending: false,
-      emailStatus: finalEmailStatus,
-      emailRecipient,
-      emailNotification: lastEmailResult,
+      emailStatus: 'disabled',
+      emailRecipient: null,
+      emailNotification: null,
     });
   } catch (error) {
     console.error('Error in POST /api/cacl2-analysis:', error);
@@ -337,46 +335,12 @@ router.get('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    let record = null;
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
-      record = await PlantAnalysisRecord.findById(id);
-    }
-    if (!record) {
-      record = cacl2Records.find((r) => (r._id || r.id).toString() === id.toString());
-    }
-
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'CaCl2 analysis record not found.' });
-    }
-
-    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-    const result = await executeSaveAndEmailWorkflow({
-      plantIdentifier: record.plantCode || 'ACL',
-      analysisType: record.analysisType || 'CaCl2 Analysis',
-      unit: 'CaCl2',
-      shift: 'Day',
-      date: record.date,
-      data: record.data || record,
-      submittedBy: record.submittedBy || req.user?.name || 'Shift Chemist',
-      submittedById: req.user?._id || record.submittedById,
-      company: req.user?.company?._id || req.user?.company || record.company,
-      explicitRecord: record,
-    });
-
-    return res.status(result.success && result.emailSent ? 200 : 400).json({
-      success: result.success,
-      emailSent: result.emailSent,
-      emailStatus: result.emailStatus,
-      emailRecipient: result.recipient || result.data?.emailRecipient || '',
-      error: result.error,
-    });
-  } catch (error) {
-    console.error('[CaCl2 Retry Email] Error:', error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;

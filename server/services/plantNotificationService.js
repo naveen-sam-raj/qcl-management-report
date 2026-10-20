@@ -385,13 +385,14 @@ const sendPlantAnalysisEmail = async ({
   changedSlotKeys = [],
   isTestMode: testModeParam = false,
 }) => {
-  if (!assignedUser || !assignedUser.email) {
-    return {
-      success: false,
-      emailStatus: 'failed',
-      error: 'No user is assigned to this plant.',
-    };
-  }
+  // [EMAIL FUNCTIONALITY DECOMMISSIONED]
+  return {
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+    recipient: assignedUser?.email || '',
+  };
 
   // Extract exact server-generated timestamp from saved MongoDB record
   const serverTimestamp = savedRecord?.createdAt || savedRecord?.savedAt || new Date();
@@ -4429,174 +4430,65 @@ const executeSaveAndEmailWorkflow = async ({
   }
   }
 
-  // 6. Idempotency Check: Prevent duplicate notifications for records already successfully sent
-  if (!isRetry && !forceSend && explicitRecord && explicitRecord.emailStatus === 'sent' && (!changedSlotKeys || changedSlotKeys.length === 0)) {
-    console.log(`[SaveAndEmail] ℹ️ Record ${savedRecord._id} is already marked as 'sent' with no new changes. Skipping duplicate notification.`);
-    return {
-      success: true,
-      emailSent: true,
-      emailStatus: 'sent',
-      alreadySent: true,
-      message: 'Notification was already sent successfully for this record.',
-      recipient: assignedUser?.email || explicitRecord.emailRecipient,
-      messageId: explicitRecord.emailMessageId || '',
-      data: savedRecord,
-      excel: null,
-    };
-  }
-
-  // 7. Security Check: Assigned plant user
-  if (!primaryEmail || !assignedUser) {
-    console.warn(`[SaveAndEmail] No user assigned to plant "${plantName}". Skipping email dispatch.`);
-
-    // Record emailStatus in MongoDB as failed
-    const ModelToUpdate = explicitRecord?.constructor?.findByIdAndUpdate
-      ? explicitRecord.constructor
-      : PlantAnalysisRecord;
-
-    try {
-      if (savedRecord._id && ModelToUpdate.findByIdAndUpdate) {
-        await ModelToUpdate.findByIdAndUpdate(savedRecord._id, {
-          emailStatus: 'failed',
-          reportFileName: excelResult?.filename || excelFileName,
-        });
-        savedRecord.emailStatus = 'failed';
-      }
-    } catch (uErr) {}
-
-    return {
-      success: true,
-      emailSent: false,
-      emailStatus: 'failed',
-      message: 'No user is assigned to this plant.',
-      data: savedRecord,
-      excel: excelResult
-        ? {
-            fileName: excelResult.filename,
-            base64: excelResult.base64,
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            sizeBytes: excelResult.buffer?.length,
-          }
-        : null,
-    };
-  }
-
-  // 8. Dispatch Email (EmailJS HTTPS API - zero Excel attachments across all plants)
-  let emailResult = { success: false, emailStatus: 'failed', error: 'Email dispatch failed' };
-  const targetEmailRecipients = (['CO2', 'ACL'].includes(plantCode) || String(plantName).toUpperCase().includes('CO2') || String(plantName).toUpperCase().includes('ACL'))
-    ? [assignedUser.email]
-    : (recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email]);
-  emailResult = await sendPlantAnalysisEmail({
-    plantDoc,
-    assignedUser,
-    recipientEmails: targetEmailRecipients,
-    analysisType: analysisType || `${plantName} Analysis`,
-    shift: targetShift,
-    savedRecord,
-    excelBuffer: null,
-    excelFileName: null,
-    saveEventId,
-    changedSlotKeys,
-    isTestMode,
-  });
-
-  // 9. Update emailStatus in MongoDB (ONLY "sent" after EmailJS confirms; otherwise "failed")
-  const finalEmailStatus = emailResult.success ? 'sent' : 'failed';
+  // 6. [EMAIL FUNCTIONALITY DECOMMISSIONED]
+  // Email dispatch has been disabled. Data persistence to MongoDB and report generation are fully preserved.
   const ModelToUpdate = explicitRecord?.constructor?.findByIdAndUpdate
     ? explicitRecord.constructor
     : PlantAnalysisRecord;
 
   try {
-    if (savedRecord._id && ModelToUpdate.findByIdAndUpdate) {
+    if (savedRecord && savedRecord._id && ModelToUpdate.findByIdAndUpdate) {
       await ModelToUpdate.findByIdAndUpdate(savedRecord._id, {
-        emailStatus: finalEmailStatus,
-        emailRecipient: assignedUser.email,
-        emailMessageId: emailResult.messageId || '',
+        emailStatus: 'disabled',
         reportFileName: excelResult?.filename || excelFileName,
       });
-      savedRecord.emailStatus = finalEmailStatus;
+      savedRecord.emailStatus = 'disabled';
     }
   } catch (upErr) {
     console.warn(`[SaveAndEmail] Could not update record status: ${upErr.message}`);
   }
 
-  // 9. Activity Log Entry
+  // 7. Activity Log Entry
   try {
     if (ActivityLog && typeof ActivityLog.create === 'function') {
       await ActivityLog.create({
         action: 'PLANT_ANALYSIS_SAVED',
         user: submittedById,
         userName: submittedBy,
-        details: `${analysisType || 'Analysis'} saved for ${plantName}. Email ${
-          emailResult.success ? 'sent to ' + assignedUser.email : 'failed: ' + (emailResult.error || 'N/A')
-        }.`,
+        details: `${analysisType || 'Analysis'} saved for ${plantName}.`,
         timestamp: new Date(),
       });
     }
   } catch (logErr) {}
 
-  // 10. Return Response
-  if (emailResult.success) {
-    return {
-      success: true,
-      emailSent: true,
-      emailStatus: 'sent',
-      message: 'Saved & Emailed Successfully ✓',
-      recipient: assignedUser.email,
-      messageId: emailResult.messageId,
-      data: savedRecord,
-      excel: excelResult
-        ? {
-            fileName: excelResult.filename,
-            base64: excelResult.base64,
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            sizeBytes: excelResult.buffer?.length,
-          }
-        : null,
-    };
-  } else {
-    return {
-      success: true,
-      emailSent: false,
-      emailStatus: 'failed',
-      message: 'Data saved and Excel generated, but email sending failed.',
-      emailError: emailResult.error,
-      error: emailResult.error,
-      recipient: assignedUser.email,
-      data: savedRecord,
-      excel: excelResult
-        ? {
-            fileName: excelResult.filename,
-            base64: excelResult.base64,
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            sizeBytes: excelResult.buffer?.length,
-          }
-        : null,
-    };
-  }
+  // 8. Return Clean Database Persistence Confirmation
+  return {
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Saved in MongoDB successfully ✓',
+    data: savedRecord,
+    excel: excelResult
+      ? {
+          fileName: excelResult.filename,
+          base64: excelResult.base64,
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          sizeBytes: excelResult.buffer?.length,
+        }
+      : null,
+  };
 };
 
 /**
- * Legacy wrapper for backwards compatibility
+ * Legacy wrapper for backwards compatibility (Decommissioned)
  */
-const sendPlantUpdateNotification = async (params) => {
-  const { plant, whatUpdated, updatedBy, dateTime, details, excelBuffer, excelFileName } = params;
-  const plantDoc = await resolvePlant(plant, { analysisType: whatUpdated });
-  if (!plantDoc) return { success: false, error: `Could not identify plant for "${plant}"` };
-
-  const { assignedUser, primaryEmail } = await getPlantAssignedUser(plantDoc._id);
-  if (!assignedUser || !primaryEmail) {
-    return { success: false, error: 'No user is assigned to this plant.' };
-  }
-
-  return sendPlantAnalysisEmail({
-    plantDoc,
-    assignedUser,
-    analysisType: whatUpdated || `${plantDoc.name} Update`,
-    savedRecord: { createdAt: dateTime || new Date(), _id: 'rec_' + Date.now() },
-    excelBuffer,
-    excelFileName: excelFileName || `${plantDoc.code}_Report.xlsx`,
-  });
+const sendPlantUpdateNotification = async () => {
+  return {
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  };
 };
 
 module.exports = {

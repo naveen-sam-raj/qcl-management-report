@@ -237,38 +237,6 @@ router.post('/', async (req, res) => {
     }
 
     // 5. Asynchronous Email Dispatch via Centralized Workflow
-    let emailStatus = 'pending';
-    let emailRecipient = null;
-    let emailMessage = 'Saved successfully. Email dispatch initiated.';
-
-    try {
-      const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-
-      const emailPromise = executeSaveAndEmailWorkflow({
-        plantIdentifier: 'SA',
-        analysisType: 'LSA Shift Analysis',
-        unit: 'LSA',
-        shift: 'All Shifts',
-        date: payload.date,
-        data: recordPayload,
-        submittedBy: recordPayload.submittedBy,
-        submittedById: recordPayload.submittedById,
-        explicitRecord: savedRecordDoc,
-        saveEventId,
-      });
-
-      const workflowResult = await emailPromise;
-      emailStatus = workflowResult.emailStatus || (workflowResult.success ? 'sent' : 'failed');
-        emailRecipient = workflowResult.recipient || null;
-        emailMessage = workflowResult.emailSent
-          ? `Saved and notification dispatched to ${emailRecipient}`
-          : `Saved, but email delivery failed: ${workflowResult.emailError || workflowResult.message || 'SMTP delivery rejected'}`;
-    } catch (emailWorkflowErr) {
-      console.warn('[LSA Shift Email Warning]:', emailWorkflowErr.message);
-      emailStatus = 'failed';
-      emailMessage = `Saved, but email delivery encountered an error: ${emailWorkflowErr.message}`;
-    }
-
     // Audit log entry
     try {
       if (ActivityLog && typeof ActivityLog.create === 'function') {
@@ -287,13 +255,13 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: emailMessage,
+      message: 'LSA Shift Analysis saved successfully in MongoDB ✓',
       data: recordPayload,
       record: recordPayload,
       recordId: savedRecordDoc?._id || recordPayload.id,
-      emailStatus,
-      emailDeliveryStatus: emailStatus === 'sent' ? 'sent' : (emailStatus === 'failed' ? 'failed' : 'pending'),
-      emailRecipient,
+      emailStatus: 'disabled',
+      emailDeliveryStatus: 'disabled',
+      emailRecipient: null,
       editedFields,
       saveEventId,
     });
@@ -453,54 +421,12 @@ router.get('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    let record = null;
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
-      record = await PlantAnalysisRecord.findById(id);
-    }
-    if (!record) {
-      record = lsaShiftRecords.find((r) => (r._id || r.id).toString() === id.toString());
-    }
-
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'LSA Shift analysis record not found.' });
-    }
-
-    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-    const result = await executeSaveAndEmailWorkflow({
-      plantIdentifier: record.plantCode || 'SA',
-      analysisType: record.analysisType || 'LSA Shift Analysis',
-      unit: 'LSA',
-      shift: 'All Shifts',
-      date: record.date,
-      data: record.data || record,
-      submittedBy: record.submittedBy || req.user?.name,
-      submittedById: record.submittedById || req.user?._id,
-      explicitRecord: record,
-      saveEventId: `lsa_shift_retry_${Date.now()}`,
-    });
-
-    const isSuccess = result?.emailSent || result?.emailStatus === 'sent';
-    const recipient = result?.recipient || result?.primaryEmail || null;
-    return res.status(200).json({
-      success: true,
-      emailSent: isSuccess,
-      emailDeliveryStatus: isSuccess ? 'sent' : 'failed',
-      emailRecipient: recipient,
-      recipient,
-      message: isSuccess
-        ? `Notification email successfully re-sent to ${recipient}.`
-        : `Email delivery failed: ${result?.emailError || result?.message || 'SMTP delivery rejected'}`,
-    });
-  } catch (error) {
-    console.error('Error in retry email for LSA Shift analysis:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to re-send notification email: ' + error.message,
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;

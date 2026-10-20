@@ -68,46 +68,10 @@ export const LockedDateDisplay = ({ date, label = 'Date:', id = 'offset-date-dis
 };
 
 /**
- * Decoupled Retry Email Action
+ * Decoupled Retry Email Action (Decommissioned)
  */
-export const retryAnalysisEmail = async ({
-  endpoint,
-  recordId,
-  setSavePhase,
-  setEmailStatusDetail,
-  showToast,
-  setSaving,
-}) => {
-  if (!recordId) {
-    showToast?.('Cannot retry email: Record ID is not available.', 'error');
-    return false;
-  }
-  // Strip any leading /api prefix if present
-  const cleanEndpoint = endpoint.replace(/^\/api/, '');
-  if (setSaving) setSaving(true);
-  try {
-    const res = await api.post(`${cleanEndpoint}/${recordId}/retry-email`);
-    if (res.data?.success || res.data?.emailStatus === 'sent' || res.data?.emailSent) {
-      if (setSavePhase) setSavePhase('completed');
-      if (setEmailStatusDetail) setEmailStatusDetail('Email sent successfully on retry ✓');
-      showToast?.('Email resent successfully to registered plant operator!', 'success');
-      return true;
-    } else {
-      if (setSavePhase) setSavePhase('email_failed');
-      const err = res.data?.emailError || res.data?.message || 'Email delivery rejected by server.';
-      if (setEmailStatusDetail) setEmailStatusDetail(err);
-      showToast?.('Email retry failed: ' + err, 'error');
-      return false;
-    }
-  } catch (err) {
-    const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
-    if (setSavePhase) setSavePhase('email_failed');
-    if (setEmailStatusDetail) setEmailStatusDetail(msg);
-    showToast?.('Retry Email Error: ' + msg, 'error');
-    return false;
-  } finally {
-    if (setSaving) setSaving(false);
-  }
+export const retryAnalysisEmail = async () => {
+  return false;
 };
 
 /**

@@ -24,6 +24,19 @@ const SHIFT_DISPLAY_NAMES = {
 
 const STREAMS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
+const defaultLocks = {
+  shift1: false,
+  shift1Locked: false,
+  shift2: true,
+  shift2Locked: true,
+  shift3: true,
+  shift3Locked: true,
+  shift1Saved: false,
+  shift2Saved: false,
+  shift3Saved: false,
+  shift3Edits: 0,
+};
+
 // Asia/Kolkata date helper
 const getTodayKolkata = () => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -132,26 +145,39 @@ router.post('/', async (req, res) => {
       });
     };
 
-    let lockedShifts = existingData.lockedShifts || {
-      shift1: false,
-      shift2: false,
-      shift3: false,
-      shift1Saved: false,
-      shift2Saved: false,
-      shift3Saved: false,
-      shift3Edits: 0,
-    };
+    let lockedShifts = existingData.lockedShifts
+      ? { ...defaultLocks, ...existingData.lockedShifts }
+      : { ...defaultLocks };
     let editedFields = existingData.editedFields || {};
     let editAuditHistory = existingData.editAuditHistory || [];
 
-    // Helper: check if a shift is locked according to workflow rules
+    const areShiftsLocked = Boolean(lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
     const isShiftLocked = (key) => {
-      if (lockedShifts[key]) return true;
-      if (key === 'shift1' && lockedShifts.shift2Saved) return true;
-      if (key === 'shift2' && lockedShifts.shift3Saved) return true;
-      if (key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+      if (key === 'shift1') return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
+      if (key === 'shift2') {
+        if (!lockedShifts.shift1Saved) return true;
+        return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
+      }
+      if (key === 'shift3') {
+        if (!lockedShifts.shift2Saved) return true;
+        if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
+        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+        return false;
+      }
       return false;
     };
+
+    if (areShiftsLocked) {
+      const hasSlotChanges = targetShifts.some(
+        (key) => hasShiftData(key, incomingTimeRows) && isShiftDiff(key, existingTimeRows, incomingTimeRows)
+      );
+      if (hasSlotChanges) {
+        return res.status(400).json({
+          success: false,
+          message: 'All shifts for this date are permanently locked. No further edits permitted.',
+        });
+      }
+    }
 
     const willSave = {};
 
@@ -194,6 +220,13 @@ router.post('/', async (req, res) => {
     // If only FNH3 or PCL changed, associate with current active unlocked shift
     const shiftsToSave = targetShifts.filter((k) => willSave[k]);
     if (shiftsToSave.length === 0 && (fnh3Changed || pclChanged)) {
+      if (areShiftsLocked) {
+        return res.status(400).json({
+          success: false,
+          message: 'All shifts for today are permanently locked. Cannot edit FNH₃ or PCl.',
+        });
+      }
+      // Find current open shift
       if (!lockedShifts.shift1Saved || !lockedShifts.shift2Saved) {
         if (!lockedShifts.shift1Saved) shiftsToSave.push('shift1');
         else shiftsToSave.push('shift2');
@@ -219,15 +252,15 @@ router.post('/', async (req, res) => {
     let newS2Saved = lockedShifts.shift2Saved || willSave.shift2;
 
     if (willSave.shift2 && !newS1Saved) {
-      return res.status(400).json({ success: false, message: 'Cannot save II SHIFT before I SHIFT is saved.' });
+      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save II SHIFT before I SHIFT is saved.' });
     }
     if (willSave.shift3 && !newS2Saved) {
-      return res.status(400).json({ success: false, message: 'Cannot save III SHIFT before II SHIFT is saved.' });
+      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save III SHIFT before II SHIFT is saved.' });
     }
     if (willSave.shift3 && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
       return res.status(400).json({
         success: false,
-        message: 'III SHIFT has already reached its maximum edit limit (one final edit allowed).',
+        message: 'Cannot save III SHIFT because it is already permanently locked after 1 permitted correction.',
       });
     }
 
@@ -332,20 +365,58 @@ router.post('/', async (req, res) => {
     newlySavedShifts.push(activeShiftKey);
 
     // Update locked status
-    if (activeShiftKey === 'shift1') lockedShifts.shift1Saved = true;
-    if (activeShiftKey === 'shift2') lockedShifts.shift2Saved = true;
-    if (activeShiftKey === 'shift3') {
+    if (activeShiftKey === 'shift1') {
+      lockedShifts.shift1Saved = true;
+      lockedShifts.shift1 = false;
+      lockedShifts.shift1Locked = false;
+      lockedShifts.shift2 = false;
+      lockedShifts.shift2Locked = false;
       if (!lockedShifts.shift3Saved) {
-        lockedShifts.shift3Saved = true;
-      } else {
+        lockedShifts.shift3 = true;
+        lockedShifts.shift3Locked = true;
+      }
+    }
+    if (activeShiftKey === 'shift2') {
+      lockedShifts.shift2Saved = true;
+      lockedShifts.shift1 = true;
+      lockedShifts.shift1Locked = true;
+      lockedShifts.shift2 = false;
+      lockedShifts.shift2Locked = false;
+      lockedShifts.shift3 = false;
+      lockedShifts.shift3Locked = false;
+    }
+    if (activeShiftKey === 'shift3') {
+      lockedShifts.shift1 = true;
+      lockedShifts.shift1Locked = true;
+      lockedShifts.shift2 = true;
+      lockedShifts.shift2Locked = true;
+      if (lockedShifts.shift3Saved) {
         lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
+        lockedShifts.shift3 = true;
+        lockedShifts.shift3Locked = true;
+      } else {
+        lockedShifts.shift3Saved = true;
+        lockedShifts.shift3Edits = 0;
+        lockedShifts.shift3 = false;
+        lockedShifts.shift3Locked = false;
       }
     }
 
-    if (lockedShifts.shift2Saved) lockedShifts.shift1 = true;
-    if (lockedShifts.shift3Saved) lockedShifts.shift2 = true;
+    if (lockedShifts.shift2Saved) {
+      lockedShifts.shift1 = true;
+      lockedShifts.shift1Locked = true;
+    }
+    if (lockedShifts.shift3Saved) {
+      lockedShifts.shift2 = true;
+      lockedShifts.shift2Locked = true;
+    }
     if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
+      lockedShifts.shift1 = true;
+      lockedShifts.shift1Locked = true;
+      lockedShifts.shift2 = true;
+      lockedShifts.shift2Locked = true;
       lockedShifts.shift3 = true;
+      lockedShifts.shift3Locked = true;
     }
 
     // Package complete data structure
@@ -408,58 +479,75 @@ router.post('/', async (req, res) => {
       }
     } catch (logErr) {}
 
+    // Generate unique Save Event ID for this exact save operation
+    const saveEventId = 'SE_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const isTestMode =
+      process.env.NODE_ENV === 'test' ||
+      req.headers['x-test-mode'] === 'true' ||
+      req.headers['x-test-env'] === 'true' ||
+      payload.isTestMode === true;
+
     // ── Execute Instant Email Dispatch Workflow ──
     const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
 
-    const emailPromises = newlySavedShifts.map((shiftKey) =>
-      executeSaveAndEmailWorkflow({
-        plantIdentifier: plantTarget,
+    let lastEmailResult = null;
+    let emailTimedOut = false;
+
+    try {
+      const emailPromise = executeSaveAndEmailWorkflow({
+        plantIdentifier: 'ACL',
         analysisType: 'CR 203 Analysis',
         unit: 'CR 203',
-        shift: SHIFT_DISPLAY_NAMES[shiftKey],
+        shift: SHIFT_DISPLAY_NAMES[activeShiftKey],
         date: payload.date,
         data: updatedRecordData,
         submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
         submittedById: req.user?._id || null,
         company: updatedRecordData.company,
         explicitRecord: savedDoc,
-        rawBody: payload,
-      }).catch((err) => {
-        console.warn(`[AutoPlantEmail] Instant workflow note for CR 203 ${shiftKey}:`, err.message);
-        return { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
-      })
-    );
+        rawBody: { ...payload, data: updatedRecordData },
+        saveEventId,
+        isTestMode,
+      });
 
-    let lastEmailResult = null;
-    try {
-      const emailResults = await Promise.all(emailPromises);
-      if (Array.isArray(emailResults) && emailResults.length > 0) {
-        lastEmailResult = emailResults[emailResults.length - 1];
-      }
+      lastEmailResult = await emailPromise;
     } catch (err) {
-      console.warn('[AutoPlantEmail] Note:', err.message);
+      console.warn(`[AutoPlantEmail] Instant workflow note for CR 203 ${activeShiftKey}:`, err.message);
       lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
     }
 
+    if (savedDoc?._id) {
+      await PlantAnalysisRecord.findByIdAndUpdate(savedDoc._id, { $set: { data: updatedRecordData } });
+    }
+
     const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.success));
-    const finalEmailStatus = emailSent ? 'sent' : 'failed';
-    const emailRecipient =
+    const finalEmailStatus = emailTimedOut
+      ? 'pending'
+      : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
+    const finalRecipient =
       lastEmailResult?.recipient ||
       lastEmailResult?.data?.emailRecipient ||
       savedDoc?.emailRecipient ||
       '';
 
-    return res.status(201).json({
+    if (savedDoc && savedDoc._id) {
+      updatedRecordData._id = savedDoc._id;
+      updatedRecordData.recordId = savedDoc._id;
+    }
+
+    return res.status(200).json({
       success: true,
-      message: emailSent
-        ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} & email sent ✓`
-        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB. Email delivery failed: ${lastEmailResult?.error || 'Rejected by server'}`,
+      message: `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB ✓`,
       data: updatedRecordData,
-      emailSent,
+      lockedShifts,
+      editedFields,
+      editAuditHistory,
+      recordId: savedDoc?._id || updatedRecordData.id,
+      saveEventId,
+      emailSent: false,
       emailPending: false,
-      emailStatus: finalEmailStatus,
-      emailRecipient,
-      emailNotification: lastEmailResult,
+      emailStatus: 'disabled',
+      emailRecipient: '',
       newlySavedShifts,
     });
   } catch (error) {
@@ -496,9 +584,20 @@ router.get('/', async (req, res) => {
       const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
 
       if (doc && doc.data) {
+        const enrichedData = { ...doc.data };
+        enrichedData.lockedShifts = doc.data.lockedShifts || defaultLocks;
+        enrichedData.editedFields = doc.data.editedFields || {};
+        enrichedData.editAuditHistory = doc.data.editAuditHistory || [];
+        enrichedData.id = doc._id;
+        enrichedData._id = doc._id;
+
         return res.status(200).json({
           success: true,
-          data: [doc.data],
+          data: [enrichedData],
+          recordId: doc._id,
+          lockedShifts: doc.data?.lockedShifts || defaultLocks,
+          editedFields: doc.data?.editedFields || {},
+          editAuditHistory: doc.data?.editAuditHistory || [],
           assignedOperatorEmail,
           emailStatus: doc.emailStatus || 'pending',
           emailRecipient: doc.emailRecipient || assignedOperatorEmail,
@@ -509,6 +608,9 @@ router.get('/', async (req, res) => {
     return res.status(200).json({
       success: true,
       data: [],
+      lockedShifts: defaultLocks,
+      editedFields: {},
+      editAuditHistory: [],
       assignedOperatorEmail,
       emailStatus: 'pending',
       emailRecipient: assignedOperatorEmail,
@@ -528,40 +630,12 @@ router.get('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    let record = null;
-    if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findById === 'function') {
-      record = await PlantAnalysisRecord.findById(id);
-    }
-    if (!record) {
-      record = cr203Records.find((r) => (r._id || r.id).toString() === id.toString());
-    }
-
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'CR 203 analysis record not found.' });
-    }
-
-    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-    const result = await executeSaveAndEmailWorkflow({
-      plantIdentifier: record.plantCode || 'ACL Plant',
-      analysisType: record.analysisType || 'CR 203 Analysis',
-      unit: 'CR 203',
-      shift: req.body?.shift || record.shift || 'All Shifts',
-      date: record.date,
-      data: record.data,
-      submittedBy: record.submittedBy || req.user?.name || 'Plant Operator',
-      submittedById: req.user?._id || record.submittedById,
-      company: req.user?.company?._id || req.user?.company || record.company,
-      explicitRecord: record,
-    });
-
-    return res.status(result.success && result.emailSent ? 200 : 400).json(result);
-  } catch (error) {
-    console.error('[CR203 Retry Email] Error:', error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;

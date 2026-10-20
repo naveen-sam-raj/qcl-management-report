@@ -498,14 +498,12 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isEmailDelivered
-        ? 'CBD Analysis saved and email sent successfully.'
-        : 'CBD Analysis saved successfully in MongoDB. Email delivery failed: ' + (emailResult.error || emailResult.emailError || emailResult.message || 'No registered recipient available'),
+      message: 'CBD Analysis saved successfully in MongoDB ✓',
       recordId: savedRecord._id,
-      emailStatus,
-      emailRecipient,
-      emailMessageId: emailResult.messageId || '',
-      emailError: isEmailDelivered ? undefined : (emailResult.error || emailResult.emailError || emailResult.message),
+      emailStatus: 'disabled',
+      emailRecipient: null,
+      emailSent: false,
+      emailPending: false,
       lockedShifts,
       editedFields,
       editAuditHistory,
@@ -526,70 +524,12 @@ router.post('/', async (req, res) => {
  * @access  Private
  */
 router.post('/:id/retry-email', async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Valid Record ID is required for email retry.' });
-    }
-
-    const record = await PlantAnalysisRecord.findById(id);
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'Record not found for email retry.' });
-    }
-
-    // Do not resend duplicate notifications if already confirmed successful
-    if (record.emailStatus === 'sent') {
-      return res.status(200).json({
-        success: true,
-        alreadySent: true,
-        emailSent: true,
-        emailStatus: 'sent',
-        emailRecipient: record.emailRecipient || null,
-        message: `Notification email has already been successfully sent to ${record.emailRecipient}.`,
-      });
-    }
-
-    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || req.headers['x-test-mode'] === 'true';
-    const retryEventId = `retry_cbd_${Date.now()}`;
-    const emailResult = await executeSaveAndEmailWorkflow({
-      plantIdentifier: 'OFFSITE',
-      analysisType: record.analysisType || 'CBD Analysis',
-      unit: record.unit || 'CBD',
-      shift: record.shift || 'All Shifts',
-      date: record.date,
-      data: record.data,
-      submittedBy: req.user?.name || record.submittedBy,
-      submittedById: req.user?._id || record.submittedById,
-      company: record.company,
-      explicitRecord: record,
-      rawBody: record.data,
-      saveEventId: retryEventId,
-      isTestMode,
-    });
-
-    const isEmailDelivered = emailResult.emailSent === true || (emailResult.success === true && emailResult.emailStatus === 'sent');
-    const status = isEmailDelivered ? 'sent' : 'failed';
-    record.emailStatus = status;
-    if (emailResult.recipient) record.emailRecipient = emailResult.recipient;
-    await record.save();
-
-    return res.status(200).json({
-      success: true,
-      emailSent: isEmailDelivered,
-      emailStatus: status,
-      emailRecipient: record.emailRecipient || null,
-      emailError: isEmailDelivered ? undefined : (emailResult.error || emailResult.emailError || emailResult.message),
-      message: isEmailDelivered
-        ? `Notification email successfully sent to ${record.emailRecipient}.`
-        : `Email retry failed: ${emailResult.error || emailResult.emailError || emailResult.message || 'Delivery rejected'}.`,
-    });
-  } catch (error) {
-    console.error('[CBD Retry Email] Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error during email retry: ' + error.message,
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;

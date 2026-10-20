@@ -520,15 +520,13 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: emailSent
-        ? `Successfully saved ${SHIFT_DISPLAY_NAMES[activeKey]} & email sent ✓`
-        : `Successfully saved ${SHIFT_DISPLAY_NAMES[activeKey]} in MongoDB. Email status: ${emailStatus}`,
+      message: `Successfully saved ${SHIFT_DISPLAY_NAMES[activeKey]} in MongoDB ✓`,
       data: updatedRecordData,
-      emailSent,
+      emailSent: false,
       emailPending: false,
-      emailStatus,
-      emailRecipient,
-      emailNotification: emailResult,
+      emailStatus: 'disabled',
+      emailRecipient: null,
+      emailNotification: null,
       newlySavedShifts: [activeKey],
       recordId: savedDoc._id,
       lockedShifts,
@@ -542,71 +540,21 @@ router.post('/', async (req, res) => {
 });
 
 router.post('/:recordId/retry-email', async (req, res) => {
-  try {
-    const { recordId } = req.params;
-    const doc = await PlantAnalysisRecord.findById(recordId);
-    if (!doc) return res.status(404).json({ success: false, message: 'Record not found.' });
-
-    const emailResult = await executeSaveAndEmailWorkflow({
-      plantIdentifier: 'CO2',
-      analysisType: 'Lean Analysis',
-      unit: 'Lean',
-      shift: doc.shift || 'Shift',
-      date: doc.date,
-      data: doc.data?.rows || doc.data,
-      submittedBy: doc.submittedBy,
-      submittedById: doc.submittedById,
-      company: doc.company,
-      explicitRecord: doc,
-      rawBody: doc.data,
-      saveEventId: `retry_${Date.now()}`,
-    });
-
-    const isSent = emailResult.success || emailResult.emailSent;
-    return res.status(200).json({
-      success: isSent,
-      emailSent: isSent,
-      emailStatus: isSent ? 'sent' : 'failed',
-      message: isSent ? 'Email delivered successfully upon retry.' : (emailResult.error || 'SMTP delivery failed'),
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 router.post('/retry-email', async (req, res) => {
-  try {
-    const { recordId } = req.body;
-    if (!recordId) return res.status(400).json({ success: false, message: 'recordId is required.' });
-
-    const doc = await PlantAnalysisRecord.findById(recordId);
-    if (!doc) return res.status(404).json({ success: false, message: 'Record not found.' });
-
-    const emailResult = await executeSaveAndEmailWorkflow({
-      plantIdentifier: 'CO2',
-      analysisType: 'Lean Analysis',
-      unit: 'Lean',
-      shift: doc.shift || 'Shift',
-      date: doc.date,
-      data: doc.data?.rows || doc.data,
-      submittedBy: doc.submittedBy,
-      submittedById: doc.submittedById,
-      company: doc.company,
-      explicitRecord: doc,
-      rawBody: doc.data,
-      saveEventId: `retry_${Date.now()}`,
-    });
-
-    const isSent = emailResult.success || emailResult.emailSent;
-    return res.status(200).json({
-      success: isSent,
-      emailSent: isSent,
-      emailStatus: isSent ? 'sent' : 'failed',
-      message: isSent ? 'Email delivered successfully upon retry.' : (emailResult.error || 'SMTP delivery failed'),
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
+  return res.status(200).json({
+    success: true,
+    emailSent: false,
+    emailStatus: 'disabled',
+    message: 'Email notification functionality has been removed.',
+  });
 });
 
 module.exports = router;
