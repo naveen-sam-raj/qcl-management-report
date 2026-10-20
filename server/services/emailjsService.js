@@ -36,6 +36,32 @@ const maskKey = (key) => {
 };
 
 /**
+ * Safely extracts error details from an EmailJS SDK error, standard Error, or API response.
+ * Handles EmailJSResponseStatus instances ({ status, text }), Error instances ({ name, message }),
+ * raw strings, or HTTP response errors without exposing credentials or PII.
+ */
+const formatEmailJSError = (err) => {
+  if (!err) return { status: 'N/A', message: 'Unknown error', fullString: 'Unknown error' };
+  if (typeof err === 'string') return { status: 'N/A', message: err, fullString: err };
+
+  const status = err.status || err.statusCode || (err.response && err.response.status) || 'N/A';
+  // EmailJSResponseStatus uses .text; standard JS Error uses .message
+  const message =
+    err.text ||
+    err.message ||
+    (err.response && err.response.data) ||
+    (typeof err === 'object' ? JSON.stringify(err) : String(err));
+  const name = err.name || (err.constructor && err.constructor.name !== 'Object' ? err.constructor.name : 'EmailJSError');
+
+  return {
+    status,
+    message,
+    name,
+    fullString: status !== 'N/A' ? `${name} [Status ${status}]: ${message}` : `${name}: ${message}`,
+  };
+};
+
+/**
  * Dispatches an OFFSITE plant analysis email notification via EmailJS HTTPS API.
  *
  * @param {Object} options
@@ -180,7 +206,8 @@ const sendEmailJSOffsiteNotification = async ({
       provider: 'EmailJS Node SDK',
     };
   } catch (sdkErr) {
-    console.warn(`[EmailJS] ⚠️ @emailjs/nodejs SDK error (${sdkErr.message}), attempting direct HTTPS REST API fallback...`);
+    const sdkErrInfo = formatEmailJSError(sdkErr);
+    console.warn(`[EmailJS] ⚠️ @emailjs/nodejs SDK error (${sdkErrInfo.fullString}), attempting direct HTTPS REST API fallback...`);
 
     // 5. Direct HTTPS REST API Fallback (Port 443)
     try {
@@ -229,7 +256,8 @@ const sendEmailJSOffsiteNotification = async ({
         recipient: recipientString,
       };
     } catch (restErr) {
-      const finalError = `EmailJS delivery failed: ${restErr.message || sdkErr.message}`;
+      const restErrInfo = formatEmailJSError(restErr);
+      const finalError = `EmailJS delivery failed: ${restErrInfo.message || sdkErrInfo.message}`;
       console.error(`[EmailJS] ❌ All EmailJS dispatch attempts failed: ${finalError}`);
       return {
         success: false,
@@ -243,6 +271,7 @@ const sendEmailJSOffsiteNotification = async ({
 
 module.exports = {
   getEmailJSConfig,
+  formatEmailJSError,
   sendEmailJSOffsiteNotification,
   sendEmailJSPlantNotification: sendEmailJSOffsiteNotification,
 };

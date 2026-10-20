@@ -319,7 +319,7 @@ const getPlantAssignedUser = async (plantIdentifier, options = {}) => {
     adminEmails = adminDocs
       .map((a) => (a.email && typeof a.email === 'string' && a.email.includes('@') ? a.email.trim().toLowerCase() : null))
       .filter(Boolean)
-      .filter((email) => !email.endsWith('@spicglobal.com') && !email.includes('spicglobal.com'));
+      .filter((email) => !email.endsWith('@spicglobal.com') && !email.includes('spicglobal.com') && email !== 'admin@gmail.com');
   } catch (aErr) {
     console.warn('[PlantNotification] Could not query admin recipients:', aErr.message);
   }
@@ -3942,6 +3942,8 @@ const executeSaveAndEmailWorkflow = async ({
   saveEventId = '',
   changedSlotKeys = [],
   isTestMode = false,
+  isRetry = false,
+  forceSend = false,
 }) => {
   // 1. Resolve Plant from MongoDB
   const plantDoc = await resolvePlant(plantIdentifier, { analysisType, unit, company });
@@ -4428,7 +4430,7 @@ const executeSaveAndEmailWorkflow = async ({
   }
 
   // 6. Idempotency Check: Prevent duplicate notifications for records already successfully sent
-  if (explicitRecord && explicitRecord.emailStatus === 'sent' && (!changedSlotKeys || changedSlotKeys.length === 0)) {
+  if (!isRetry && !forceSend && explicitRecord && explicitRecord.emailStatus === 'sent' && (!changedSlotKeys || changedSlotKeys.length === 0)) {
     console.log(`[SaveAndEmail] ℹ️ Record ${savedRecord._id} is already marked as 'sent' with no new changes. Skipping duplicate notification.`);
     return {
       success: true,
@@ -4481,7 +4483,7 @@ const executeSaveAndEmailWorkflow = async ({
 
   // 8. Dispatch Email (EmailJS HTTPS API - zero Excel attachments across all plants)
   let emailResult = { success: false, emailStatus: 'failed', error: 'Email dispatch failed' };
-  const targetEmailRecipients = (plantCode === 'CO2' || String(plantName).toUpperCase().includes('CO2'))
+  const targetEmailRecipients = (['CO2', 'ACL'].includes(plantCode) || String(plantName).toUpperCase().includes('CO2') || String(plantName).toUpperCase().includes('ACL'))
     ? [assignedUser.email]
     : (recipientEmails && recipientEmails.length > 0 ? recipientEmails : [assignedUser.email]);
   emailResult = await sendPlantAnalysisEmail({
