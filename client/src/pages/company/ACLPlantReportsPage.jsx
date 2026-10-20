@@ -83,17 +83,19 @@ const REPORT_MODULES_REGISTRY = {
   'overall-plant': {
     id: 'overall-plant',
     name: 'ACL Plant Master Summary',
-    description: 'Comprehensive cross-module QC summary report (Upcoming)',
-    status: 'upcoming',
+    description: 'Comprehensive cross-module QC shift report populated directly into official master template (SHIFT REPORT -2026.xlsx)',
+    status: 'active',
     subModules: [
-      { id: 'all', name: 'Combined QC Summary' },
-      { id: 'exceptions', name: 'Out-of-Spec Exceptions' },
+      { id: 'all', name: 'All 11 ACL Plant Analyses (SEP-26)' },
+      { id: 'pure-salt-summary', name: 'Pure Salt & Sieve Analysis' },
+      { id: 'tanks-reactors', name: 'TK & CR Reactor Streams' },
     ],
     columns: [
       { key: 'date', label: 'Date', width: 14 },
-      { key: 'module', label: 'Module', width: 20 },
-      { key: 'section', label: 'Section', width: 20 },
-      { key: 'status', label: 'Overall Status', width: 14 },
+      { key: 'module', label: 'Report Module', width: 28 },
+      { key: 'shift', label: 'Shift Scope', width: 18 },
+      { key: 'section', label: 'Plant Section', width: 26 },
+      { key: 'status', label: 'QC Generation Status', width: 22 },
     ],
   },
 };
@@ -240,8 +242,62 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
   const [generating, setGenerating] = useState(false);
   const [generatedReport, setGeneratedReport] = useState(null);
 
+  // ── Master Template State (SHIFT REPORT -2026.xlsx) ──
+  const [masterDate, setMasterDate] = useState(todayStr);
+  const [masterShift, setMasterShift] = useState('all');
+  const [downloadingMaster, setDownloadingMaster] = useState(false);
+
+  // Download official ACL report populated into master Excel template
+  // Works directly from selected date & shift by fetching actual DB records independently of query preview
+  const handleDownloadMasterExcel = async (customDate, customShift) => {
+    const targetDate = customDate || masterDate || dateTo || dateFrom || todayStr;
+    const targetShift = customShift || (customDate ? shift : masterShift) || 'all';
+    if (!targetDate) {
+      showToast('Please select a date for the Master ACL report.', 'error');
+      return;
+    }
+    setDownloadingMaster(true);
+    try {
+      showToast('Generating official ACL Shift Report from master template...', 'info');
+      const response = await api.get(`/reports/acl/download?date=${targetDate}&shift=${targetShift}`, {
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `SHIFT_REPORT_2026_ACL_${targetDate}_${targetShift}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      showToast('Official ACL Master Shift Report downloaded successfully! ✓', 'success');
+    } catch (err) {
+      console.error('[ACLReports] Master Excel download error:', err);
+      let errMsg = err.message;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          if (parsed?.message) errMsg = parsed.message;
+        } catch {
+          // fallback
+        }
+      } else if (err.response?.data?.message) {
+        errMsg = err.response.data.message;
+      }
+      showToast('Failed to download Master ACL Report: ' + errMsg, 'error');
+    } finally {
+      setDownloadingMaster(false);
+    }
+  };
+
   // Current module definition
   const currentModule = REPORT_MODULES_REGISTRY[reportType] || REPORT_MODULES_REGISTRY['pure-salt'];
+
 
   // Handle report type switch
   const handleReportTypeChange = (newType) => {
@@ -299,6 +355,27 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         section,
         sectionName: SECTION_OPTIONS.find((s) => s.value === section)?.label || 'All',
       };
+
+      // If user selected ACL Plant Master Summary, directly invoke Master Template Generator
+      if (reportType === 'overall-plant') {
+        await handleDownloadMasterExcel(dateTo || dateFrom, shift);
+        setGeneratedReport({
+          filters: filterPayload,
+          records: [
+            {
+              id: `${dateTo || dateFrom}-master-summary`,
+              date: dateTo || dateFrom,
+              module: 'ACL Plant Master Shift Report (11 Analyses)',
+              shift: SHIFT_OPTIONS.find((s) => s.value === shift)?.label || 'All Shifts',
+              section: 'Central Quality Control (SEP-26)',
+              status: 'Generated & Downloaded (.xlsx) ✓',
+            },
+          ],
+          generatedAt: new Date().toISOString(),
+          totalCount: 1,
+        });
+        return;
+      }
 
       // Fetch accurate real-time records from MongoDB backend
       let savedRecords = [];
@@ -459,8 +536,73 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
         </div>
       </div>
 
+      {/* ── Official Master Template Generator Card (SHIFT REPORT -2026.xlsx) ── */}
+      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-5 text-white shadow-md border border-blue-800/40">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-1.5 max-w-xl">
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[11px] font-bold">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>OFFICIAL MASTER TEMPLATE (SHIFT REPORT -2026.xlsx)</span>
+            </div>
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+              Generate Official ACL Plant Shift Report
+            </h2>
+            <p className="text-xs text-blue-200/80 leading-relaxed">
+              Populates all saved laboratory analysis records for ACL Plant directly into the multi-worksheet master template (<code className="bg-blue-950/80 px-1 py-0.5 rounded text-blue-300">SEP-26</code>, <code className="bg-blue-950/80 px-1 py-0.5 rounded text-blue-300">T.CAO</code>, <code className="bg-blue-950/80 px-1 py-0.5 rounded text-blue-300">FEED BIOMASS TM &BD</code>), preserving all formatting, formulas, and merged cells.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/15">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-blue-200 mb-1">
+                Reporting Date
+              </label>
+              <input
+                type="date"
+                id="input-master-acl-date"
+                value={masterDate}
+                onChange={(e) => setMasterDate(e.target.value)}
+                className="text-xs font-semibold px-2.5 py-2 bg-slate-900 text-white rounded-lg border border-blue-400/30 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-blue-200 mb-1">
+                Shift
+              </label>
+              <select
+                id="select-master-acl-shift"
+                value={masterShift}
+                onChange={(e) => setMasterShift(e.target.value)}
+                className="text-xs font-semibold px-2.5 py-2 bg-slate-900 text-white rounded-lg border border-blue-400/30 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              >
+                <option value="all">All Shifts (I, II, III)</option>
+                <option value="shift1">I Shift</option>
+                <option value="shift2">II Shift</option>
+                <option value="shift3">III Shift</option>
+              </select>
+            </div>
+
+            <button
+              id="btn-generate-acl-master-excel"
+              onClick={() => handleDownloadMasterExcel()}
+              disabled={downloadingMaster}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 mt-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition shadow-md disabled:opacity-50 cursor-pointer"
+            >
+              {downloadingMaster ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloadingMaster ? 'Generating...' : 'Generate ACL Report'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ── Filter Form Card ────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+
         {/* Filter Card Header */}
         <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -631,10 +773,26 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
             </button>
 
             <button
+              id="btn-filter-download-master-excel"
+              type="button"
+              onClick={() => handleDownloadMasterExcel(dateTo || dateFrom, shift)}
+              disabled={downloadingMaster}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-xs disabled:opacity-60 cursor-pointer"
+              title="Directly download official Master Template workbook (.xlsx) with current date and shift"
+            >
+              {downloadingMaster ? (
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloadingMaster ? 'Generating...' : 'Download Master Report (.xlsx)'}</span>
+            </button>
+
+            <button
               id="btn-reports-generate"
               onClick={handleGenerateReport}
               disabled={generating}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-sm shadow-blue-600/20 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-sm shadow-blue-600/20 disabled:opacity-60 cursor-pointer"
             >
               {generating ? (
                 <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -670,17 +828,33 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
             </div>
 
             {/* Direct Excel Download Action */}
-            <div className="flex items-center gap-2 w-full md:w-auto">
+            <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto">
+              <button
+                id="btn-reports-export-master-excel"
+                onClick={() => handleDownloadMasterExcel(generatedReport.filters.dateTo, generatedReport.filters.shift)}
+                disabled={downloadingMaster}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition shadow-xs cursor-pointer"
+                title="Download official multi-sheet workbook populated into SHIFT REPORT -2026.xlsx template"
+              >
+                {downloadingMaster ? (
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
+                )}
+                <span>Download Master Template (.XLSX)</span>
+              </button>
+
               <button
                 id="btn-reports-export-excel"
                 onClick={handleExportExcel}
-                className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 hover:border-emerald-400 rounded-xl transition shadow-xs"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 hover:border-emerald-400 rounded-xl transition shadow-xs cursor-pointer"
               >
                 <Download className="w-4 h-4 text-emerald-700" />
-                <span>Export to Excel (.XLSX)</span>
+                <span>Export Table Data (.XLSX)</span>
               </button>
             </div>
           </div>
+
 
           {/* Preview Table */}
           <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
