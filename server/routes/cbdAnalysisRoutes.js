@@ -4,6 +4,12 @@ const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const {
+  getInitialLockState,
+  hydrateLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+} = require('../services/analysisLockEngine');
 
 /**
  * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
@@ -66,15 +72,8 @@ router.get('/', async (req, res) => {
       assignedOperatorEmail = null;
     }
 
-    const defaultLocks = {
-      shift1Saved: false,
-      shift2Saved: false,
-      shift3Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift3Locked: false,
-      shift3Edits: 0,
-    };
+    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
+    const defaultLocks = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
 
     if (date) {
       try {
@@ -91,13 +90,16 @@ router.get('/', async (req, res) => {
         if (doc && doc.data) {
           const payloadData = doc.data;
           const shifts = payloadData.shifts || payloadData.data || payloadData;
+          const hydratedLocks = payloadData.lockedShifts
+            ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
+            : defaultLocks;
           return res.status(200).json({
             success: true,
             recordId: doc._id,
             emailRecipient: doc.emailRecipient || assignedOperatorEmail,
             emailStatus: doc.emailStatus || 'pending',
             assignedOperatorEmail,
-            lockedShifts: payloadData.lockedShifts || defaultLocks,
+            lockedShifts: hydratedLocks,
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             data: {
@@ -106,7 +108,7 @@ router.get('/', async (req, res) => {
               id: doc._id,
               date: doc.date,
               shifts: shifts || {},
-              lockedShifts: payloadData.lockedShifts || defaultLocks,
+              lockedShifts: hydratedLocks,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',
@@ -120,10 +122,13 @@ router.get('/', async (req, res) => {
 
       const match = cbdRecords.find((r) => r.date === date);
       if (match) {
+        const hydratedMatchLocks = match.lockedShifts
+          ? hydrateLockState(match.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
+          : defaultLocks;
         return res.status(200).json({
           success: true,
           assignedOperatorEmail,
-          lockedShifts: match.lockedShifts || defaultLocks,
+          lockedShifts: hydratedMatchLocks,
           data: match,
         });
       }
@@ -246,25 +251,21 @@ router.post('/', async (req, res) => {
 
     const existingDoc = await PlantAnalysisRecord.findOne(query);
 
-    let lockedShifts = {
-      shift1Saved: false,
-      shift2Saved: false,
-      shift3Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift3Locked: false,
-      shift1Edits: 0,
-      shift2Edits: 0,
-      shift3Edits: 0,
-    };
+    const SHIFT_MAPPING = [
+      { shiftKey: 'iShift', itemKey: 'shift1', name: 'I SHIFT' },
+      { shiftKey: 'iiShift', itemKey: 'shift2', name: 'II SHIFT' },
+      { shiftKey: 'iiiShift', itemKey: 'shift3', name: 'III SHIFT' },
+    ];
+    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
+
+    let lockedShifts = existingDoc?.data?.lockedShifts
+      ? hydrateLockState(existingDoc.data.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
+      : getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
     let editedFields = {};
     let editAuditHistory = [];
     let oldShifts = { iShift: {}, iiShift: {}, iiiShift: {} };
 
     if (existingDoc && existingDoc.data) {
-      if (existingDoc.data.lockedShifts) {
-        lockedShifts = { ...lockedShifts, ...existingDoc.data.lockedShifts };
-      }
       editedFields = { ...(existingDoc.data.editedFields || {}) };
       editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
       oldShifts = existingDoc.data.shifts || existingDoc.data.data || oldShifts;
@@ -278,69 +279,47 @@ router.post('/', async (req, res) => {
     const hasS2 = hasData(shifts.iiShift);
     const hasS3 = hasData(shifts.iiiShift);
 
-    // 1. Sequential Progression Enforcement
-    if (hasS2 && !lockedShifts.shift1Saved && !hasS1) {
-      return res.status(400).json({
-        success: false,
-        message: 'Sequential shift restriction: Shift 1 must be completed and saved before proceeding to Shift 2.',
-      });
-    }
-
-    if (hasS3 && !lockedShifts.shift2Saved && !hasS2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Sequential shift restriction: Shift 2 must be completed and saved before proceeding to Shift 3.',
-      });
-    }
-
-    // 2. Lock Enforcement
-    const isAllPermanentlyLocked = Boolean(
-      lockedShifts.shift3Locked ||
-      (lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked) ||
-      (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)
-    );
-    if (isAllPermanentlyLocked) {
-      return res.status(400).json({
-        success: false,
-        message: 'All shifts for this date are permanently locked. No further edits permitted.',
-      });
-    }
-
     const s1Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iShift?.[f], shifts.iShift?.[f]));
     const s2Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiShift?.[f], shifts.iiShift?.[f]));
     const s3Changed = SHIFT_FIELDS.some((f) => isValDiff(oldShifts.iiiShift?.[f], shifts.iiiShift?.[f]));
 
-    if ((lockedShifts.shift1Locked || lockedShifts.shift2Saved) && s1Changed) {
-      return res.status(400).json({
-        success: false,
-        message: 'I SHIFT is permanently locked because II SHIFT has already been saved.',
+    const incomingShifts = [];
+    if (hasS1) incomingShifts.push({ itemKey: 'shift1', changed: s1Changed, shiftKey: 'iShift' });
+    if (hasS2) incomingShifts.push({ itemKey: 'shift2', changed: s2Changed, shiftKey: 'iiShift' });
+    if (hasS3) incomingShifts.push({ itemKey: 'shift3', changed: s3Changed, shiftKey: 'iiiShift' });
+
+    // Authoritative sequential save check via Universal Lock Engine
+    for (const { itemKey, changed } of incomingShifts) {
+      const isDiff = changed || !lockedShifts.slots?.[itemKey]?.isSaved;
+      const valRes = validateSequentialSave({
+        lockState: lockedShifts,
+        targetItem: itemKey,
+        itemsOrder: SHIFT_KEYS,
+        isDiff,
+        type: 'shift',
       });
+      if (!valRes.allowed) {
+        return res.status(valRes.statusCode || 400).json({
+          success: false,
+          message: valRes.message,
+        });
+      }
     }
 
-    if ((lockedShifts.shift2Locked || lockedShifts.shift3Saved) && s2Changed) {
-      return res.status(400).json({
-        success: false,
-        message: 'II SHIFT is permanently locked because III SHIFT has already been saved.',
-      });
-    }
-
-    if ((lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) && s3Changed) {
-      return res.status(400).json({
-        success: false,
-        message: 'III SHIFT has exhausted its single permitted correction edit and all shifts for this date are permanently locked.',
-      });
-    }
-
-    // 3. Field-Level Edit Audit
+    // Field-Level Edit Audit
     const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
     const nowIso = new Date().toISOString();
 
     if (existingDoc && existingDoc.data) {
-      [
-        { key: 'iShift', name: 'I SHIFT', wasSaved: existingDoc.data.lockedShifts?.shift1Saved },
-        { key: 'iiShift', name: 'II SHIFT', wasSaved: existingDoc.data.lockedShifts?.shift2Saved },
-        { key: 'iiiShift', name: 'III SHIFT', wasSaved: existingDoc.data.lockedShifts?.shift3Saved },
-      ].forEach(({ key: sKey, name: sName, wasSaved }) => {
+      SHIFT_MAPPING.forEach(({ shiftKey: sKey, itemKey, name: sName }) => {
+        const wasSaved = Boolean(
+          existingDoc.data.lockedShifts?.[`${itemKey}Saved`] ||
+          existingDoc.data.lockedShifts?.slots?.[itemKey]?.isSaved ||
+          (itemKey === 'shift1' && existingDoc.data.lockedShifts?.s1Saved) ||
+          (itemKey === 'shift2' && existingDoc.data.lockedShifts?.s2Saved) ||
+          (itemKey === 'shift3' && existingDoc.data.lockedShifts?.s3Saved)
+        );
+
         if (wasSaved) {
           SHIFT_FIELDS.forEach((f) => {
             const oldVal = oldShifts[sKey]?.[f];
@@ -363,30 +342,22 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // 4. Update Shift Lock State Machine
-    if (hasS1) {
-      lockedShifts.shift1Saved = true;
-      // Shift 1 remains editable until Shift 2 is saved
-    }
-
-    if (hasS2) {
-      lockedShifts.shift2Saved = true;
-      lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
-      // Shift 2 remains editable until Shift 3 is saved
-    }
-
-    if (hasS3) {
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2Locked = true; // Lock Shift 2 permanently when Shift 3 is saved
-      if (lockedShifts.shift3Saved && s3Changed) {
-        // Permitted single correction edit
-        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-        lockedShifts.shift3Locked = true; // Permanently lock all 3 shifts
-      } else if (!lockedShifts.shift3Saved) {
-        lockedShifts.shift3Saved = true;
-        lockedShifts.shift3Edits = 0;
-        lockedShifts.shift3Locked = false; // 1 correction edit permitted
-      }
+    // Update Shift Lock State Machine via Universal Lock Engine
+    for (const { itemKey } of incomingShifts) {
+      const isCorrection = Boolean(
+        lockedShifts[`${itemKey}Saved`] ||
+        lockedShifts.slots?.[itemKey]?.isSaved ||
+        (itemKey === 'shift1' && lockedShifts.s1Saved) ||
+        (itemKey === 'shift2' && lockedShifts.s2Saved) ||
+        (itemKey === 'shift3' && lockedShifts.s3Saved)
+      );
+      lockedShifts = applySequentialSaveTransition({
+        lockState: lockedShifts,
+        targetItem: itemKey,
+        itemsOrder: SHIFT_KEYS,
+        isCorrection,
+        type: 'shift',
+      });
     }
 
     const isAllLocked = Boolean(lockedShifts.shift1Locked && lockedShifts.shift2Locked && lockedShifts.shift3Locked);

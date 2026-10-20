@@ -2171,6 +2171,21 @@ const validateAnalysisPayload = (payload) => {
     Object.entries(paramValues).forEach(([paramKey, val]) => {
       if (METADATA_KEYS.includes(paramKey)) return;
 
+      // If val is a nested object (e.g. time slots like t07: { fnh3: ... }), validate its properties
+      if (typeof val === 'object' && val !== null) {
+        Object.entries(val).forEach(([subKey, subVal]) => {
+          if (METADATA_KEYS.includes(subKey)) return;
+          if (subVal === '' || subVal === null || subVal === undefined) return;
+          const subNum = Number(subVal);
+          if (isNaN(subNum)) {
+            const msg = `Row '${rowKey}', slot '${paramKey}', parameter '${subKey}' must be a valid number. Received: ${subVal}`;
+            errors.push(msg);
+            errorDetails[`${rowKey}_${paramKey}_${subKey}`] = msg;
+          }
+        });
+        return;
+      }
+
       // If empty string or null or undefined, treat as blank (allowed)
       if (val === '' || val === null || val === undefined) return;
 

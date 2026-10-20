@@ -4,6 +4,12 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const {
+  hydrateLockState,
+  getInitialLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+} = require('../services/analysisLockEngine');
 
 const inMemoryRecords = [];
 router.use(protect);
@@ -43,21 +49,23 @@ router.get('/', async (req, res) => {
       assignedOperatorEmail = null;
     }
 
-    const defaultLocks = {
-      shift1: false,
-      shift2: true,
-      shift3: true,
-      day: false,
-      shift1Locked: false,
-      shift2Locked: true,
-      shift3Locked: true,
-      dayLocked: false,
-      shift1Saved: false,
-      shift2Saved: false,
-      shift3Saved: false,
-      daySaved: false,
-      shift3Edits: 0,
-      dayEdits: 0,
+    const getInitialLocks = () => {
+      const base = getInitialLockState({ type: 'shift', items: ['shift1', 'shift2', 'shift3'] });
+      base.day = false;
+      base.dayLocked = false;
+      base.daySaved = false;
+      base.dayEdits = 0;
+      return base;
+    };
+
+    const resolveLocks = (raw) => {
+      if (!raw) return getInitialLocks();
+      const hydrated = hydrateLockState(raw, { type: 'shift', items: ['shift1', 'shift2', 'shift3'] });
+      hydrated.daySaved = Boolean(raw.daySaved);
+      hydrated.dayEdits = Number(raw.dayEdits || 0);
+      hydrated.dayLocked = Boolean(raw.dayLocked || (raw.daySaved && hydrated.dayEdits >= 1));
+      hydrated.day = !Boolean(!hydrated.dayLocked);
+      return hydrated;
     };
 
     if (date) {
@@ -74,13 +82,14 @@ router.get('/', async (req, res) => {
       if (doc && doc.data) {
         const payloadData = doc.data;
         const rows = payloadData.rows || payloadData;
+        const resolvedLocks = resolveLocks(payloadData.lockedShifts);
         return res.status(200).json({
           success: true,
           recordId: doc._id,
           emailRecipient: doc.emailRecipient || assignedOperatorEmail,
           emailStatus: doc.emailStatus || 'pending',
           assignedOperatorEmail,
-          lockedShifts: payloadData.lockedShifts || defaultLocks,
+          lockedShifts: resolvedLocks,
           editedFields: payloadData.editedFields || {},
           editAuditHistory: payloadData.editAuditHistory || [],
           data: {
@@ -89,7 +98,7 @@ router.get('/', async (req, res) => {
             id: doc._id,
             date: doc.date,
             rows,
-            lockedShifts: payloadData.lockedShifts || defaultLocks,
+            lockedShifts: resolvedLocks,
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             emailStatus: doc.emailStatus || 'pending',
@@ -100,10 +109,11 @@ router.get('/', async (req, res) => {
 
       const memMatch = inMemoryRecords.find((r) => r.date === date);
       if (memMatch) {
+        const resolvedLocks = resolveLocks(memMatch.lockedShifts);
         return res.status(200).json({
           success: true,
           assignedOperatorEmail,
-          lockedShifts: memMatch.lockedShifts || defaultLocks,
+          lockedShifts: resolvedLocks,
           data: memMatch,
         });
       }
@@ -111,7 +121,7 @@ router.get('/', async (req, res) => {
       return res.status(200).json({
         success: true,
         assignedOperatorEmail,
-        lockedShifts: defaultLocks,
+        lockedShifts: getInitialLocks(),
         data: null,
         message: `No record found for date ${date}`,
       });
@@ -223,46 +233,31 @@ router.post('/', async (req, res) => {
       });
     };
 
-    let lockedShifts = existingData.lockedShifts || {
-      shift1: false,
-      shift2: true,
-      shift3: true,
-      day: false,
-      shift1Locked: false,
-      shift2Locked: true,
-      shift3Locked: true,
-      dayLocked: false,
-      shift1Saved: false,
-      shift2Saved: false,
-      shift3Saved: false,
-      daySaved: false,
-      shift3Edits: 0,
-      dayEdits: 0,
-    };
+    let rawLockedShifts = existingData.lockedShifts || {};
+    let lockedShifts = hydrateLockState(rawLockedShifts, { type: 'shift', items: ['shift1', 'shift2', 'shift3'] });
+    lockedShifts.daySaved = Boolean(rawLockedShifts.daySaved);
+    lockedShifts.dayEdits = Number(rawLockedShifts.dayEdits || 0);
+    lockedShifts.dayLocked = Boolean(rawLockedShifts.dayLocked || (rawLockedShifts.daySaved && lockedShifts.dayEdits >= 1));
+    lockedShifts.day = !Boolean(!lockedShifts.dayLocked);
+
     let editedFields = existingData.editedFields || {};
     let editAuditHistory = existingData.editAuditHistory || [];
 
-    const areShiftsLocked = Boolean(
-      lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1
-    );
-
     const isSectionLocked = (key) => {
-      if (key === 'shift1') return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
-      if (key === 'shift2') {
-        if (!lockedShifts.shift1Saved) return true;
-        return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
+      if (key === 'day') {
+        return Boolean(lockedShifts.dayLocked || (lockedShifts.daySaved && lockedShifts.dayEdits >= 1));
       }
-      if (key === 'shift3') {
-        if (!lockedShifts.shift2Saved) return true;
-        if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
-        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-        return false;
-      }
-      if (key === 'day') return Boolean(lockedShifts.day || lockedShifts.dayLocked || (lockedShifts.daySaved && (lockedShifts.dayEdits || 0) >= 1));
-      return false;
+      const check = validateSequentialSave({
+        lockState: lockedShifts,
+        targetItem: key,
+        itemsOrder: ['shift1', 'shift2', 'shift3'],
+        isDiff: true,
+        type: 'shift',
+      });
+      return !check.allowed;
     };
 
-    if (areShiftsLocked) {
+    if (lockedShifts.allPermanentlyLocked) {
       const hasShiftChanges = ['shift1', 'shift2', 'shift3'].some(
         (key) => hasSectionData(key, payload.rows) && isSectionDiff(key, existingRows, payload.rows)
       );
@@ -278,9 +273,18 @@ router.post('/', async (req, res) => {
     for (const key of targetSections) {
       if (hasSectionData(key, payload.rows) && isSectionLocked(key)) {
         if (isSectionDiff(key, existingRows, payload.rows)) {
+          const check = key === 'day'
+            ? { allowed: false, message: 'Day routine has already reached its maximum edit limit (one final edit allowed).' }
+            : validateSequentialSave({
+                lockState: lockedShifts,
+                targetItem: key,
+                itemsOrder: ['shift1', 'shift2', 'shift3'],
+                isDiff: true,
+                type: 'shift',
+              });
           return res.status(400).json({
             success: false,
-            message: `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is permanently locked.`,
+            message: check.message || `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is permanently locked.`,
           });
         }
       }
@@ -300,34 +304,38 @@ router.post('/', async (req, res) => {
       });
     }
 
-    let newS1Saved = lockedShifts.shift1Saved || willSave.shift1;
-    let newS2Saved = lockedShifts.shift2Saved || willSave.shift2;
-
-    if (willSave.shift2 && !newS1Saved) {
-      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save II SHIFT before I SHIFT is saved.' });
-    }
-    if (willSave.shift3 && !newS2Saved) {
-      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save III SHIFT before II SHIFT is saved.' });
-    }
-    if (willSave.shift3 && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'III SHIFT has already reached its maximum edit limit (one final edit allowed).',
-      });
-    }
-    if (willSave.day && lockedShifts.daySaved && (lockedShifts.dayEdits || 0) >= 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'Day routine has already reached its maximum edit limit (one final edit allowed).',
-      });
-    }
-
     const activeKey = sectionsToSave[0];
     if (!activeKey) {
       return res.status(400).json({
         success: false,
         message: 'No unlocked shifts or day routine with valid changes were found to save.',
       });
+    }
+
+    // Authoritative sequential save check
+    let saveCheck = { allowed: true, isCorrection: false };
+    if (activeKey === 'day') {
+      if (lockedShifts.dayLocked || (lockedShifts.daySaved && lockedShifts.dayEdits >= 1)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Day routine has already reached its maximum edit limit (one final edit allowed).',
+        });
+      }
+      saveCheck.isCorrection = lockedShifts.daySaved;
+    } else {
+      saveCheck = validateSequentialSave({
+        lockState: lockedShifts,
+        targetItem: activeKey,
+        itemsOrder: ['shift1', 'shift2', 'shift3'],
+        isDiff: true,
+        type: 'shift',
+      });
+      if (!saveCheck.allowed) {
+        return res.status(saveCheck.statusCode || 400).json({
+          success: false,
+          message: saveCheck.message,
+        });
+      }
     }
 
     const mergedRows = { ...(existingRows || {}) };
@@ -372,42 +380,7 @@ router.post('/', async (req, res) => {
 
     mergedRows[activeKey] = newSec;
 
-    if (activeKey === 'shift1') {
-      lockedShifts.shift1Saved = true;
-      lockedShifts.shift1 = false;
-      lockedShifts.shift1Locked = false;
-      lockedShifts.shift2 = false;
-      lockedShifts.shift2Locked = false;
-      if (!lockedShifts.shift3Saved) {
-        lockedShifts.shift3 = true;
-        lockedShifts.shift3Locked = true;
-      }
-    }
-    if (activeKey === 'shift2') {
-      lockedShifts.shift2Saved = true;
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = false;
-      lockedShifts.shift2Locked = false;
-      lockedShifts.shift3 = false;
-      lockedShifts.shift3Locked = false;
-    }
-    if (activeKey === 'shift3') {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-      if (lockedShifts.shift3Saved) {
-        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-        lockedShifts.shift3 = true;
-        lockedShifts.shift3Locked = true;
-      } else {
-        lockedShifts.shift3Saved = true;
-        lockedShifts.shift3Edits = 0;
-        lockedShifts.shift3 = false;
-        lockedShifts.shift3Locked = false;
-      }
-    }
+    // Apply state transitions
     if (activeKey === 'day') {
       if (lockedShifts.daySaved) {
         lockedShifts.dayEdits = (lockedShifts.dayEdits || 0) + 1;
@@ -419,27 +392,23 @@ router.post('/', async (req, res) => {
         lockedShifts.day = false;
         lockedShifts.dayLocked = false;
       }
-    }
+    } else {
+      const prevDaySaved = lockedShifts.daySaved;
+      const prevDayEdits = lockedShifts.dayEdits;
+      const prevDayLocked = lockedShifts.dayLocked;
 
-    if (lockedShifts.shift2Saved) {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-    }
-    if (lockedShifts.shift3Saved) {
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-    }
-    if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-      lockedShifts.shift3 = true;
-      lockedShifts.shift3Locked = true;
-    }
-    if (lockedShifts.daySaved && (lockedShifts.dayEdits || 0) >= 1) {
-      lockedShifts.day = true;
-      lockedShifts.dayLocked = true;
+      lockedShifts = applySequentialSaveTransition({
+        lockState: lockedShifts,
+        targetItem: activeKey,
+        itemsOrder: ['shift1', 'shift2', 'shift3'],
+        isCorrection: saveCheck.isCorrection,
+        type: 'shift',
+      });
+
+      lockedShifts.daySaved = prevDaySaved;
+      lockedShifts.dayEdits = prevDayEdits;
+      lockedShifts.dayLocked = prevDayLocked;
+      lockedShifts.day = prevDayLocked;
     }
 
     const updatedRecordData = {

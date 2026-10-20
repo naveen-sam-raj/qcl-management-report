@@ -96,7 +96,7 @@ const pureSaltSieveAnalysisSchema = new mongoose.Schema(
     },
     emailStatus: {
       type: String,
-      enum: ['pending', 'processing', 'sent', 'failed'],
+      enum: ['pending', 'processing', 'sent', 'failed', 'skipped', 'disabled'],
       default: 'pending',
     },
     reportFileName: {

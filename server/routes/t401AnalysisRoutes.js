@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord, Plant } = require('../models');
+const {
+  hydrateLockState,
+  getInitialLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+} = require('../services/analysisLockEngine');
 
 // Helper: Get today's date in Asia/Kolkata timezone (YYYY-MM-DD)
 const getTodayKolkata = () => {
@@ -34,6 +40,22 @@ const SHIFT_DISPLAY_NAMES = {
   shift1: 'I SHIFT',
   shift2: 'II SHIFT',
   shift3: 'III SHIFT',
+};
+
+const hydrateTowerLocks = (rawLocks) => {
+  const result = {};
+  for (const uKey of TOWERS) {
+    result[uKey] = hydrateLockState(rawLocks?.[uKey], { type: 'shift', items: SHIFTS });
+  }
+  return result;
+};
+
+const getInitialTowerLocks = () => {
+  const result = {};
+  for (const uKey of TOWERS) {
+    result[uKey] = getInitialLockState({ type: 'shift', items: SHIFTS });
+  }
+  return result;
 };
 
 /**
@@ -105,8 +127,10 @@ router.post('/', async (req, res) => {
     let existingData = existingDoc?.data || {};
     let existingUnits = existingData.units || existingData.towers || {};
 
-    // lockedShifts structure: { [towerKey]: { s1Saved, s2Saved, s3Saved, s1, s2, s3, s3Edits } }
-    let lockedShifts = { ...(existingData.lockedShifts || {}) };
+    // lockedShifts structure: { [towerKey]: lockState }
+    let lockedShifts = existingData.lockedShifts
+      ? hydrateTowerLocks(existingData.lockedShifts)
+      : getInitialTowerLocks();
     let editedFields = { ...(existingData.editedFields || {}) };
     let editAuditHistory = [...(existingData.editAuditHistory || [])];
 
@@ -134,12 +158,15 @@ router.post('/', async (req, res) => {
     };
 
     const isShiftLocked = (uKey, sKey) => {
-      const uLocks = lockedShifts[uKey] || {};
-      if (uLocks[sKey]) return true;
-      if (sKey === 's1' && uLocks.s2Saved) return true;
-      if (sKey === 's2' && uLocks.s3Saved) return true;
-      if (sKey === 's3' && uLocks.s3Saved && (uLocks.s3Edits || 0) >= 1) return true;
-      return false;
+      const uLocks = lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS });
+      const check = validateSequentialSave({
+        lockState: uLocks,
+        targetItem: sKey,
+        itemsOrder: SHIFTS,
+        isDiff: true,
+        type: 'shift',
+      });
+      return !check.allowed;
     };
 
     // Filter which towers are in scope if targetTower is specified, otherwise all
@@ -153,9 +180,16 @@ router.post('/', async (req, res) => {
       for (const sKey of SHIFTS) {
         if (hasShiftData(uKey, sKey) && isShiftLocked(uKey, sKey)) {
           if (isShiftDiff(uKey, sKey)) {
+            const check = validateSequentialSave({
+              lockState: lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS }),
+              targetItem: sKey,
+              itemsOrder: SHIFTS,
+              isDiff: true,
+              type: 'shift',
+            });
             return res.status(400).json({
               success: false,
-              message: `Cannot edit ${TOWER_DISPLAY_NAMES[uKey]} ${SHIFT_DISPLAY_NAMES[sKey]} because it is locked.`,
+              message: check.message || `Cannot edit ${TOWER_DISPLAY_NAMES[uKey]} ${SHIFT_DISPLAY_NAMES[sKey]} because it is locked.`,
             });
           }
         }
@@ -163,28 +197,26 @@ router.post('/', async (req, res) => {
     }
 
     // Determine changes per tower
-    // changesToSave: Array of { towerKey, shiftKey }
+    // changesToSave: Array of { towerKey, shiftKey, validation }
     const changesToSave = [];
     for (const uKey of towersToCheck) {
-      const uLocks = lockedShifts[uKey] || {};
+      const uLocks = lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS });
       for (const sKey of SHIFTS) {
         if (hasShiftData(uKey, sKey) && isShiftDiff(uKey, sKey) && !isShiftLocked(uKey, sKey)) {
-          // Check sequential workflow for this tower:
-          // Cannot save s2 if s1 has never been saved for this tower
-          if (sKey === 's2' && !uLocks.s1Saved) {
-            return res.status(400).json({
+          const check = validateSequentialSave({
+            lockState: uLocks,
+            targetItem: sKey,
+            itemsOrder: SHIFTS,
+            isDiff: true,
+            type: 'shift',
+          });
+          if (!check.allowed) {
+            return res.status(check.statusCode || 400).json({
               success: false,
-              message: `Cannot save ${TOWER_DISPLAY_NAMES[uKey]} II SHIFT before I SHIFT is saved.`,
+              message: `${TOWER_DISPLAY_NAMES[uKey]}: ${check.message}`,
             });
           }
-          // Cannot save s3 if s2 has never been saved for this tower
-          if (sKey === 's3' && !uLocks.s2Saved) {
-            return res.status(400).json({
-              success: false,
-              message: `Cannot save ${TOWER_DISPLAY_NAMES[uKey]} III SHIFT before II SHIFT is saved.`,
-            });
-          }
-          changesToSave.push({ towerKey: uKey, shiftKey: sKey });
+          changesToSave.push({ towerKey: uKey, shiftKey: sKey, validation: check });
         }
       }
     }
@@ -223,17 +255,9 @@ router.post('/', async (req, res) => {
     const saveEventId = `t401_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Apply changes and update tower-wise sequential lock flags
-    for (const { towerKey: uKey, shiftKey: sKey } of changesToSave) {
+    for (const { towerKey: uKey, shiftKey: sKey, validation } of changesToSave) {
       if (!lockedShifts[uKey]) {
-        lockedShifts[uKey] = {
-          s1Saved: false,
-          s2Saved: false,
-          s3Saved: false,
-          s1: false,
-          s2: false,
-          s3: false,
-          s3Edits: 0,
-        };
+        lockedShifts[uKey] = getInitialLockState({ type: 'shift', items: SHIFTS });
       }
       const uLocks = lockedShifts[uKey];
 
@@ -275,22 +299,14 @@ router.post('/', async (req, res) => {
         }
       });
 
-      // Update sequential locking status for this specific tower
-      if (sKey === 's1') {
-        uLocks.s1Saved = true;
-      } else if (sKey === 's2') {
-        uLocks.s2Saved = true;
-        uLocks.s1 = true; // Lock I SHIFT permanently
-      } else if (sKey === 's3') {
-        if (!uLocks.s3Saved) {
-          uLocks.s3Saved = true;
-          uLocks.s2 = true; // Lock II SHIFT permanently
-        } else {
-          // Final edit executed on s3
-          uLocks.s3Edits = (uLocks.s3Edits || 0) + 1;
-          uLocks.s3 = true; // Lock III SHIFT permanently
-        }
-      }
+      // Update sequential locking status for this specific tower via universal locking engine
+      lockedShifts[uKey] = applySequentialSaveTransition({
+        lockState: lockedShifts[uKey],
+        targetItem: sKey,
+        itemsOrder: SHIFTS,
+        isCorrection: validation?.isCorrection || false,
+        type: 'shift',
+      });
     }
 
     // Determine primary shift label for display
@@ -427,13 +443,16 @@ router.get('/', async (req, res) => {
 
       if (doc && doc.data) {
         const docData = doc.data || {};
+        const resolvedLocks = docData.lockedShifts
+          ? hydrateTowerLocks(docData.lockedShifts)
+          : getInitialTowerLocks();
         const enrichedData = {
           ...docData,
           _id: doc._id,
           id: doc._id,
           recordId: doc._id,
           units: docData.units || docData.towers || {},
-          lockedShifts: docData.lockedShifts || {},
+          lockedShifts: resolvedLocks,
           editedFields: docData.editedFields || {},
         };
         return res.status(200).json({
@@ -441,7 +460,7 @@ router.get('/', async (req, res) => {
           data: [enrichedData],
           record: enrichedData,
           recordId: doc._id,
-          lockedShifts: docData.lockedShifts || {},
+          lockedShifts: resolvedLocks,
           editedFields: docData.editedFields || {},
           assignedOperatorEmail,
           emailStatus: doc.emailStatus || 'pending',
@@ -450,12 +469,13 @@ router.get('/', async (req, res) => {
       }
     }
 
+    const initialLocks = getInitialTowerLocks();
     return res.status(200).json({
       success: true,
       data: [],
       record: null,
       recordId: null,
-      lockedShifts: {},
+      lockedShifts: initialLocks,
       editedFields: {},
       assignedOperatorEmail,
       emailStatus: 'failed',

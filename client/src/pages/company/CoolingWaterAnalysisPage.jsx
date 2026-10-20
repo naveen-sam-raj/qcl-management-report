@@ -84,11 +84,13 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   // Sequential shift permissions for 200# / lock for Day routine
   const isRowDisabled = useCallback((row, idx) => {
     if (isViewOnly) return true;
-    if (!is200) return isLocked;
+    if (!is200) return false;
 
     const time = String(row.time || '');
     if (idx === 0 || time === '07:00') {
-      return Boolean(lockedShifts.shift1Locked || lockedShifts.shift2Saved);
+      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1) return true;
+      return false;
     }
     if (idx === 1 || time === '19:00') {
       if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
@@ -97,7 +99,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
       return false;
     }
     return false;
-  }, [isViewOnly, is200, lockedShifts, isLocked]);
+  }, [isViewOnly, is200, lockedShifts]);
 
   // Fetch existing data when date or unit changes
   useEffect(() => {
@@ -432,7 +434,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           {!isViewOnly && (
             <StatusSaveButton
               saving={saving}
-              isLocked={is200 ? (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) : isLocked}
+              isLocked={is200 ? Boolean(lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) : false}
               savePhase={savePhase}
               onClick={initiateSave}
               className="px-4 py-2 text-xs"
@@ -583,10 +585,10 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                 if (is200) {
                   const time = String(row.time || '');
                   if (idx === 0 || time === '07:00') {
-                    if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
+                    if (lockedShifts.shift1Locked || lockedShifts.shift2Saved || (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1)) {
                       shiftBadge = <RecordStatusBadge status="locked" />;
                     } else if (lockedShifts.shift1Saved) {
-                      shiftBadge = <RecordStatusBadge status="editable" />;
+                      shiftBadge = <RecordStatusBadge status="editable" subLabel="1 edit left" />;
                     } else {
                       shiftBadge = <RecordStatusBadge status="new" />;
                     }
@@ -596,7 +598,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                     } else if (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) {
                       shiftBadge = <RecordStatusBadge status="locked" />;
                     } else if (lockedShifts.shift2Saved) {
-                      shiftBadge = <RecordStatusBadge status="editable" />;
+                      shiftBadge = <RecordStatusBadge status="editable" subLabel="1 edit left" />;
                     } else {
                       shiftBadge = <RecordStatusBadge status="new" />;
                     }

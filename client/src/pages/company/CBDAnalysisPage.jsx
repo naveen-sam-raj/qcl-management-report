@@ -115,11 +115,15 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
   const isShiftDisabled = useCallback((shiftKey) => {
     if (isViewOnly) return true;
     if (shiftKey === 'iShift') {
-      return Boolean(lockedShifts.shift1Locked || lockedShifts.shift2Saved);
+      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1) return true;
+      return false;
     }
     if (shiftKey === 'iiShift') {
       if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
-      return Boolean(lockedShifts.shift2Locked || lockedShifts.shift3Saved);
+      if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) return true;
+      if (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1) return true;
+      return false;
     }
     if (shiftKey === 'iiiShift') {
       if (!lockedShifts.shift2Saved) return true; // Waiting for Shift 2
@@ -349,11 +353,11 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
   // Helper for Shift Status Badge
   const getShiftBadge = (shiftKey) => {
     if (shiftKey === 'iShift') {
-      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
+      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved || (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1)) {
         return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
       }
       if (lockedShifts.shift1Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
+        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
       }
       return <RecordStatusBadge status="NEW" subLabel="first entry" />;
     }
@@ -361,11 +365,11 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
       if (!lockedShifts.shift1Saved) {
         return <RecordStatusBadge status="WAITING" subLabel="pending shift 1" />;
       }
-      if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) {
+      if (lockedShifts.shift2Locked || lockedShifts.shift3Saved || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) {
         return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
       }
       if (lockedShifts.shift2Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
+        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
       }
       return <RecordStatusBadge status="NEW" subLabel="first entry" />;
     }

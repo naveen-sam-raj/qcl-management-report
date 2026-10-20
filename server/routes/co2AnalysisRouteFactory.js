@@ -3,6 +3,13 @@ const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const {
+  getInitialLockState,
+  hydrateLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+  DEFAULT_SHIFTS_3,
+} = require('../services/analysisLockEngine');
 
 /**
  * Helper to get Asia/Kolkata date string (YYYY-MM-DD)
@@ -54,18 +61,8 @@ function createCO2ShiftAnalysisRouter({
         assignedOperatorEmail = null;
       }
 
-      const defaultLocks = {
-        shift1: false,
-        shift2: true,
-        shift3: true,
-        shift1Locked: false,
-        shift2Locked: true,
-        shift3Locked: true,
-        shift1Saved: false,
-        shift2Saved: false,
-        shift3Saved: false,
-        shift3Edits: 0,
-      };
+      const targetShifts = ['shift1', 'shift2', 'shift3'];
+      const defaultLocks = getInitialLockState({ type: 'shift', items: targetShifts });
 
       if (date) {
         const query = {
@@ -81,13 +78,17 @@ function createCO2ShiftAnalysisRouter({
         if (doc && doc.data) {
           const payloadData = doc.data;
           const rows = payloadData.rows || payloadData.shifts || payloadData;
+          const resolvedLocks = payloadData.lockedShifts
+            ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: targetShifts })
+            : defaultLocks;
+
           return res.status(200).json({
             success: true,
             recordId: doc._id,
             emailRecipient: doc.emailRecipient || assignedOperatorEmail,
             emailStatus: doc.emailStatus || 'pending',
             assignedOperatorEmail,
-            lockedShifts: payloadData.lockedShifts || defaultLocks,
+            lockedShifts: resolvedLocks,
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             data: {
@@ -96,7 +97,7 @@ function createCO2ShiftAnalysisRouter({
               id: doc._id,
               date: doc.date,
               rows,
-              lockedShifts: payloadData.lockedShifts || defaultLocks,
+              lockedShifts: resolvedLocks,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',
@@ -238,61 +239,34 @@ function createCO2ShiftAnalysisRouter({
         });
       };
 
-      let lockedShifts = existingData.lockedShifts || {
-        shift1: false,
-        shift2: true,
-        shift3: true,
-        shift1Locked: false,
-        shift2Locked: true,
-        shift3Locked: true,
-        shift1Saved: false,
-        shift2Saved: false,
-        shift3Saved: false,
-        shift3Edits: 0,
-      };
+      let lockedShifts = existingData.lockedShifts
+        ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: targetShifts })
+        : getInitialLockState({ type: 'shift', items: targetShifts });
       let editedFields = existingData.editedFields || {};
       let editAuditHistory = existingData.editAuditHistory || [];
 
-      // Check if all shifts are already permanently locked
-      const isAllPermanentlyLocked = Boolean(
-        lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1
-      );
-      if (isAllPermanentlyLocked) {
-        return res.status(400).json({
-          success: false,
-          message: 'All shifts for this date are permanently locked. No further edits permitted.',
-        });
-      }
-
-      const isShiftLocked = (key) => {
-        if (key === 'shift1') return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
-        if (key === 'shift2') {
-          if (!lockedShifts.shift1Saved) return true;
-          return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
-        }
-        if (key === 'shift3') {
-          if (!lockedShifts.shift2Saved) return true;
-          if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
-          if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-          return false;
-        }
-        return false;
-      };
-
-      const willSave = {};
+      // Check for lock violations on modified shifts
       for (const key of targetShifts) {
-        if (hasShiftData(key, payload.rows) && isShiftLocked(key)) {
-          if (isShiftDiff(key, existingRows, payload.rows)) {
-            return res.status(400).json({
+        if (hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows)) {
+          const check = validateSequentialSave({
+            lockState: lockedShifts,
+            targetItem: key,
+            itemsOrder: targetShifts,
+            isDiff: true,
+            type: 'shift',
+          });
+          if (!check.allowed) {
+            return res.status(check.statusCode || 400).json({
               success: false,
-              message: `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is permanently locked.`,
+              message: check.message,
             });
           }
         }
       }
 
+      const willSave = {};
       for (const key of targetShifts) {
-        if (hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows) && !isShiftLocked(key)) {
+        if (hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows)) {
           willSave[key] = true;
         }
       }
@@ -305,22 +279,6 @@ function createCO2ShiftAnalysisRouter({
         });
       }
 
-      let newS1Saved = lockedShifts.shift1Saved || willSave.shift1;
-      let newS2Saved = lockedShifts.shift2Saved || willSave.shift2;
-
-      if (willSave.shift2 && !newS1Saved) {
-        return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save II SHIFT before I SHIFT is saved.' });
-      }
-      if (willSave.shift3 && !newS2Saved) {
-        return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save III SHIFT before II SHIFT is saved.' });
-      }
-      if (willSave.shift3 && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-        return res.status(400).json({
-          success: false,
-          message: 'III SHIFT has already reached its maximum edit limit (one final edit allowed).',
-        });
-      }
-
       const activeShiftKey = shiftsToSave[0];
       if (!activeShiftKey) {
         return res.status(400).json({
@@ -329,14 +287,26 @@ function createCO2ShiftAnalysisRouter({
         });
       }
 
+      // Authoritative sequential save validation
+      const saveValidation = validateSequentialSave({
+        lockState: lockedShifts,
+        targetItem: activeShiftKey,
+        itemsOrder: targetShifts,
+        isDiff: true,
+        type: 'shift',
+      });
+      if (!saveValidation.allowed) {
+        return res.status(saveValidation.statusCode || 400).json({
+          success: false,
+          message: saveValidation.message,
+        });
+      }
+
       const mergedRows = { ...(existingRows || {}) };
       const oldShift = mergedRows[activeShiftKey] || {};
       const newShift = payload.rows[activeShiftKey] || {};
 
-      const isPriorSavedShift =
-        (activeShiftKey === 'shift1' && lockedShifts.shift1Saved) ||
-        (activeShiftKey === 'shift2' && lockedShifts.shift2Saved) ||
-        (activeShiftKey === 'shift3' && lockedShifts.shift3Saved);
+      const isPriorSavedShift = saveValidation.isCorrection;
 
       if (isPriorSavedShift) {
         parameters.forEach((paramKey) => {
@@ -369,60 +339,14 @@ function createCO2ShiftAnalysisRouter({
 
       mergedRows[activeShiftKey] = newShift;
 
-      // Update shift locks
-      if (activeShiftKey === 'shift1') {
-        lockedShifts.shift1Saved = true;
-        lockedShifts.shift1 = false;
-        lockedShifts.shift1Locked = false;
-        lockedShifts.shift2 = false;
-        lockedShifts.shift2Locked = false;
-        if (!lockedShifts.shift3Saved) {
-          lockedShifts.shift3 = true;
-          lockedShifts.shift3Locked = true;
-        }
-      }
-      if (activeShiftKey === 'shift2') {
-        lockedShifts.shift2Saved = true;
-        lockedShifts.shift1 = true;
-        lockedShifts.shift1Locked = true;
-        lockedShifts.shift2 = false;
-        lockedShifts.shift2Locked = false;
-        lockedShifts.shift3 = false;
-        lockedShifts.shift3Locked = false;
-      }
-      if (activeShiftKey === 'shift3') {
-        lockedShifts.shift1 = true;
-        lockedShifts.shift1Locked = true;
-        lockedShifts.shift2 = true;
-        lockedShifts.shift2Locked = true;
-        if (lockedShifts.shift3Saved) {
-          lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-          lockedShifts.shift3 = true;
-          lockedShifts.shift3Locked = true;
-        } else {
-          lockedShifts.shift3Saved = true;
-          lockedShifts.shift3Edits = 0;
-          lockedShifts.shift3 = false;
-          lockedShifts.shift3Locked = false;
-        }
-      }
-
-      if (lockedShifts.shift2Saved) {
-        lockedShifts.shift1 = true;
-        lockedShifts.shift1Locked = true;
-      }
-      if (lockedShifts.shift3Saved) {
-        lockedShifts.shift2 = true;
-        lockedShifts.shift2Locked = true;
-      }
-      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-        lockedShifts.shift1 = true;
-        lockedShifts.shift1Locked = true;
-        lockedShifts.shift2 = true;
-        lockedShifts.shift2Locked = true;
-        lockedShifts.shift3 = true;
-        lockedShifts.shift3Locked = true;
-      }
+      // Apply authoritative state transition
+      lockedShifts = applySequentialSaveTransition({
+        lockState: lockedShifts,
+        targetItem: activeShiftKey,
+        itemsOrder: targetShifts,
+        isCorrection: saveValidation.isCorrection,
+        type: 'shift',
+      });
 
       const updatedRecordData = {
         id: existingData.id || `${unit}_${Date.now()}`,
@@ -746,23 +670,14 @@ function createCO2WeeklyAnalysisRouter({
 
       let initialSaved = Boolean(existingData.initialSaved);
       let editCount = existingData.editCount || 0;
-      let isLocked = Boolean(existingData.isLocked || (editCount >= 1));
+      let isLocked = false; // Analyses without shifts or timings remain open for normal saving and editing
       let editedFields = existingData.editedFields || {};
       let editAuditHistory = existingData.editAuditHistory || [];
-
-      // Check lock violation
-      if (isLocked) {
-        return res.status(400).json({
-          success: false,
-          message: `${analysisType} for ${payload.date} is permanently locked. Only 1 edit is permitted and it has already been utilized.`,
-        });
-      }
 
       const incomingWeek = (payload.rows && payload.rows.week) || payload.rows || {};
       const oldWeek = (existingRows && existingRows.week) || existingRows || {};
 
       if (initialSaved) {
-        // This is a permitted edit
         parameters.forEach((paramKey) => {
           const oVal = oldWeek[paramKey] ?? null;
           let nVal = incomingWeek[paramKey] ?? null;
@@ -791,7 +706,6 @@ function createCO2WeeklyAnalysisRouter({
         });
 
         editCount += 1;
-        isLocked = true; // Permitted edit consumed -> permanently lock
       } else {
         initialSaved = true;
       }

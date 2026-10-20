@@ -4,6 +4,12 @@ const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const {
+  getInitialLockState,
+  hydrateLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+} = require('../services/analysisLockEngine');
 
 /**
  * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
@@ -80,13 +86,8 @@ router.get('/', async (req, res) => {
       assignedOperatorEmail = null;
     }
 
-    const defaultLocks200 = {
-      shift1Saved: false,
-      shift2Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift2Edits: 0,
-    };
+    const SHIFT_KEYS = ['shift1', 'shift2'];
+    const defaultLocks200 = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
 
     if (date) {
       try {
@@ -104,13 +105,17 @@ router.get('/', async (req, res) => {
         if (doc && doc.data) {
           const payloadData = doc.data;
           const readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
+          const hydratedLocks = is200
+            ? (payloadData.lockedShifts ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: SHIFT_KEYS }) : defaultLocks200)
+            : undefined;
+
           return res.status(200).json({
             success: true,
             recordId: doc._id,
             emailRecipient: doc.emailRecipient || assignedOperatorEmail,
             emailStatus: doc.emailStatus || 'pending',
             assignedOperatorEmail,
-            lockedShifts: payloadData.lockedShifts || (is200 ? defaultLocks200 : {}),
+            lockedShifts: hydratedLocks || {},
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             data: {
@@ -120,7 +125,7 @@ router.get('/', async (req, res) => {
               date: doc.date,
               unit: normalizedUnit,
               readings: readings.length > 0 ? readings : (is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY),
-              lockedShifts: payloadData.lockedShifts || (is200 ? defaultLocks200 : {}),
+              lockedShifts: hydratedLocks || {},
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
               emailStatus: doc.emailStatus || 'pending',
@@ -135,9 +140,13 @@ router.get('/', async (req, res) => {
       const cache = is200 ? coolingWater200Records : coolingWaterRecords;
       const match = cache.find((r) => r.date === date);
       if (match) {
+        const hydratedMatchLocks = is200
+          ? (match.lockedShifts ? hydrateLockState(match.lockedShifts, { type: 'shift', items: SHIFT_KEYS }) : defaultLocks200)
+          : undefined;
         return res.status(200).json({
           success: true,
           assignedOperatorEmail,
+          lockedShifts: hydratedMatchLocks || {},
           data: match,
         });
       }
@@ -286,13 +295,12 @@ router.post('/', async (req, res) => {
 
     let editedFields = existingDoc?.data?.editedFields || {};
     let editAuditHistory = Array.isArray(existingDoc?.data?.editAuditHistory) ? existingDoc.data.editAuditHistory : [];
-    let lockedShifts = existingDoc?.data?.lockedShifts || {
-      shift1Saved: false,
-      shift2Saved: false,
-      shift1Locked: false,
-      shift2Locked: false,
-      shift2Edits: 0,
-    };
+    const SHIFT_KEYS = ['shift1', 'shift2'];
+    let lockedShifts = is200
+      ? (existingDoc?.data?.lockedShifts
+          ? hydrateLockState(existingDoc.data.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
+          : getInitialLockState({ type: 'shift', items: SHIFT_KEYS }))
+      : undefined;
 
     const isEdit = Boolean(existingDoc);
     const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
@@ -304,69 +312,52 @@ router.post('/', async (req, res) => {
       const s1Reading = readings.find((r) => r.time === '07:00') || readings[0];
       const s2Reading = readings.find((r) => r.time === '19:00') || readings[1];
 
-      const s1HasData = s1Reading && CW200_NUMERIC_FIELDS.some((f) => s1Reading[f] !== '' && s1Reading[f] !== null);
-      const s2HasData = s2Reading && CW200_NUMERIC_FIELDS.some((f) => s2Reading[f] !== '' && s2Reading[f] !== null);
+      const s1HasData = s1Reading && CW200_NUMERIC_FIELDS.some((f) => s1Reading[f] !== '' && s1Reading[f] !== null && s1Reading[f] !== undefined);
+      const s2HasData = s2Reading && CW200_NUMERIC_FIELDS.some((f) => s2Reading[f] !== '' && s2Reading[f] !== null && s2Reading[f] !== undefined);
 
-      if (s2HasData && !lockedShifts.shift1Saved && !s1HasData) {
-        return res.status(400).json({
-          success: false,
-          message: 'Sequential shift violation: Shift 1 (07:00) must be saved before Shift 2 (19:00) can be entered.',
-        });
-      }
-
-      // Check if Shift 1 values changed
       const oldS1 = existingDoc?.data?.readings?.find((r) => r.time === '07:00') || existingDoc?.data?.readings?.[0];
+      const oldS2 = existingDoc?.data?.readings?.find((r) => r.time === '19:00') || existingDoc?.data?.readings?.[1];
+
       const s1Changed = oldS1 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS1[f], s1Reading[f]));
+      const s2Changed = oldS2 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS2[f], s2Reading[f]));
 
-      if (s1HasData) {
-        if (lockedShifts.shift1Locked) {
-          if (s1Changed) {
-            return res.status(400).json({
-              success: false,
-              message: 'Shift 1 (07:00) is locked. Edits to Shift 1 are prohibited.',
-            });
-          }
-        }
-        if (lockedShifts.shift1Saved && s1Changed) {
-          lockedShifts.shift1Edits = (lockedShifts.shift1Edits || 0) + 1;
-          if (lockedShifts.shift1Edits >= 1) {
-            lockedShifts.shift1Locked = true;
-          }
-        } else {
-          lockedShifts.shift1Saved = true;
+      const incomingShifts = [];
+      if (s1HasData) incomingShifts.push({ itemKey: 'shift1', changed: s1Changed });
+      if (s2HasData) incomingShifts.push({ itemKey: 'shift2', changed: s2Changed });
+
+      // Authoritative sequential save check via Universal Lock Engine
+      for (const { itemKey, changed } of incomingShifts) {
+        const isDiff = changed || !lockedShifts.slots?.[itemKey]?.isSaved;
+        const valRes = validateSequentialSave({
+          lockState: lockedShifts,
+          targetItem: itemKey,
+          itemsOrder: SHIFT_KEYS,
+          isDiff,
+          type: 'shift',
+        });
+        if (!valRes.allowed) {
+          return res.status(valRes.statusCode || 400).json({
+            success: false,
+            message: valRes.message,
+          });
         }
       }
 
-      if (s2HasData) {
-        if (lockedShifts.shift2Locked) {
-          return res.status(400).json({
-            success: false,
-            message: 'Shift 2 (19:00) has reached the maximum permitted edit limit (1 edit) and is permanently locked.',
-          });
-        }
-        lockedShifts.shift1Locked = true; // Lock Shift 1 permanently when Shift 2 is saved
-        const oldS2 = existingDoc?.data?.readings?.find((r) => r.time === '19:00') || existingDoc?.data?.readings?.[1];
-        const s2Changed = oldS2 && CW200_NUMERIC_FIELDS.some((f) => isValDiff(oldS2[f], s2Reading[f]));
-
-        if (lockedShifts.shift2Saved && s2Changed) {
-          lockedShifts.shift2Edits = (lockedShifts.shift2Edits || 0) + 1;
-          if (lockedShifts.shift2Edits >= 1) {
-            lockedShifts.shift2Locked = true;
-          }
-        } else {
-          lockedShifts.shift2Saved = true;
-        }
-      }
-    } else {
-      // Day Routine Cooling Water: Record-level one-time edit lock
-      if (existingDoc && existingDoc.data) {
-        const docData = existingDoc.data;
-        if (docData.isLocked || (docData.editCount || 0) >= 1) {
-          return res.status(400).json({
-            success: false,
-            message: 'One-time edit restriction: Cooling Water Analysis has already been edited once and is now permanently locked.',
-          });
-        }
+      // Update Shift Lock State Machine via Universal Lock Engine
+      for (const { itemKey } of incomingShifts) {
+        const isCorrection = Boolean(
+          lockedShifts[`${itemKey}Saved`] ||
+          lockedShifts.slots?.[itemKey]?.isSaved ||
+          (itemKey === 'shift1' && lockedShifts.s1Saved) ||
+          (itemKey === 'shift2' && lockedShifts.s2Saved)
+        );
+        lockedShifts = applySequentialSaveTransition({
+          lockState: lockedShifts,
+          targetItem: itemKey,
+          itemsOrder: SHIFT_KEYS,
+          isCorrection,
+          type: 'shift',
+        });
       }
     }
 

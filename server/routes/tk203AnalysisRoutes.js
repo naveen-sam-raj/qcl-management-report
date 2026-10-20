@@ -3,6 +3,12 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
+const {
+  hydrateLockState,
+  getInitialLockState,
+  validateSequentialSave,
+  applySequentialSaveTransition,
+} = require('../services/analysisLockEngine');
 
 // In-memory fallback
 const tk203Records = [];
@@ -109,22 +115,41 @@ router.post('/', async (req, res) => {
     let existingDoc = await PlantAnalysisRecord.findOne(query);
     let existingData = existingDoc?.data || {};
     let existingRows = existingData.rows || existingData;
+    let incomingRows = payload.shiftRows || payload.rows || {};
 
     // Helper: check if a shift has non-empty values
     const hasShiftData = (shiftKey, rowsSource) => {
+      if (!rowsSource) return false;
+      const hasShiftContainers = Boolean(rowsSource.shift1 || rowsSource.shift2 || rowsSource.shift3);
+      if (hasShiftContainers) {
+        const source = rowsSource[shiftKey];
+        if (!source) return false;
+        const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
+        return slotKeys.some((sKey) => {
+          const slot = source[sKey];
+          return slot && Object.values(slot).some((v) => v !== null && v !== '');
+        });
+      }
       const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
       return slotKeys.some((sKey) => {
-        const slot = rowsSource ? rowsSource[sKey] : null;
+        const slot = rowsSource[sKey];
         return slot && Object.values(slot).some((v) => v !== null && v !== '');
       });
     };
 
     // Helper: check if incoming shift data differs from existing
     const isShiftDiff = (shiftKey, oldRows, newRows) => {
+      if (!oldRows && !newRows) return false;
+      const hasShiftContainers = Boolean(newRows && (newRows.shift1 || newRows.shift2 || newRows.shift3));
+      if (hasShiftContainers && !newRows[shiftKey]) {
+        return false;
+      }
+      const oldSrc = (oldRows && oldRows[shiftKey]) ? oldRows[shiftKey] : oldRows;
+      const newSrc = (newRows && newRows[shiftKey]) ? newRows[shiftKey] : newRows;
       const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
       return slotKeys.some((sKey) => {
-        const oldSlot = (oldRows && oldRows[sKey]) || {};
-        const newSlot = (newRows && newRows[sKey]) || {};
+        const oldSlot = (oldSrc && oldSrc[sKey]) || (oldRows && oldRows[sKey]) || {};
+        const newSlot = (newSrc && newSrc[sKey]) || (newRows && newRows[sKey]) || {};
         const params = ['fnh3', 'cnh3', 'tcl', 'pcl', 'co2'];
         return params.some((p) => {
           let oVal = oldSlot[p] ?? null;
@@ -139,30 +164,25 @@ router.post('/', async (req, res) => {
     };
 
     let lockedShifts = existingData.lockedShifts
-      ? { ...defaultLocks, ...existingData.lockedShifts }
-      : { ...defaultLocks };
+      ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: targetShifts })
+      : getInitialLockState({ type: 'shift', items: targetShifts });
     let editedFields = existingData.editedFields || {};
     let editAuditHistory = existingData.editAuditHistory || [];
 
-    const areShiftsLocked = Boolean(lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
     const isShiftLocked = (key) => {
-      if (key === 'shift1') return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
-      if (key === 'shift2') {
-        if (!lockedShifts.shift1Saved) return true;
-        return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
-      }
-      if (key === 'shift3') {
-        if (!lockedShifts.shift2Saved) return true;
-        if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
-        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-        return false;
-      }
-      return false;
+      const check = validateSequentialSave({
+        lockState: lockedShifts,
+        targetItem: key,
+        itemsOrder: targetShifts,
+        isDiff: true,
+        type: 'shift',
+      });
+      return !check.allowed;
     };
 
-    if (areShiftsLocked) {
+    if (lockedShifts.allPermanentlyLocked) {
       const hasShiftChanges = targetShifts.some(
-        (key) => hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows)
+        (key) => hasShiftData(key, incomingRows) && isShiftDiff(key, existingRows, incomingRows)
       );
       if (hasShiftChanges) {
         return res.status(400).json({
@@ -176,11 +196,18 @@ router.post('/', async (req, res) => {
 
     // Check lock violations
     for (const key of targetShifts) {
-      if (hasShiftData(key, payload.rows) && isShiftLocked(key)) {
-        if (isShiftDiff(key, existingRows, payload.rows)) {
+      if (hasShiftData(key, incomingRows) && isShiftLocked(key)) {
+        if (isShiftDiff(key, existingRows, incomingRows)) {
+          const check = validateSequentialSave({
+            lockState: lockedShifts,
+            targetItem: key,
+            itemsOrder: targetShifts,
+            isDiff: true,
+            type: 'shift',
+          });
           return res.status(400).json({
             success: false,
-            message: `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is locked.`,
+            message: check.message || `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is locked.`,
           });
         }
       }
@@ -188,7 +215,7 @@ router.post('/', async (req, res) => {
 
     // Determine which shift has changes and is unlocked
     for (const key of targetShifts) {
-      if (hasShiftData(key, payload.rows) && isShiftDiff(key, existingRows, payload.rows) && !isShiftLocked(key)) {
+      if (hasShiftData(key, incomingRows) && isShiftDiff(key, existingRows, incomingRows) && !isShiftLocked(key)) {
         willSave[key] = true;
       }
     }
@@ -202,27 +229,26 @@ router.post('/', async (req, res) => {
       });
     }
 
-    let newS1Saved = lockedShifts.shift1Saved || willSave.shift1;
-    let newS2Saved = lockedShifts.shift2Saved || willSave.shift2;
-
-    if (willSave.shift2 && !newS1Saved) {
-      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save II SHIFT before I SHIFT is saved.' });
-    }
-    if (willSave.shift3 && !newS2Saved) {
-      return res.status(400).json({ success: false, message: 'Sequential restriction: Cannot save III SHIFT before II SHIFT is saved.' });
-    }
-    if (willSave.shift3 && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'III SHIFT has already reached its maximum edit limit (one final edit allowed).',
-      });
-    }
-
     const activeShiftKey = shiftsToSave[0];
     if (!activeShiftKey) {
       return res.status(400).json({
         success: false,
         message: 'No unlocked shifts with valid new or modified data were found to save.',
+      });
+    }
+
+    // Authoritative sequential save check
+    const saveValidation = validateSequentialSave({
+      lockState: lockedShifts,
+      targetItem: activeShiftKey,
+      itemsOrder: targetShifts,
+      isDiff: true,
+      type: 'shift',
+    });
+    if (!saveValidation.allowed) {
+      return res.status(saveValidation.statusCode || 400).json({
+        success: false,
+        message: saveValidation.message,
       });
     }
 
@@ -237,7 +263,7 @@ router.post('/', async (req, res) => {
 
     slotKeysToUpdate.forEach((sKey) => {
       const oldSlot = mergedRows[sKey] || {};
-      const newSlot = payload.rows[sKey] || {};
+      const newSlot = (incomingRows[activeShiftKey] && incomingRows[activeShiftKey][sKey]) || incomingRows[sKey] || {};
       const params = ['fnh3', 'cnh3', 'tcl', 'pcl', 'co2'];
 
       if (isPriorSavedShift) {
@@ -274,60 +300,14 @@ router.post('/', async (req, res) => {
 
     newlySavedShifts.push(activeShiftKey);
 
-    // Update locked status
-    if (activeShiftKey === 'shift1') {
-      lockedShifts.shift1Saved = true;
-      lockedShifts.shift1 = false;
-      lockedShifts.shift1Locked = false;
-      lockedShifts.shift2 = false;
-      lockedShifts.shift2Locked = false;
-      if (!lockedShifts.shift3Saved) {
-        lockedShifts.shift3 = true;
-        lockedShifts.shift3Locked = true;
-      }
-    }
-    if (activeShiftKey === 'shift2') {
-      lockedShifts.shift2Saved = true;
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = false;
-      lockedShifts.shift2Locked = false;
-      lockedShifts.shift3 = false;
-      lockedShifts.shift3Locked = false;
-    }
-    if (activeShiftKey === 'shift3') {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-      if (lockedShifts.shift3Saved) {
-        lockedShifts.shift3Edits = (lockedShifts.shift3Edits || 0) + 1;
-        lockedShifts.shift3 = true;
-        lockedShifts.shift3Locked = true;
-      } else {
-        lockedShifts.shift3Saved = true;
-        lockedShifts.shift3Edits = 0;
-        lockedShifts.shift3 = false;
-        lockedShifts.shift3Locked = false;
-      }
-    }
-
-    if (lockedShifts.shift2Saved) {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-    }
-    if (lockedShifts.shift3Saved) {
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-    }
-    if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-      lockedShifts.shift1 = true;
-      lockedShifts.shift1Locked = true;
-      lockedShifts.shift2 = true;
-      lockedShifts.shift2Locked = true;
-      lockedShifts.shift3 = true;
-      lockedShifts.shift3Locked = true;
-    }
+    // Update locked status via universal locking engine
+    lockedShifts = applySequentialSaveTransition({
+      lockState: lockedShifts,
+      targetItem: activeShiftKey,
+      itemsOrder: targetShifts,
+      isCorrection: saveValidation.isCorrection,
+      type: 'shift',
+    });
 
     // Generate unique Save Event ID for this exact save operation
     const saveEventId = `save_tk203_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -473,6 +453,7 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { date } = req.query;
+    const targetShifts = ['shift1', 'shift2', 'shift3'];
     const { getPlantAssignedUser } = require('../services/plantNotificationService');
 
     let assignedOperatorEmail = null;
@@ -490,8 +471,12 @@ router.get('/', async (req, res) => {
       const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
 
       if (doc && doc.data) {
+        const resolvedLocks = doc.data.lockedShifts
+          ? hydrateLockState(doc.data.lockedShifts, { type: 'shift', items: targetShifts })
+          : getInitialLockState({ type: 'shift', items: targetShifts });
         const enrichedData = {
           ...doc.data,
+          lockedShifts: resolvedLocks,
           _id: doc._id,
           recordId: doc._id,
         };
@@ -499,7 +484,7 @@ router.get('/', async (req, res) => {
           success: true,
           data: [enrichedData],
           recordId: doc._id,
-          lockedShifts: doc.data?.lockedShifts || defaultLocks,
+          lockedShifts: resolvedLocks,
           editedFields: doc.data?.editedFields || {},
           editAuditHistory: doc.data?.editAuditHistory || [],
           assignedOperatorEmail,
@@ -512,7 +497,7 @@ router.get('/', async (req, res) => {
     return res.status(200).json({
       success: true,
       data: [],
-      lockedShifts: defaultLocks,
+      lockedShifts: getInitialLockState({ type: 'shift', items: targetShifts }),
       editedFields: {},
       editAuditHistory: [],
       assignedOperatorEmail,

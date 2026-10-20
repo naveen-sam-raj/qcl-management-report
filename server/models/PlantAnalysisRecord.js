@@ -72,7 +72,7 @@ const plantAnalysisRecordSchema = new mongoose.Schema(
     },
     emailStatus: {
       type: String,
-      enum: ['Pending', 'Sent', 'Failed', 'Skipped', 'pending', 'sent', 'failed', 'skipped'],
+      enum: ['Pending', 'Sent', 'Failed', 'Skipped', 'pending', 'sent', 'failed', 'skipped', 'disabled'],
       default: 'pending',
     },
     emailMessageId: {
