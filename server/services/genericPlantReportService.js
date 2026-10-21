@@ -216,37 +216,29 @@ function mergeRecordsForAnalysis(records) {
     const rec = records[i];
     const d = rec.data || {};
 
-    // 1. Merge rows
-    if (d.rows && typeof d.rows === 'object') {
-      mergedData.rows = { ...(mergedData.rows || {}), ...d.rows };
+    // 8. Merge editedFields safely
+    if (d.editedFields && typeof d.editedFields === 'object') {
+      if (Array.isArray(d.editedFields)) {
+        mergedData.editedFields = [
+          ...(Array.isArray(mergedData.editedFields) ? mergedData.editedFields : []),
+          ...d.editedFields,
+        ];
+      } else {
+        mergedData.editedFields = { ...(mergedData.editedFields || {}), ...d.editedFields };
+      }
     }
-    // 2. Merge shifts
-    if (d.shifts && typeof d.shifts === 'object') {
-      mergedData.shifts = { ...(mergedData.shifts || {}), ...d.shifts };
+    // 9. Merge editAuditHistory safely
+    if (Array.isArray(d.editAuditHistory)) {
+      mergedData.editAuditHistory = [...(mergedData.editAuditHistory || []), ...d.editAuditHistory];
     }
-    // 3. Merge shiftRows
-    if (d.shiftRows && typeof d.shiftRows === 'object') {
-      mergedData.shiftRows = { ...(mergedData.shiftRows || {}), ...d.shiftRows };
-    }
-    // 4. Merge timeRows
-    if (d.timeRows && typeof d.timeRows === 'object') {
-      mergedData.timeRows = { ...(mergedData.timeRows || {}), ...d.timeRows };
-    }
-    // 5. Merge readings array
-    if (Array.isArray(d.readings)) {
-      mergedData.readings = [...(mergedData.readings || []), ...d.readings];
-    }
-    // 6. Merge parameters
-    if (d.parameters && typeof d.parameters === 'object') {
-      mergedData.parameters = { ...(mergedData.parameters || {}), ...d.parameters };
-    }
-    // 7. Merge chemical & bss
-    if (d.chemical && typeof d.chemical === 'object') {
-      mergedData.chemical = { ...(mergedData.chemical || {}), ...d.chemical };
-    }
-    if (d.bss && typeof d.bss === 'object') {
-      mergedData.bss = { ...(mergedData.bss || {}), ...d.bss };
-    }
+  }
+
+  // Also pull edited fields/audit history from primary record root if present
+  if (primary.editedFields && !mergedData.editedFields) {
+    mergedData.editedFields = primary.editedFields;
+  }
+  if (primary.editAuditHistory && !mergedData.editAuditHistory) {
+    mergedData.editAuditHistory = primary.editAuditHistory;
   }
 
   primary.data = mergedData;
@@ -259,6 +251,321 @@ const THIN_BLACK_BORDER = {
   bottom: { style: 'thin', color: { argb: 'FF000000' } },
   right: { style: 'thin', color: { argb: 'FF000000' } },
 };
+
+/**
+ * EPSILON tolerance for boundary comparisons, matching client/src/services/analysisValidation.js (Line 2392)
+ */
+const EPSILON = 0.000001;
+
+/**
+ * Parses min-max range string (e.g. "0.03-0.30", "0.03–0.30").
+ * Returns { min: number, max: number } or null if unparseable/null.
+ */
+function parseColumnRange(rangeStr) {
+  if (!rangeStr || typeof rangeStr !== 'string') return null;
+  const match = rangeStr.match(/^\s*(-?\d+(?:\.\d+)?)\s*[\u2013\-–]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!match) return null;
+  const min = parseFloat(match[1]);
+  const max = parseFloat(match[2]);
+  if (isNaN(min) || isNaN(max)) return null;
+  return { min, max };
+}
+
+/**
+ * Checks if a value is out of limit using EPSILON tolerance
+ */
+function checkOutOfLimit(val, limit) {
+  if (!limit) return false;
+  if (val === null || val === undefined || val === '' || val === '*') return false;
+  const num = typeof val === 'number' ? val : parseFloat(String(val).trim());
+  if (isNaN(num)) return false;
+  return num < limit.min - EPSILON || num > limit.max + EPSILON;
+}
+
+/**
+ * Formats a timestamp into IST string: "DD-MM-YYYY HH:mm IST"
+ */
+function formatTimestampIST(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const p = {};
+    parts.forEach(({ type, value }) => {
+      p[type] = value;
+    });
+    return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute} IST`;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Safely inspects editedFields across various data structures (Object, Map, Array, Set, nested)
+ */
+function isFieldMarkedEdited(editedFields, candidateKeys) {
+  if (!editedFields) return false;
+  try {
+    // 1. If Map (ES6 Map or Mongoose Map)
+    if (typeof editedFields.get === 'function') {
+      for (const key of candidateKeys) {
+        if (editedFields.get(key) || editedFields.get(key.toLowerCase())) {
+          return true;
+        }
+      }
+    }
+
+    // 2. If Array
+    if (Array.isArray(editedFields)) {
+      for (const item of editedFields) {
+        if (typeof item === 'string') {
+          const itemLower = item.toLowerCase();
+          if (candidateKeys.some((k) => k.toLowerCase() === itemLower)) {
+            return true;
+          }
+        } else if (item && typeof item === 'object') {
+          const itemKey = String(item.field || item.key || item.paramKey || item.fieldKey || '').toLowerCase();
+          if (itemKey && candidateKeys.some((k) => k.toLowerCase() === itemKey)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // 3. If Set
+    if (editedFields instanceof Set) {
+      for (const key of candidateKeys) {
+        if (editedFields.has(key) || editedFields.has(key.toLowerCase())) {
+          return true;
+        }
+      }
+    }
+
+    // 4. If plain or nested object
+    if (typeof editedFields === 'object') {
+      // Direct flat check
+      for (const key of candidateKeys) {
+        if (editedFields[key] || editedFields[key.toLowerCase()]) {
+          return true;
+        }
+      }
+      // Nested check e.g. editedFields[rowKey][colKey]
+      for (const key of candidateKeys) {
+        const parts = key.split('_');
+        if (parts.length >= 2) {
+          const rKey = parts[0];
+          const cKey = parts.slice(1).join('_');
+          const nestedRow = editedFields[rKey] || editedFields[rKey.toLowerCase()];
+          if (nestedRow && typeof nestedRow === 'object') {
+            if (typeof nestedRow.get === 'function') {
+              if (nestedRow.get(cKey) || nestedRow.get(cKey.toLowerCase())) return true;
+            } else if (nestedRow[cKey] || nestedRow[cKey.toLowerCase()]) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Finds all audit history entries for a given cell
+ */
+function getCellAuditEntries(editAuditHistory, rowKey, colKey, dataObj = null) {
+  if (!Array.isArray(editAuditHistory) || editAuditHistory.length === 0) {
+    return [];
+  }
+  try {
+    const rLower = String(rowKey || '').toLowerCase().trim();
+    const cLower = String(colKey || '').toLowerCase().trim();
+
+    const candidateRowIds = new Set([rLower]);
+    if (dataObj && typeof dataObj === 'object') {
+      if (dataObj.time) candidateRowIds.add(String(dataObj.time).toLowerCase().trim());
+      if (dataObj.id) candidateRowIds.add(String(dataObj.id).toLowerCase().trim());
+      if (dataObj.sample) candidateRowIds.add(String(dataObj.sample).toLowerCase().trim());
+      if (dataObj.shift) candidateRowIds.add(String(dataObj.shift).toLowerCase().trim());
+    }
+
+    return editAuditHistory.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+
+      const pKey = String(entry.paramKey || entry.stream || entry.parameter || entry.field || entry.key || '')
+        .toLowerCase()
+        .trim();
+      if (pKey !== cLower) return false;
+
+      const sKey = String(entry.shiftKey || entry.shiftName || entry.rowKey || entry.timeKey || entry.time || entry.rowId || '')
+        .toLowerCase()
+        .trim();
+      if (!sKey) return true;
+
+      for (const cand of candidateRowIds) {
+        if (!cand) continue;
+        if (sKey === cand || sKey.includes(cand) || cand.includes(sKey)) {
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Determines whether a cell is edited and builds its multi-entry audit note
+ */
+function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
+  if (!data || typeof data !== 'object') {
+    return { isEdited: false, note: null };
+  }
+
+  const rStr = String(rowKey || '').trim();
+  const cStr = String(colKey || '').trim();
+
+  const candidateKeys = [
+    `${rStr}_${cStr}`,
+    `${rStr.toLowerCase()}_${cStr.toLowerCase()}`,
+    `${cStr}`,
+    `${cStr.toLowerCase()}`,
+  ];
+  if (dataObj && typeof dataObj === 'object') {
+    if (dataObj.time) candidateKeys.push(`${dataObj.time}_${cStr}`);
+    if (dataObj.id) candidateKeys.push(`${dataObj.id}_${cStr}`);
+  }
+
+  const editedFields = data.editedFields || null;
+  const isMarked = isFieldMarkedEdited(editedFields, candidateKeys);
+
+  const auditHistory = data.editAuditHistory || null;
+  const matchingEntries = getCellAuditEntries(auditHistory, rowKey, colKey, dataObj);
+
+  const isEdited = isMarked || matchingEntries.length > 0;
+  if (!isEdited) {
+    return { isEdited: false, note: null };
+  }
+
+  if (matchingEntries.length > 0) {
+    const lines = matchingEntries.map((e) => {
+      const oldStr = e.oldValue !== undefined && e.oldValue !== null ? e.oldValue : '*';
+      const newStr = e.newValue !== undefined && e.newValue !== null ? e.newValue : '*';
+      const byStr = e.editedBy ? ` by ${e.editedBy}` : '';
+      const timeStr = e.timestamp ? `, ${formatTimestampIST(e.timestamp)}` : '';
+      return `Edited (old ${oldStr} -> new ${newStr})${byStr}${timeStr}`;
+    });
+    return { isEdited: true, note: lines.join('\n') };
+  }
+
+  return { isEdited: true, note: 'Edited' };
+}
+
+/**
+ * Resolves standard column objects from columnKeys and labelConfig
+ */
+function resolveColumns(columnKeys, labelConfig = null) {
+  const columns = [];
+  if (labelConfig && Array.isArray(labelConfig.columns) && labelConfig.columns.length > 0) {
+    const configMap = new Map();
+    labelConfig.columns.forEach((c) => {
+      configMap.set(String(c.key).toLowerCase(), c);
+      columns.push({
+        key: c.key,
+        label: c.label || String(c.key).toUpperCase(),
+        unit: c.unit !== undefined ? c.unit : null,
+        range: c.range !== undefined ? c.range : null,
+      });
+    });
+
+    columnKeys.forEach((k) => {
+      if (!configMap.has(String(k).toLowerCase())) {
+        columns.push({
+          key: k,
+          label: String(k).toUpperCase(),
+          unit: null,
+          range: null,
+        });
+      }
+    });
+  } else {
+    columnKeys.forEach((colKey) => {
+      columns.push({
+        key: colKey,
+        label: String(colKey).toUpperCase(),
+        unit: null,
+        range: null,
+      });
+    });
+  }
+  return columns;
+}
+
+/**
+ * Analyzes all cells in a table block to detect out-of-limit and edited cells
+ */
+function analyzeTableMarkedCells(data, rowEntries, columns) {
+  let hasMarkedCells = false;
+  const rowMarksMap = new Map();
+
+  for (const row of rowEntries) {
+    const outOfLimitLabels = [];
+    const editedLabels = [];
+    const cellMarks = {};
+
+    for (const col of columns) {
+      const val = row.dataObj ? row.dataObj[col.key] : null;
+      const limit = parseColumnRange(col.range);
+      const isOutOfLimit = checkOutOfLimit(val, limit);
+      const editInfo = getCellEditInfo(data, row.rowKey, col.key, row.dataObj);
+      const isEdited = editInfo.isEdited;
+
+      if (isOutOfLimit) {
+        hasMarkedCells = true;
+        outOfLimitLabels.push(col.label);
+      }
+      if (isEdited) {
+        hasMarkedCells = true;
+        editedLabels.push(col.label);
+      }
+
+      cellMarks[col.key] = {
+        isOutOfLimit,
+        isEdited,
+        note: editInfo.note,
+      };
+    }
+
+    const remarksParts = [];
+    if (outOfLimitLabels.length > 0) {
+      remarksParts.push(`Out of limit: ${outOfLimitLabels.join(', ')}`);
+    }
+    if (editedLabels.length > 0) {
+      remarksParts.push(`Edited: ${editedLabels.join(', ')}`);
+    }
+    const remarkText = remarksParts.join(' | ');
+
+    rowMarksMap.set(row.rowKey, {
+      cellMarks,
+      remarkText,
+    });
+  }
+
+  return { hasMarkedCells, rowMarksMap };
+}
 
 /**
  * Apply consistent Excel table styling (Classic ACL Master Template Design)
@@ -285,13 +592,40 @@ function applySubHeaderStyle(cell) {
   cell.border = THIN_BLACK_BORDER;
 }
 
-function applyDataCellStyle(cell, isFirstCol = false, isMissing = false) {
+function applyDataCellStyle(cell, isFirstCol = false, isMissing = false, isOutOfLimit = false, isEdited = false) {
   if (isFirstCol) {
     cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF660066' } };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: 'FFFFC000' },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  } else if (isOutOfLimit && isEdited) {
+    // Both: red fill #FFC7CE and blue bold font #0000FF
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0000FF' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFC7CE' },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  } else if (isOutOfLimit) {
+    // Out of limit: fill #FFC7CE, font bold color #9C0006
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF9C0006' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFC7CE' },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  } else if (isEdited) {
+    // Edited: font bold color #0000FF
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0000FF' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFFFFF' },
     };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
   } else {
@@ -334,9 +668,40 @@ function applySectionTitleStyle(cell) {
 }
 
 /**
+ * Adds a small legend 2 rows below the table
+ */
+function renderLegend(sheet, rowIdx) {
+  const leg1 = sheet.getRow(rowIdx).getCell(1);
+  leg1.value = 'Red = Out of limit';
+  leg1.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF9C0006' } };
+  leg1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+  leg1.alignment = { vertical: 'middle', horizontal: 'center' };
+  leg1.border = THIN_BLACK_BORDER;
+
+  const leg2 = sheet.getRow(rowIdx).getCell(2);
+  leg2.value = 'Blue = Edited';
+  leg2.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0000FF' } };
+  leg2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+  leg2.alignment = { vertical: 'middle', horizontal: 'center' };
+  leg2.border = THIN_BLACK_BORDER;
+
+  sheet.getRow(rowIdx).height = 20;
+}
+
+/**
  * Builds an Excel table grid from an array of row objects
  */
-function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys, labelConfig = null, totalMergeCols = null) {
+function renderTableBlock(
+  sheet,
+  startRow,
+  sectionTitle,
+  rowEntries,
+  columns,
+  labelConfig = null,
+  totalMergeCols = null,
+  hasRemarksColumn = false,
+  rowMarksMap = null
+) {
   let currentRow = startRow;
 
   if (sectionTitle) {
@@ -344,43 +709,9 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     secRow.height = 28;
     secRow.getCell(1).value = sectionTitle;
     applySectionTitleStyle(secRow.getCell(1));
-    const mergeWidth = totalMergeCols || Math.max(columnKeys.length + 1, 6);
+    const mergeWidth = totalMergeCols || Math.max(columns.length + 1 + (hasRemarksColumn ? 1 : 0), 6);
     sheet.mergeCells(currentRow, 1, currentRow, mergeWidth);
     currentRow++;
-  }
-
-  // Determine effective column list and ordering
-  let columns = [];
-  if (labelConfig && Array.isArray(labelConfig.columns) && labelConfig.columns.length > 0) {
-    const configMap = new Map();
-    labelConfig.columns.forEach((c) => {
-      configMap.set(String(c.key).toLowerCase(), c);
-      columns.push({
-        key: c.key,
-        label: c.label || String(c.key).toUpperCase(),
-        unit: c.unit !== undefined ? c.unit : null,
-        range: c.range !== undefined ? c.range : null,
-      });
-    });
-
-    // Append any extra keys found in data but not in config (preserving all data)
-    columnKeys.forEach((k) => {
-      if (!configMap.has(String(k).toLowerCase())) {
-        columns.push({
-          key: k,
-          label: String(k).toUpperCase(),
-          unit: null,
-          range: null,
-        });
-      }
-    });
-  } else {
-    columns = columnKeys.map((colKey) => ({
-      key: colKey,
-      label: String(colKey).toUpperCase(),
-      unit: null,
-      range: null,
-    }));
   }
 
   // Only show subheader row if at least one column has a unit or range configured
@@ -402,6 +733,12 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     cell.value = col.label;
     applyHeaderStyle(cell);
   });
+
+  if (hasRemarksColumn) {
+    const remHeader = headerRow.getCell(columns.length + 2);
+    remHeader.value = 'REMARKS';
+    applyHeaderStyle(remHeader);
+  }
   currentRow++;
 
   // Header row 2 (Subheader): Unit + Range (as text, never number/formula)
@@ -427,13 +764,19 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
       cell.numFmt = '@'; // Store strictly as text format
       applySubHeaderStyle(cell);
     });
+
+    if (hasRemarksColumn) {
+      const remSubHeader = subHeaderRow.getCell(columns.length + 2);
+      remSubHeader.value = '';
+      applySubHeaderStyle(remSubHeader);
+    }
     currentRow++;
   }
 
   // Data rows
   rowEntries.forEach(({ rowKey, label, dataObj }) => {
     const dRow = sheet.getRow(currentRow);
-    dRow.height = 22;
+    const rowMarks = rowMarksMap ? rowMarksMap.get(rowKey) : null;
 
     const labelCell = dRow.getCell(1);
     let finalLabel = label;
@@ -448,21 +791,67 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
       const val = formatCellValue(dataObj ? dataObj[col.key] : null);
       cell.value = val;
       const isMissing = val === '*';
-      applyDataCellStyle(cell, false, isMissing);
+
+      const mark = rowMarks?.cellMarks?.[col.key];
+      const isOol = Boolean(mark?.isOutOfLimit);
+      const isEd = Boolean(mark?.isEdited);
+
+      applyDataCellStyle(cell, false, isMissing, isOol, isEd);
+
+      if (isEd && mark?.note) {
+        cell.note = mark.note;
+      }
     });
+
+    if (hasRemarksColumn) {
+      const remCell = dRow.getCell(columns.length + 2);
+      const remarkText = rowMarks?.remarkText || '';
+      remCell.value = remarkText;
+      remCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF000000' } };
+      remCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+      remCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+      remCell.border = THIN_BLACK_BORDER;
+
+      dRow.height = remarkText ? Math.max(22, Math.ceil(remarkText.length / 30) * 16) : 22;
+    } else {
+      dRow.height = 22;
+    }
+
     currentRow++;
   });
 
-  return { nextRow: currentRow + 1, colsCount: columns.length + 1 };
+  const totalTableCols = columns.length + 1 + (hasRemarksColumn ? 1 : 0);
+  return { nextRow: currentRow + 1, colsCount: totalTableCols };
 }
 
 /**
  * Auto-fits column widths for a worksheet based on content length
  */
-function autoFitColumns(sheet, totalColumns = 1) {
+function autoFitColumns(sheet, totalColumns = 1, remarksColIndex = null) {
   for (let c = 1; c <= totalColumns; c++) {
     const col = sheet.getColumn(c);
-    if (c === 1) {
+    let isRemarksCol = c === remarksColIndex;
+    if (!isRemarksCol) {
+      // Check if header cell in row 2, 3, or 4 has 'REMARKS'
+      for (let r = 2; r <= 6; r++) {
+        const val = sheet.getRow(r).getCell(c).value;
+        if (typeof val === 'string' && val.trim().toUpperCase() === 'REMARKS') {
+          isRemarksCol = true;
+          break;
+        }
+      }
+    }
+
+    if (isRemarksCol) {
+      let maxLen = 0;
+      col.eachCell({ includeEmpty: false }, (cell) => {
+        if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
+          const s = String(cell.value);
+          if (s.length > maxLen) maxLen = s.length;
+        }
+      });
+      col.width = Math.min(Math.max(maxLen > 0 ? 30 : 28, 28), 45);
+    } else if (c === 1) {
       let maxLen = 0;
       col.eachCell({ includeEmpty: false }, (cell) => {
         if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
@@ -592,7 +981,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
     );
     const sheetName = sanitizeSheetName(analysisType, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, {
-      views: [{ showGridLines: false }],
+      views: [{ showGridLines: true }],
     });
 
     let nextRow = 3;
@@ -607,7 +996,20 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       isDualBlock = true;
       const chemKeys = Object.keys(data.chemical).filter((k) => !METADATA_KEYS.has(k));
       const bssKeys = Object.keys(data.bss).filter((k) => !METADATA_KEYS.has(k));
-      sheetMaxCols = Math.max(chemKeys.length + 1, bssKeys.length + 1);
+
+      const chemColumns = resolveColumns(chemKeys, null);
+      const bssColumns = resolveColumns(bssKeys, null);
+      const chemRows = [{ rowKey: 'chemical', label: 'Product Specifications', dataObj: data.chemical }];
+      const bssRows = [{ rowKey: 'bss', label: 'Mesh Analysis', dataObj: data.bss }];
+
+      const resChem = analyzeTableMarkedCells(data, chemRows, chemColumns);
+      const resBss = analyzeTableMarkedCells(data, bssRows, bssColumns);
+      const hasRemarks = resChem.hasMarkedCells || resBss.hasMarkedCells;
+
+      sheetMaxCols = Math.max(
+        chemColumns.length + 1 + (hasRemarks ? 1 : 0),
+        bssColumns.length + 1 + (hasRemarks ? 1 : 0)
+      );
       const titleMergeCols = Math.max(sheetMaxCols, 6);
 
       // Title Banner
@@ -622,10 +1024,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         sheet,
         nextRow,
         'CHEMICAL & PHYSICAL PARAMETERS',
-        [{ rowKey: 'chemical', label: 'Product Specifications', dataObj: data.chemical }],
-        chemKeys,
+        chemRows,
+        chemColumns,
         null,
-        titleMergeCols
+        titleMergeCols,
+        hasRemarks,
+        resChem.rowMarksMap
       );
       nextRow = res1.nextRow;
 
@@ -633,12 +1037,19 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         sheet,
         nextRow,
         'BSS SIEVE FRACTIONS',
-        [{ rowKey: 'bss', label: 'Mesh Analysis', dataObj: data.bss }],
-        bssKeys,
+        bssRows,
+        bssColumns,
         null,
-        titleMergeCols
+        titleMergeCols,
+        hasRemarks,
+        resBss.rowMarksMap
       );
       nextRow = res2.nextRow;
+
+      if (hasRemarks) {
+        renderLegend(sheet, nextRow);
+        nextRow += 2;
+      }
     }
     // ── Pattern 2: Readings Array (BFW, DM Water, CaCl2, Cooling Water, etc.) ──
     else if (Array.isArray(data.readings) && data.readings.length > 0) {
@@ -651,7 +1062,18 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         }
       });
       const columnKeys = Array.from(allKeys);
-      sheetMaxCols = columnKeys.length + 1;
+      const columns = resolveColumns(columnKeys, labelConfig);
+
+      const rowEntries = data.readings.map((item, idx) => ({
+        rowKey: String(idx),
+        label: formatRowLabel(idx, item),
+        dataObj: item,
+      }));
+
+      const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+      const hasRemarks = analysisRes.hasMarkedCells;
+
+      sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
       const titleMergeCols = Math.max(sheetMaxCols, 6);
 
       const titleRow = sheet.getRow(1);
@@ -661,15 +1083,24 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       applyTitleStyle(titleCell);
       sheet.mergeCells(1, 1, 1, titleMergeCols);
 
-      const rowEntries = data.readings.map((item, idx) => ({
-        rowKey: String(idx),
-        label: formatRowLabel(idx, item),
-        dataObj: item,
-      }));
-
-      const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
+      const res = renderTableBlock(
+        sheet,
+        nextRow,
+        null,
+        rowEntries,
+        columns,
+        labelConfig,
+        titleMergeCols,
+        hasRemarks,
+        analysisRes.rowMarksMap
+      );
       sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
       nextRow = res.nextRow;
+
+      if (hasRemarks) {
+        renderLegend(sheet, nextRow);
+        nextRow += 2;
+      }
     }
     // ── Pattern 3: Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows) ──
     else {
@@ -689,16 +1120,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           }
         });
         const columnKeys = Array.from(allKeys);
-        const configColsCount = (labelConfig && Array.isArray(labelConfig.columns)) ? labelConfig.columns.length : 0;
-        sheetMaxCols = Math.max(columnKeys.length + 1, configColsCount + 1);
-        const titleMergeCols = Math.max(sheetMaxCols, 6);
-
-        const titleRow = sheet.getRow(1);
-        titleRow.height = 30;
-        const titleCell = titleRow.getCell(1);
-        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
-        applyTitleStyle(titleCell);
-        sheet.mergeCells(1, 1, 1, titleMergeCols);
+        const columns = resolveColumns(columnKeys, labelConfig);
 
         const rowEntries = sortedRowKeys.map((rk) => ({
           rowKey: rk,
@@ -706,14 +1128,10 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           dataObj: rowContainer[rk],
         }));
 
-        const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
-        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
-        nextRow = res.nextRow;
-      }
-      // ── Pattern 4: Flat Parameters (Raw Salt) ──
-      else if (data.parameters && typeof data.parameters === 'object') {
-        const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
-        sheetMaxCols = columnKeys.length + 1;
+        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+        const hasRemarks = analysisRes.hasMarkedCells;
+
+        sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
         const titleMergeCols = Math.max(sheetMaxCols, 6);
 
         const titleRow = sheet.getRow(1);
@@ -723,16 +1141,74 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         applyTitleStyle(titleCell);
         sheet.mergeCells(1, 1, 1, titleMergeCols);
 
-        const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
-        const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
+        const res = renderTableBlock(
+          sheet,
+          nextRow,
+          null,
+          rowEntries,
+          columns,
+          labelConfig,
+          titleMergeCols,
+          hasRemarks,
+          analysisRes.rowMarksMap
+        );
         sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
         nextRow = res.nextRow;
+
+        if (hasRemarks) {
+          renderLegend(sheet, nextRow);
+          nextRow += 2;
+        }
+      }
+      // ── Pattern 4: Flat Parameters (Raw Salt) ──
+      else if (data.parameters && typeof data.parameters === 'object') {
+        const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
+        const columns = resolveColumns(columnKeys, labelConfig);
+        const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
+
+        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+        const hasRemarks = analysisRes.hasMarkedCells;
+
+        sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
+        const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+        const titleRow = sheet.getRow(1);
+        titleRow.height = 30;
+        const titleCell = titleRow.getCell(1);
+        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+        applyTitleStyle(titleCell);
+        sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+        const res = renderTableBlock(
+          sheet,
+          nextRow,
+          null,
+          rowEntries,
+          columns,
+          labelConfig,
+          titleMergeCols,
+          hasRemarks,
+          analysisRes.rowMarksMap
+        );
+        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+        nextRow = res.nextRow;
+
+        if (hasRemarks) {
+          renderLegend(sheet, nextRow);
+          nextRow += 2;
+        }
       }
       // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary) ──
       else {
         const flatKeys = Object.keys(data).filter((k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function');
         if (flatKeys.length > 0) {
-          sheetMaxCols = flatKeys.length + 1;
+          const columns = resolveColumns(flatKeys, labelConfig);
+          const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
+
+          const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+          const hasRemarks = analysisRes.hasMarkedCells;
+
+          sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
           const titleMergeCols = Math.max(sheetMaxCols, 6);
 
           const titleRow = sheet.getRow(1);
@@ -742,10 +1218,24 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           applyTitleStyle(titleCell);
           sheet.mergeCells(1, 1, 1, titleMergeCols);
 
-          const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
-          const res = renderTableBlock(sheet, nextRow, null, rowEntries, flatKeys, labelConfig, titleMergeCols);
+          const res = renderTableBlock(
+            sheet,
+            nextRow,
+            null,
+            rowEntries,
+            columns,
+            labelConfig,
+            titleMergeCols,
+            hasRemarks,
+            analysisRes.rowMarksMap
+          );
           sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
           nextRow = res.nextRow;
+
+          if (hasRemarks) {
+            renderLegend(sheet, nextRow);
+            nextRow += 2;
+          }
         } else {
           sheetMaxCols = 6;
           const titleMergeCols = 6;
@@ -770,11 +1260,11 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
     //   - More than 10 columns: freeze first column (xSplit: 1) and header rows (ySplit)
     //   - 10 columns or fewer: freeze rows only (xSplit: 0), no column freeze
     if (isDualBlock) {
-      sheet.views = [{ showGridLines: false }];
+      sheet.views = [{ showGridLines: true }];
     } else {
       const splitRow = hasSubHeader ? 4 : 3;
       const xSplit = sheetMaxCols > 10 ? 1 : 0;
-      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit, ySplit: splitRow }];
+      sheet.views = [{ showGridLines: true, state: 'frozen', xSplit, ySplit: splitRow }];
     }
 
     // Page setup: landscape, fit to 1 page wide, repeat headers, narrow margins
