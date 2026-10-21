@@ -167,6 +167,9 @@ function formatRowLabel(key, item = null) {
   if (item && item.sample) {
     return item.time ? `${item.sample} (${item.time})` : item.sample;
   }
+  if (item && item.stream != null && String(item.stream).trim() !== '') {
+    return String(item.stream).trim();
+  }
   if (item && item.time != null && String(item.time).trim() !== '') {
     return String(item.time).trim();
   }
@@ -177,6 +180,9 @@ function formatRowLabel(key, item = null) {
   const slotMatch = lower.match(/^t(\d{2})$/);
   if (slotMatch) {
     return `${slotMatch[1]}:00`;
+  }
+  if (item && item.unit != null && String(item.unit).trim() !== '') {
+    return String(item.unit).trim();
   }
   if (key === '0' || key === 0) {
     return 'Reading';
