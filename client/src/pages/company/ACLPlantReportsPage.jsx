@@ -773,22 +773,6 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
             </button>
 
             <button
-              id="btn-filter-download-master-excel"
-              type="button"
-              onClick={() => handleDownloadMasterExcel(dateTo || dateFrom, shift)}
-              disabled={downloadingMaster}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-xs disabled:opacity-60 cursor-pointer"
-              title="Directly download official Master Template workbook (.xlsx) with current date and shift"
-            >
-              {downloadingMaster ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              <span>{downloadingMaster ? 'Generating...' : 'Download Master Report (.xlsx)'}</span>
-            </button>
-
-            <button
               id="btn-reports-generate"
               onClick={handleGenerateReport}
               disabled={generating}
@@ -827,27 +811,13 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
               </p>
             </div>
 
-            {/* Direct Excel Download Action */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto">
-              <button
-                id="btn-reports-export-master-excel"
-                onClick={() => handleDownloadMasterExcel(generatedReport.filters.dateTo, generatedReport.filters.shift)}
-                disabled={downloadingMaster}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition shadow-xs cursor-pointer"
-                title="Download official multi-sheet workbook populated into SHIFT REPORT -2026.xlsx template"
-              >
-                {downloadingMaster ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
-                )}
-                <span>Download Master Template (.XLSX)</span>
-              </button>
-
+            {/* Table Export Action */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 id="btn-reports-export-excel"
                 onClick={handleExportExcel}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 hover:border-emerald-400 rounded-xl transition shadow-xs cursor-pointer"
+                title="Export current preview table rows to an Excel spreadsheet (.xlsx)"
               >
                 <Download className="w-4 h-4 text-emerald-700" />
                 <span>Export Table Data (.XLSX)</span>

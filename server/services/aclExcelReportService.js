@@ -140,7 +140,7 @@ async function generateACLShiftReportWorkbook({ date, shift = 'all' }) {
   const tk207Data = recordMap['TK 207 Analysis']?.rows || recordMap['TK 207 Analysis']?.shiftRows || recordMap['TK 207 Analysis'] || {};
   const cr202Data = recordMap['CR 202 Analysis']?.timeRows || recordMap['CR 202 Analysis']?.shiftRows || {};
   const cr203Data = recordMap['CR 203 Analysis']?.timeRows || recordMap['CR 203 Analysis']?.shiftRows || {};
-  const pclTclData = recordMap['Pcl & Tcl Analysis']?.rows || recordMap['Pcl & Tcl Analysis']?.shifts || {};
+  const pclTclData = recordMap['PCL/TCL Analysis']?.rows || recordMap['PCL/TCL Analysis']?.shiftRows || recordMap['PCL/TCL Analysis']?.shifts || {};
   const aclProductData = recordMap['ACL Product Analysis'] || {};
   const acl300Data = recordMap['ACL 300# Analysis']?.shifts || recordMap['ACL 300# Analysis']?.shiftRows || {};
   const brineData = recordMap['Brine Analysis']?.rows || {};
@@ -182,6 +182,8 @@ async function generateACLShiftReportWorkbook({ date, shift = 'all' }) {
     safeSetCell(row, 6, tk203_pcl);
 
     // ── 2. TK 204 Analysis (Cols 7..8: G, H) ──
+    // Template has exactly 2 columns for TK 204: G=FNH3, H=CNH3.
+    // TCL and PCL are saved in DB but have no corresponding template columns for TK 204.
     const tk204Shift = tk204Data[shiftKey] || {};
     safeSetCell(row, 7, tk204Shift.fnh3);
     safeSetCell(row, 8, tk204Shift.cnh3);
