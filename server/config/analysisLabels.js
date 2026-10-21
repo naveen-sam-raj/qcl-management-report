@@ -333,6 +333,23 @@ const ANALYSIS_LABELS = {
       { key: 'turbidity', label: 'TURBIDITY SOLUTION', unit: 'NTU', range: '75-85' },
     ],
   },
+  'LSA AT 500# Analysis': {
+    title: 'LSA AT 500# ANALYSIS',
+    columns: [
+      { key: 'nacl',      label: 'NaCl',      unit: '%',   range: '0.5-2.0' },
+      { key: 'bd',        label: 'BD',        unit: 'g/L', range: '500-750' },
+      { key: 'turbidity', label: 'TURBIDITY', unit: 'NTU', range: '75-85' },
+    ],
+  },
+  'LSA Bagging Sieve Analysis': {
+    title: 'LSA BAGGING SIEVE ANALYSIS',
+    columns: [
+      { key: 'bss10', label: 'BSS 10', unit: '%', range: null },
+      { key: 'bss30', label: 'BSS 30', unit: '%', range: '1.5-2.0' },
+      { key: 'm30',   label: '-30',    unit: '%', range: null },
+      { key: 'bss60', label: 'BSS 60', unit: '%', range: '5.5-6.0' },
+    ],
+  },
 };
 
 /**
