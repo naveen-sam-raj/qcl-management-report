@@ -257,23 +257,26 @@ function mergeRecordsForAnalysis(records) {
  * Apply consistent Excel table styling
  */
 function applyHeaderStyle(cell, hasSubHeader = false) {
-  cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFF1F5F9' },
+    fgColor: { argb: 'FFE2E8F0' },
   };
-  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
   cell.border = {
-    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-    bottom: { style: hasSubHeader ? 'thin' : 'medium', color: { argb: hasSubHeader ? 'FFE2E8F0' : 'FF94A3B8' } },
-    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    bottom: {
+      style: hasSubHeader ? 'thin' : 'medium',
+      color: { argb: hasSubHeader ? 'FF94A3B8' : 'FF1E293B' },
+    },
+    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
   };
 }
 
 function applySubHeaderStyle(cell) {
-  cell.font = { name: 'Segoe UI', size: 9, bold: false, color: { argb: 'FF475569' } };
+  cell.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF475569' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
@@ -281,52 +284,74 @@ function applySubHeaderStyle(cell) {
   };
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
   cell.border = {
-    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-    bottom: { style: 'medium', color: { argb: 'FF94A3B8' } },
-    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    bottom: { style: 'medium', color: { argb: 'FF1E293B' } },
+    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
   };
 }
 
-function applyDataCellStyle(cell, isFirstCol = false) {
-  cell.font = { name: 'Segoe UI', size: 10, color: { argb: 'FF1E293B' }, bold: isFirstCol };
-  cell.alignment = { vertical: 'middle', horizontal: isFirstCol ? 'left' : 'center' };
+function applyDataCellStyle(cell, isFirstCol = false, isZebra = false, isMissing = false) {
+  if (isFirstCol) {
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF1F5F9' },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  } else {
+    cell.font = {
+      name: 'Arial',
+      size: 10,
+      color: { argb: isMissing ? 'FF94A3B8' : 'FF1E293B' },
+    };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: isZebra ? 'FFF8FAFC' : 'FFFFFFFF' },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  }
+
   cell.border = {
-    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
   };
 }
 
 function applyTitleStyle(cell) {
-  cell.font = { name: 'Segoe UI', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+  cell.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF1E293B' }, // Slate-900
+    fgColor: { argb: 'FF1E293B' },
   };
-  cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: false };
 }
 
 function applySectionTitleStyle(cell) {
-  cell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FF1E3A8A' } }; // Blue-900
+  cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF0F172A' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFDBEAFE' }, // Blue-100
+    fgColor: { argb: 'FFCBD5E1' },
   };
   cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   cell.border = {
-    top: { style: 'thin', color: { argb: 'FF93C5FD' } },
-    bottom: { style: 'thin', color: { argb: 'FF93C5FD' } },
+    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
   };
 }
 
 /**
  * Builds an Excel table grid from an array of row objects
  */
-function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys, labelConfig = null) {
+function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys, labelConfig = null, totalMergeCols = null) {
   let currentRow = startRow;
 
   if (sectionTitle) {
@@ -334,7 +359,8 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     secRow.height = 24;
     secRow.getCell(1).value = sectionTitle;
     applySectionTitleStyle(secRow.getCell(1));
-    sheet.mergeCells(currentRow, 1, currentRow, Math.max(columnKeys.length + 1, 4));
+    const mergeWidth = totalMergeCols || Math.max(columnKeys.length + 1, 6);
+    sheet.mergeCells(currentRow, 1, currentRow, mergeWidth);
     currentRow++;
   }
 
@@ -415,9 +441,9 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
   }
 
   // Data rows
-  rowEntries.forEach(({ rowKey, label, dataObj }) => {
+  rowEntries.forEach(({ rowKey, label, dataObj }, rIdx) => {
     const dRow = sheet.getRow(currentRow);
-    dRow.height = 20;
+    dRow.height = 22;
 
     const labelCell = dRow.getCell(1);
     let finalLabel = label;
@@ -427,37 +453,50 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     labelCell.value = finalLabel;
     applyDataCellStyle(labelCell, true);
 
+    const isZebra = rIdx % 2 === 1;
+
     columns.forEach((col, idx) => {
       const cell = dRow.getCell(idx + 2);
-      cell.value = formatCellValue(dataObj ? dataObj[col.key] : null);
-      applyDataCellStyle(cell, false);
+      const val = formatCellValue(dataObj ? dataObj[col.key] : null);
+      cell.value = val;
+      const isMissing = val === '*';
+      applyDataCellStyle(cell, false, isZebra, isMissing);
     });
     currentRow++;
   });
 
-  return currentRow + 1; // Return next available row (with 1 blank line spacing)
+  return { nextRow: currentRow + 1, colsCount: columns.length + 1 };
 }
 
 /**
  * Auto-fits column widths for a worksheet based on content length
  */
-function autoFitColumns(sheet) {
-  sheet.columns.forEach((col) => {
-    let maxLen = 12;
-    col.eachCell({ includeEmpty: true }, (cell) => {
-      const val = cell.value;
-      if (val !== null && val !== undefined) {
-        const str = String(val);
-        // Avoid header banner skewing column width
-        if (!cell.isMerged || cell.address === cell.master.address) {
-          if (str.length < 50 && str.length > maxLen) {
-            maxLen = str.length;
-          }
+function autoFitColumns(sheet, totalColumns = 1) {
+  for (let c = 1; c <= totalColumns; c++) {
+    const col = sheet.getColumn(c);
+    if (c === 1) {
+      let maxLen = 0;
+      col.eachCell({ includeEmpty: false }, (cell) => {
+        if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
+          const s = String(cell.value);
+          if (s.length > maxLen) maxLen = s.length;
         }
-      }
-    });
-    col.width = Math.min(Math.max(maxLen + 3, 12), 40);
-  });
+      });
+      col.width = Math.min(Math.max(maxLen + 3, 22), 34);
+    } else {
+      let maxLen = 0;
+      col.eachCell({ includeEmpty: false }, (cell) => {
+        if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
+          const s = String(cell.value);
+          const parts = s.split(/[\s/]+/);
+          const maxPart = parts.reduce((acc, p) => Math.max(acc, p.length), 0);
+          const effectiveLen = Math.min(s.length, Math.max(maxPart, 8));
+          if (effectiveLen > maxLen) maxLen = effectiveLen;
+        }
+      });
+      col.width = Math.min(Math.max(maxLen + 3, 14), 20);
+    }
+  }
 }
 
 /**
@@ -503,8 +542,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       ? { $or: [{ company: user.company?._id || user.company }, { company: null }] }
       : {};
 
-    if (!hasPureSalt && PureSaltAnalysis) {
-      const pureSaltDoc = await PureSaltAnalysis.findOne({ date, ...fallbackCompanyQuery }).lean();
+    if (!hasPureSalt && PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
+      const queryRes = PureSaltAnalysis.findOne({ date, ...fallbackCompanyQuery });
+      const pureSaltDoc = queryRes && typeof queryRes.lean === 'function' ? await queryRes.lean() : await queryRes;
       if (pureSaltDoc) {
         records.push({
           plantCode: 'ACL',
@@ -515,8 +555,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       }
     }
 
-    if (!hasPureSaltSieve && PureSaltSieveAnalysis) {
-      const sieveDoc = await PureSaltSieveAnalysis.findOne({ date, ...fallbackCompanyQuery }).lean();
+    if (!hasPureSaltSieve && PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findOne === 'function') {
+      const sieveQueryRes = PureSaltSieveAnalysis.findOne({ date, ...fallbackCompanyQuery });
+      const sieveDoc = sieveQueryRes && typeof sieveQueryRes.lean === 'function' ? await sieveQueryRes.lean() : await sieveQueryRes;
       if (sieveDoc) {
         records.push({
           plantCode: 'ACL',
@@ -556,44 +597,56 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
   for (const rec of mergedRecords) {
     const analysisType = rec.analysisType || 'Analysis';
     const labelConfig = getAnalysisConfig(analysisType);
+    const hasSubHeader = Boolean(labelConfig && Array.isArray(labelConfig.columns));
     const sheetName = sanitizeSheetName(analysisType, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, {
-      views: [{ showGridLines: true }],
+      views: [{ showGridLines: false }],
     });
-
-    // ── Row 1: Title Banner ──
-    const titleRow = sheet.getRow(1);
-    titleRow.height = 32;
-    const titleCell = titleRow.getCell(1);
-    const displayTitle = labelConfig?.title || analysisType.toUpperCase();
-    titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
-    applyTitleStyle(titleCell);
-    sheet.mergeCells(1, 1, 1, 8);
 
     let nextRow = 3;
     const data = rec.data || {};
+    let isDualBlock = false;
+    let sheetMaxCols = 1;
+
+    const displayTitle = labelConfig?.title || analysisType.toUpperCase();
 
     // ── Pattern 1: Chemical Specs & BSS Sieves (ACL Product) ──
     if (data.chemical && typeof data.chemical === 'object' && data.bss && typeof data.bss === 'object') {
+      isDualBlock = true;
       const chemKeys = Object.keys(data.chemical).filter((k) => !METADATA_KEYS.has(k));
-      nextRow = renderTableBlock(
+      const bssKeys = Object.keys(data.bss).filter((k) => !METADATA_KEYS.has(k));
+      sheetMaxCols = Math.max(chemKeys.length + 1, bssKeys.length + 1);
+      const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+      // Title Banner
+      const titleRow = sheet.getRow(1);
+      titleRow.height = 28;
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+      applyTitleStyle(titleCell);
+      sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+      const res1 = renderTableBlock(
         sheet,
         nextRow,
         'CHEMICAL & PHYSICAL PARAMETERS',
         [{ rowKey: 'chemical', label: 'Product Specifications', dataObj: data.chemical }],
         chemKeys,
-        null
+        null,
+        titleMergeCols
       );
+      nextRow = res1.nextRow;
 
-      const bssKeys = Object.keys(data.bss).filter((k) => !METADATA_KEYS.has(k));
-      nextRow = renderTableBlock(
+      const res2 = renderTableBlock(
         sheet,
         nextRow,
         'BSS SIEVE FRACTIONS',
         [{ rowKey: 'bss', label: 'Mesh Analysis', dataObj: data.bss }],
         bssKeys,
-        null
+        null,
+        titleMergeCols
       );
+      nextRow = res2.nextRow;
     }
     // ── Pattern 2: Readings Array (BFW, DM Water, CaCl2, Cooling Water, etc.) ──
     else if (Array.isArray(data.readings) && data.readings.length > 0) {
@@ -606,6 +659,15 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         }
       });
       const columnKeys = Array.from(allKeys);
+      sheetMaxCols = columnKeys.length + 1;
+      const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+      const titleRow = sheet.getRow(1);
+      titleRow.height = 28;
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+      applyTitleStyle(titleCell);
+      sheet.mergeCells(1, 1, 1, titleMergeCols);
 
       const rowEntries = data.readings.map((item, idx) => ({
         rowKey: String(idx),
@@ -613,7 +675,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         dataObj: item,
       }));
 
-      nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
+      const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
+      sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+      nextRow = res.nextRow;
     }
     // ── Pattern 3: Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows) ──
     else {
@@ -633,6 +697,16 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           }
         });
         const columnKeys = Array.from(allKeys);
+        const configColsCount = (labelConfig && Array.isArray(labelConfig.columns)) ? labelConfig.columns.length : 0;
+        sheetMaxCols = Math.max(columnKeys.length + 1, configColsCount + 1);
+        const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+        const titleRow = sheet.getRow(1);
+        titleRow.height = 28;
+        const titleCell = titleRow.getCell(1);
+        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+        applyTitleStyle(titleCell);
+        sheet.mergeCells(1, 1, 1, titleMergeCols);
 
         const rowEntries = sortedRowKeys.map((rk) => ({
           rowKey: rk,
@@ -640,30 +714,90 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           dataObj: rowContainer[rk],
         }));
 
-        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
+        const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
+        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+        nextRow = res.nextRow;
       }
       // ── Pattern 4: Flat Parameters (Raw Salt) ──
       else if (data.parameters && typeof data.parameters === 'object') {
         const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
+        sheetMaxCols = columnKeys.length + 1;
+        const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+        const titleRow = sheet.getRow(1);
+        titleRow.height = 28;
+        const titleCell = titleRow.getCell(1);
+        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+        applyTitleStyle(titleCell);
+        sheet.mergeCells(1, 1, 1, titleMergeCols);
+
         const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
-        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
+        const res = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig, titleMergeCols);
+        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+        nextRow = res.nextRow;
       }
       // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary) ──
       else {
         const flatKeys = Object.keys(data).filter((k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function');
         if (flatKeys.length > 0) {
+          sheetMaxCols = flatKeys.length + 1;
+          const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+          const titleRow = sheet.getRow(1);
+          titleRow.height = 28;
+          const titleCell = titleRow.getCell(1);
+          titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+          applyTitleStyle(titleCell);
+          sheet.mergeCells(1, 1, 1, titleMergeCols);
+
           const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
-          nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, flatKeys, labelConfig);
+          const res = renderTableBlock(sheet, nextRow, null, rowEntries, flatKeys, labelConfig, titleMergeCols);
+          sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+          nextRow = res.nextRow;
         } else {
-          // Empty or unknown data shape
+          sheetMaxCols = 6;
+          const titleMergeCols = 6;
+          const titleRow = sheet.getRow(1);
+          titleRow.height = 28;
+          const titleCell = titleRow.getCell(1);
+          titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+          applyTitleStyle(titleCell);
+          sheet.mergeCells(1, 1, 1, titleMergeCols);
+
           const emptyRow = sheet.getRow(nextRow);
+          emptyRow.height = 22;
           emptyRow.getCell(1).value = 'No data values recorded for this analysis.';
           applyDataCellStyle(emptyRow.getCell(1), true);
         }
       }
     }
 
-    autoFitColumns(sheet);
+    // Freeze panes: single-block sheets freeze row & col 1; dual-block freeze ONLY col 1
+    if (isDualBlock) {
+      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 0 }];
+    } else {
+      const splitRow = hasSubHeader ? 4 : 3;
+      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: splitRow }];
+    }
+
+    // Page setup: landscape, fit to 1 page wide, repeat headers, narrow margins
+    sheet.pageSetup = {
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: {
+        left: 0.25,
+        right: 0.25,
+        top: 0.5,
+        bottom: 0.5,
+        header: 0.3,
+        footer: 0.3,
+      },
+      printTitlesRow: isDualBlock ? undefined : (hasSubHeader ? '3:4' : '3:3'),
+    };
+
+    autoFitColumns(sheet, Math.max(sheetMaxCols, 6));
   }
 
   return { workbook, recordCount: mergedRecords.length };
