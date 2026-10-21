@@ -107,9 +107,20 @@ async function generateACLShiftReportWorkbook({ date, shift = 'all' }) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templateFile);
 
-  const sepSheet = workbook.getWorksheet('SEP-26');
+  // Derive month-based sheet name from date (e.g. '2026-10-21' → 'OCT-26')
+  const MONTH_ABBR = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const [yearStr,,] = date.split('-');
+  const monthIndex = parseInt(date.split('-')[1], 10) - 1;
+  const dynamicSheetName = `${MONTH_ABBR[monthIndex]}-${String(yearStr).slice(2)}`;
+  const sepSheet =
+    workbook.getWorksheet(dynamicSheetName) ||
+    workbook.getWorksheet('SEP-26') ||
+    workbook.worksheets[0];
   if (!sepSheet) {
-    throw new Error('Worksheet "SEP-26" not found in master template.');
+    throw new Error(`No usable worksheet found in master template (tried "${dynamicSheetName}", "SEP-26", first sheet).`);
+  }
+  if (sepSheet.name !== dynamicSheetName) {
+    console.warn(`[ACLReport] Sheet "${dynamicSheetName}" not found; falling back to "${sepSheet.name}".`);
   }
 
   // Parse day of month (1..31)
@@ -166,8 +177,15 @@ async function generateACLShiftReportWorkbook({ date, shift = 'all' }) {
     const rowNumber = dayBaseRow + shiftOffset;
     const row = sepSheet.getRow(rowNumber);
 
-    // Col 1 (A): Date (Set on Shift 1 or current shift row)
-    safeSetCell(row, 1, date);
+    // Col 1 (A): Date — write as Excel Date object (matches template date format, avoids text string)
+    if (shiftKey === 'shift1' || targetShiftKeys.length === 1) {
+      const dateCell = row.getCell(1);
+      if (!dateCell.formula && !dateCell.sharedFormula) {
+        // Parse as IST midnight: 'YYYY-MM-DD' → Date at T00:00:00+05:30
+        const [y, m, d] = date.split('-').map(Number);
+        dateCell.value = new Date(Date.UTC(y, m - 1, d));
+      }
+    }
     // Col 2 (B): Shift ('I', 'II', 'III')
     safeSetCell(row, 2, shiftInfo.name);
 
