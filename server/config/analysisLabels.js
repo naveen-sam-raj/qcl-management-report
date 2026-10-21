@@ -350,6 +350,47 @@ const ANALYSIS_LABELS = {
       { key: 'bss60', label: 'BSS 60', unit: '%', range: '5.5-6.0' },
     ],
   },
+  'P417 Analysis': {
+    title: 'P417 ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '1.98-2.18' },
+      { key: 'cnh3', label: 'CNH₃', unit: null,      range: null },
+      { key: 'tcl',  label: 'TCl',  unit: null,      range: null },
+      { key: 'nacl', label: 'NaCl', unit: null,      range: null },
+    ],
+  },
+  'E 501 / T 501 Analysis': {
+    title: 'E 501 / T 501 ANALYSIS',
+    columns: [
+      { key: 'e501_fnh3',   label: 'E 501 FNH₃',   unit: 'g/L', range: '10-40' },
+      { key: 'e501_na2co3', label: 'E 501 Na₂CO₃', unit: 'g/L', range: '2-10' },
+      { key: 't501_fnh3',   label: 'T 501 FNH₃',   unit: 'g/L', range: '1-5' },
+      { key: 't501_na2co3', label: 'T 501 Na₂CO₃', unit: 'g/L', range: '20-60' },
+    ],
+  },
+  'Bi Carbonate NaCl/Na2CO3 Analysis': {
+    title: 'BI CARBONATE NaCl/Na₂CO₃ ANALYSIS',
+    columns: [
+      { key: 'filter',     label: 'Filter',        unit: null, range: null },
+      { key: 'naclNa2co3', label: 'NaCl / Na₂CO₃', unit: '%',  range: null },
+    ],
+  },
+  'Bicarbonate Moisture Analysis': {
+    title: 'BICARBONATE MOISTURE ANALYSIS',
+    columns: [
+      { key: 'm404_a',      label: 'Option A',     unit: '%',  range: '18-22' },
+      { key: 'm404_b',      label: 'Option B',     unit: '%',  range: '18-22' },
+      { key: 'm404_c',      label: 'Option C',     unit: '%',  range: '18-22' },
+      { key: 'm405_outlet', label: 'M 405 OUTLET', unit: null, range: null },
+      { key: 'sb_turb1',    label: 'TURB 1',       unit: null, range: null },
+      { key: 'sb_turb2',    label: 'TURB 2',       unit: null, range: null },
+    ],
+  },
 };
 
 /**
