@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
+import { resolvePlantCode } from '../../utils/plantCodeHelper';
 import {
   ArrowLeft,
   Calendar,
@@ -292,6 +293,92 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
       showToast('Failed to download Master ACL Report: ' + errMsg, 'error');
     } finally {
       setDownloadingMaster(false);
+    }
+  };
+
+  // ── Generic Multi-Sheet Plant Management Report ──
+  const params = useParams();
+  const [resolvedPlant, setResolvedPlant] = useState(null);
+  const [downloadingGeneric, setDownloadingGeneric] = useState(false);
+
+  // If plantId or params.id is a Mongo ObjectId, resolve it via user.plant or fetch plants
+  useEffect(() => {
+    const rawId = plantId || params?.id;
+    if (rawId && /^[0-9a-fA-F]{24}$/.test(rawId)) {
+      if ((user?.plant?._id || user?.plant?.id) === rawId) {
+        setResolvedPlant(user.plant);
+      } else {
+        api.get('/api/plants')
+          .then((res) => {
+            const list = res.data?.plants || res.data?.data || [];
+            const match = list.find((p) => String(p._id || p.id) === String(rawId));
+            if (match) setResolvedPlant(match);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [plantId, params?.id, user?.plant]);
+
+  const handleDownloadGenericReport = async () => {
+    const targetDate = masterDate || dateTo || dateFrom || todayStr;
+
+    if (!targetDate) {
+      showToast('Please select a valid date for the report.', 'error');
+      return;
+    }
+
+    // Resolve plant code strictly without location.pathname
+    const { plantCode, source } = resolvePlantCode([
+      { source: 'plantId prop', value: plantId },
+      { source: 'resolved plant object', value: resolvedPlant },
+      { source: 'route param id', value: params?.id },
+      { source: 'user.plant', value: user?.plant },
+    ]);
+
+    if (!plantCode) {
+      showToast('Plant not identified', 'error');
+      return;
+    }
+
+    console.debug('[Download Report] plant resolved:', plantCode, 'from', source);
+
+    setDownloadingGeneric(true);
+    try {
+      showToast(`Generating ${plantCode} Management Report...`, 'info');
+      const response = await api.get('/reports/generic', {
+        params: { plant: plantCode, date: targetDate },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${plantCode}_Report_${targetDate}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast(`${plantCode} Report downloaded successfully!`, 'success');
+    } catch (err) {
+      let errMsg = err.message || 'Failed to download report.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          if (parsed?.message) errMsg = parsed.message;
+        } catch {
+          // fallback
+        }
+      } else if (err.response?.data?.message) {
+        errMsg = err.response.data.message;
+      }
+      showToast(errMsg, 'error');
+    } finally {
+      setDownloadingGeneric(false);
     }
   };
 
@@ -595,6 +682,21 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
                 <Download className="w-4 h-4" />
               )}
               <span>{downloadingMaster ? 'Generating...' : 'Generate ACL Report'}</span>
+            </button>
+
+            <button
+              id="btn-download-generic-report"
+              onClick={handleDownloadGenericReport}
+              disabled={downloadingGeneric || downloadingMaster}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 mt-auto bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition shadow-md disabled:opacity-50 cursor-pointer"
+              title="Download dynamic multi-sheet plant management report (.xlsx)"
+            >
+              {downloadingGeneric ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloadingGeneric ? 'Downloading...' : 'Download Report'}</span>
             </button>
           </div>
         </div>

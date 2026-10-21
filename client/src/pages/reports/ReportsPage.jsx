@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import Modal from '../../components/common/Modal';
 import api from '../../services/api';
+import { resolvePlantCode } from '../../utils/plantCodeHelper';
 import {
   FileSpreadsheet,
   Download,
@@ -158,6 +159,90 @@ const ReportsPage = () => {
     setSearchTerm('');
   };
 
+  // ── Generic Plant Management Report Download ──
+  const [downloadingGeneric, setDownloadingGeneric] = useState(false);
+
+  const handleDownloadGenericReport = async () => {
+    let candidatePlant = null;
+    let candidateSource = null;
+
+    if (user?.role === 'user') {
+      candidatePlant = user?.plant;
+      candidateSource = 'user.plant';
+    } else {
+      if (!plantId || plantId === 'all') {
+        showToast('Please select a plant', 'error');
+        return;
+      }
+      candidatePlant = plants.find((p) => String(p._id || p.id) === String(plantId));
+      candidateSource = 'selected plant dropdown';
+    }
+
+    const { plantCode, source } = resolvePlantCode([
+      { source: candidateSource, value: candidatePlant },
+      { source: 'user.plant', value: user?.plant },
+    ]);
+
+    if (!plantCode) {
+      showToast('Please select a plant', 'error');
+      return;
+    }
+
+    // Date validation
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate).trim())) {
+      showToast('Please select a valid date (YYYY-MM-DD)', 'error');
+      return;
+    }
+
+    const targetDate = String(startDate).trim();
+
+    console.debug('[Download Report] plant resolved:', plantCode, 'from', source);
+
+    try {
+      setDownloadingGeneric(true);
+      showToast(`Generating ${plantCode} Management Report for ${targetDate}...`, 'info');
+
+      const response = await api.get('/reports/generic', {
+        params: { plant: plantCode, date: targetDate },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${plantCode}_Report_${targetDate}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast(`${plantCode} Report downloaded successfully!`, 'success');
+    } catch (err) {
+      let errorMessage = 'Failed to download report.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) {
+            errorMessage = json.message;
+          }
+        } catch (parseErr) {
+          console.warn('Could not parse error blob as JSON:', parseErr);
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      showToast(errorMessage, 'error');
+    } finally {
+      setDownloadingGeneric(false);
+    }
+  };
+
   // Aggregate statistics
   const totalOutput = reports.reduce((sum, r) => sum + (r.metrics?.totalOutputTons || 0), 0);
   const avgEfficiency =
@@ -204,6 +289,22 @@ const ReportsPage = () => {
           >
             <Download className="w-4 h-4" />
             <span>{exporting ? 'Generating XLSX...' : 'Export Excel (.xlsx)'}</span>
+          </button>
+
+          {/* NEW Download Report Button */}
+          <button
+            id="btn-download-generic-report"
+            onClick={handleDownloadGenericReport}
+            disabled={downloadingGeneric || exporting}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
+            title="Download dynamic multi-sheet plant management report (.xlsx)"
+          >
+            {downloadingGeneric ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            <span>{downloadingGeneric ? 'Downloading...' : 'Download Report'}</span>
           </button>
         </div>
       </div>
