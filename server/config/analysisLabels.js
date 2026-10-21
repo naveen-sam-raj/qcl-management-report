@@ -132,6 +132,72 @@ const ANALYSIS_LABELS = {
       { key: 'so4',  label: 'SO₄',  unit: 'g/L', range: '5-15' },
     ],
   },
+  'CR 202 Analysis': {
+    title: 'CR 202 ANALYSIS',
+    rowLabels: {
+      t07: '07:00 (I Shift)',
+      t11: '11:00 (I Shift)',
+      t15: '15:00 (II Shift)',
+      t19: '19:00 (II Shift)',
+      t23: '23:00 (III Shift)',
+      t03: '03:00 (III Shift)',
+    },
+    columns: [
+      { key: 'a',      label: 'A',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'b',      label: 'B',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'c',      label: 'C',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'd',      label: 'D',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'e',      label: 'E',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'f',      label: 'F',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'g',      label: 'G',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'h',      label: 'H',   unit: 'Kgm/m³', range: '2.88-3.08' },
+      { key: 'avgTcl', label: 'TCl', unit: 'Kgm/m³', range: '4.55-4.75' },
+      { key: 'avgAH',  label: 'A-H', unit: 'Kgm/m³', range: '2.88-3.08' },
+    ],
+  },
+  'CR 203 Analysis': {
+    title: 'CR 203 ANALYSIS',
+    rowLabels: {
+      t07: '07:00 (I Shift)',
+      t11: '11:00 (I Shift)',
+      t15: '15:00 (II Shift)',
+      t19: '19:00 (II Shift)',
+      t23: '23:00 (III Shift)',
+      t03: '03:00 (III Shift)',
+    },
+    columns: [
+      { key: 'a',      label: 'A',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'b',      label: 'B',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'c',      label: 'C',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'd',      label: 'D',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'e',      label: 'E',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'f',      label: 'F',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'g',      label: 'G',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'h',      label: 'H',   unit: 'Kgm/m³', range: '1.88-2.08' },
+      { key: 'avgTcl', label: 'TCl', unit: 'Kgm/m³', range: '5.54-5.74' },
+    ],
+  },
+  'CaCl2 Analysis': {
+    title: 'CACL2 ANALYSIS',
+    columns: [
+      { key: 'ph',   label: 'pH',   unit: null,  range: '6.7-8.7' },
+      { key: 'conc', label: 'CONC', unit: '%',   range: '15-25' },
+      { key: 'fnh3', label: 'FNH₃', unit: 'PPM', range: '950-1050' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'PPM', range: '400-600' },
+      { key: 'ss',   label: 'SS',   unit: 'PPM', range: '50-70' },
+    ],
+  },
+  'Raw Salt Analysis': {
+    title: 'RAW SALT',
+    columns: [
+      { key: 'nacl', label: 'NaCl', unit: '%', range: null },
+      { key: 'ca',   label: 'Ca',   unit: '%', range: null },
+      { key: 'mg',   label: 'Mg',   unit: '%', range: null },
+      { key: 'so4',  label: 'SO₄',  unit: '%', range: null },
+      { key: 'ir',   label: 'IR',   unit: '%', range: null },
+      { key: 'h2o',  label: 'H₂O',  unit: '%', range: null },
+    ],
+  },
 };
 
 /**
