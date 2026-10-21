@@ -391,6 +391,47 @@ const ANALYSIS_LABELS = {
       { key: 'sb_turb2',    label: 'TURB 2',       unit: null, range: null },
     ],
   },
+  'CBD Analysis': {
+    title: 'CBD ANALYSIS (CONTINUOUS BLOWDOWN)',
+    rowLabels: {
+      iShift:   'I SHIFT (06:00 – 14:00)',
+      iiShift:  'II SHIFT (14:00 – 22:00)',
+      iiiShift: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'ph',     label: 'pH',     unit: null,  range: '10.5-11' },
+      { key: 'po4',    label: 'PO₄',    unit: 'ppm', range: '30-70' },
+      { key: 'na2so3', label: 'Na₂SO₃', unit: 'ppm', range: '20-30' },
+      { key: 'talk',   label: 'T.Alk',  unit: 'ppm', range: '190-210' },
+      { key: 'tfe',    label: 'T.Fe',   unit: 'ppm', range: '0-10' },
+      { key: 'sio2',   label: 'SiO₂',   unit: 'ppm', range: '5-15' },
+      { key: 'ss',     label: 'SS',     unit: 'ppm', range: '15-25' },
+      { key: 'tds',    label: 'TDS',    unit: 'ppm', range: '1950-2050' },
+    ],
+  },
+  'Bottom Ash Analysis': {
+    title: 'BOTTOM ASH ANALYSIS',
+    columns: [
+      { key: 'combustible', label: 'COMBUSTIBLE', unit: '%',          range: '2.0-5.0' },
+      { key: 'gcv',         label: 'GCV',         unit: 'Kcals / kg', range: '450-550' },
+      { key: 'moisture',    label: 'MOISTURE',    unit: '%',          range: '35-45' },
+    ],
+  },
+  'Fly Ash Analysis': {
+    title: 'FLY ASH ANALYSIS',
+    columns: [
+      { key: 'combustible', label: 'COMBUSTIBLE', unit: '%',          range: null },
+      { key: 'gcv',         label: 'GCV',         unit: 'Kcals / kg', range: '450-550' },
+    ],
+  },
+  'Vacuum Seal Water Analysis': {
+    title: 'VACUUM SEAL WATER ANALYSIS',
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'ppm', range: '900-1100' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'ppm', range: null },
+      { key: 'ca',   label: 'Ca',   unit: null,  range: null },
+    ],
+  },
 };
 
 /**
