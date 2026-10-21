@@ -432,6 +432,35 @@ const ANALYSIS_LABELS = {
       { key: 'ca',   label: 'Ca',   unit: null,  range: null },
     ],
   },
+  'Distiller Waste Analysis': {
+    title: 'DISTILLER WASTE WATER ANALYSIS',
+    columns: [
+      { key: 'exCao',  label: 'Ex.CaO',  unit: '%',   range: null },
+      { key: 'fnh3',   label: 'FNH₃',   unit: 'ppm', range: '250-450' },
+      { key: 'cnh3',   label: 'CNH₃',   unit: 'ppm', range: '400-600' },
+      { key: 'tnh3',   label: 'TNH₃',   unit: 'ppm', range: '900-1100' },
+      { key: 'nahco3', label: 'NaHCO₃', unit: 'ppm', range: null },
+    ],
+  },
+  'Raw Water Analysis': {
+    title: 'RAW WATER ANALYSIS',
+    columns: [
+      { key: 'ph',        label: 'pH',        unit: null,    range: '7.0-9.5' },
+      { key: 'cond',      label: 'Cond',      unit: 'µS/cm', range: '550-650' },
+      { key: 'turbidity', label: 'Turbidity', unit: 'NTU',   range: '5-15' },
+      { key: 'tds',       label: 'TDS',       unit: 'ppm',   range: '300-400' },
+      { key: 'freeCl2',   label: 'Free Cl2',  unit: 'ppm',   range: null },
+      { key: 'fe',        label: 'Fe',        unit: 'ppm',   range: null },
+      { key: 'sio2',      label: 'SiO2',      unit: 'ppm',   range: '5-15' },
+      { key: 'mAlk',      label: 'M Alk',     unit: 'ppm',   range: null },
+      { key: 'th',        label: 'TH',        unit: 'ppm',   range: '245-255' },
+      { key: 'caH',       label: 'Ca H',      unit: 'ppm',   range: '140-160' },
+      { key: 'mgH',       label: 'Mg H',      unit: 'ppm',   range: '90-110' },
+      { key: 'cl',        label: 'Cl',        unit: 'ppm',   range: '40-60' },
+      { key: 'so4',       label: 'SO4',       unit: 'ppm',   range: '35-45' },
+      { key: 'ema',       label: 'EMA',       unit: 'ppm',   range: '90-110' },
+    ],
+  },
 };
 
 /**
