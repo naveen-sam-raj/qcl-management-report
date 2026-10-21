@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const { PlantAnalysisRecord, PureSaltAnalysis, PureSaltSieveAnalysis } = require('../models');
+const { getAnalysisConfig } = require('../config/analysisLabels');
 
 /**
  * Plant code aliases mapping across all 4 plants
@@ -255,7 +256,7 @@ function mergeRecordsForAnalysis(records) {
 /**
  * Apply consistent Excel table styling
  */
-function applyHeaderStyle(cell) {
+function applyHeaderStyle(cell, hasSubHeader = false) {
   cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   cell.fill = {
     type: 'pattern',
@@ -265,6 +266,22 @@ function applyHeaderStyle(cell) {
   cell.alignment = { vertical: 'middle', horizontal: 'center' };
   cell.border = {
     top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: hasSubHeader ? 'thin' : 'medium', color: { argb: hasSubHeader ? 'FFE2E8F0' : 'FF94A3B8' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+}
+
+function applySubHeaderStyle(cell) {
+  cell.font = { name: 'Segoe UI', size: 9, bold: false, color: { argb: 'FF475569' } };
+  cell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF8FAFC' },
+  };
+  cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  cell.border = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
     left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
     bottom: { style: 'medium', color: { argb: 'FF94A3B8' } },
     right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
@@ -309,7 +326,7 @@ function applySectionTitleStyle(cell) {
 /**
  * Builds an Excel table grid from an array of row objects
  */
-function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys) {
+function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys, labelConfig = null) {
   let currentRow = startRow;
 
   if (sectionTitle) {
@@ -321,32 +338,98 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys)
     currentRow++;
   }
 
-  // Header row
+  // Determine effective column list and ordering
+  let columns = [];
+  if (labelConfig && Array.isArray(labelConfig.columns) && labelConfig.columns.length > 0) {
+    const configMap = new Map();
+    labelConfig.columns.forEach((c) => {
+      configMap.set(String(c.key).toLowerCase(), c);
+      columns.push({
+        key: c.key,
+        label: c.label || String(c.key).toUpperCase(),
+        unit: c.unit !== undefined ? c.unit : null,
+        range: c.range !== undefined ? c.range : null,
+      });
+    });
+
+    // Append any extra keys found in data but not in config (preserving all data)
+    columnKeys.forEach((k) => {
+      if (!configMap.has(String(k).toLowerCase())) {
+        columns.push({
+          key: k,
+          label: String(k).toUpperCase(),
+          unit: null,
+          range: null,
+        });
+      }
+    });
+  } else {
+    columns = columnKeys.map((colKey) => ({
+      key: colKey,
+      label: String(colKey).toUpperCase(),
+      unit: null,
+      range: null,
+    }));
+  }
+
+  const hasSubHeader = Boolean(labelConfig && Array.isArray(labelConfig.columns));
+
+  // Header row 1: Parameter labels
   const headerRow = sheet.getRow(currentRow);
   headerRow.height = 24;
   const col1 = headerRow.getCell(1);
   col1.value = 'SHIFT / SAMPLE / TIME';
-  applyHeaderStyle(col1);
+  applyHeaderStyle(col1, hasSubHeader);
 
-  columnKeys.forEach((colKey, idx) => {
+  columns.forEach((col, idx) => {
     const cell = headerRow.getCell(idx + 2);
-    cell.value = colKey.toUpperCase();
-    applyHeaderStyle(cell);
+    cell.value = col.label;
+    applyHeaderStyle(cell, hasSubHeader);
   });
   currentRow++;
 
+  // Header row 2 (Subheader): Unit + Range (as text, never number/formula)
+  if (hasSubHeader) {
+    const subHeaderRow = sheet.getRow(currentRow);
+    subHeaderRow.height = 20;
+
+    const subCol1 = subHeaderRow.getCell(1);
+    subCol1.value = 'Unit & Range';
+    applySubHeaderStyle(subCol1);
+
+    columns.forEach((col, idx) => {
+      const cell = subHeaderRow.getCell(idx + 2);
+      let subText = '*';
+      if (col.range && col.unit) {
+        subText = `${col.range} ${col.unit}`;
+      } else if (col.range) {
+        subText = `${col.range}`;
+      } else if (col.unit) {
+        subText = `${col.unit}`;
+      }
+      cell.value = String(subText);
+      cell.numFmt = '@'; // Store strictly as text format
+      applySubHeaderStyle(cell);
+    });
+    currentRow++;
+  }
+
   // Data rows
-  rowEntries.forEach(({ label, dataObj }) => {
+  rowEntries.forEach(({ rowKey, label, dataObj }) => {
     const dRow = sheet.getRow(currentRow);
     dRow.height = 20;
 
     const labelCell = dRow.getCell(1);
-    labelCell.value = label;
+    let finalLabel = label;
+    if (labelConfig && labelConfig.rowLabels && rowKey && labelConfig.rowLabels[rowKey]) {
+      finalLabel = labelConfig.rowLabels[rowKey];
+    }
+    labelCell.value = finalLabel;
     applyDataCellStyle(labelCell, true);
 
-    columnKeys.forEach((colKey, idx) => {
+    columns.forEach((col, idx) => {
       const cell = dRow.getCell(idx + 2);
-      cell.value = formatCellValue(dataObj ? dataObj[colKey] : null);
+      cell.value = formatCellValue(dataObj ? dataObj[col.key] : null);
       applyDataCellStyle(cell, false);
     });
     currentRow++;
@@ -472,6 +555,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
   for (const rec of mergedRecords) {
     const analysisType = rec.analysisType || 'Analysis';
+    const labelConfig = getAnalysisConfig(analysisType);
     const sheetName = sanitizeSheetName(analysisType, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, {
       views: [{ showGridLines: true }],
@@ -481,7 +565,8 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
     const titleRow = sheet.getRow(1);
     titleRow.height = 32;
     const titleCell = titleRow.getCell(1);
-    titleCell.value = `${normPlant} PLANT — ${analysisType.toUpperCase()} | DATE: ${date}`;
+    const displayTitle = labelConfig?.title || analysisType.toUpperCase();
+    titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
     applyTitleStyle(titleCell);
     sheet.mergeCells(1, 1, 1, 8);
 
@@ -495,8 +580,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         sheet,
         nextRow,
         'CHEMICAL & PHYSICAL PARAMETERS',
-        [{ label: 'Product Specifications', dataObj: data.chemical }],
-        chemKeys
+        [{ rowKey: 'chemical', label: 'Product Specifications', dataObj: data.chemical }],
+        chemKeys,
+        null
       );
 
       const bssKeys = Object.keys(data.bss).filter((k) => !METADATA_KEYS.has(k));
@@ -504,8 +590,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         sheet,
         nextRow,
         'BSS SIEVE FRACTIONS',
-        [{ label: 'Mesh Analysis', dataObj: data.bss }],
-        bssKeys
+        [{ rowKey: 'bss', label: 'Mesh Analysis', dataObj: data.bss }],
+        bssKeys,
+        null
       );
     }
     // ── Pattern 2: Readings Array (BFW, DM Water, CaCl2, Cooling Water, etc.) ──
@@ -521,11 +608,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       const columnKeys = Array.from(allKeys);
 
       const rowEntries = data.readings.map((item, idx) => ({
+        rowKey: String(idx),
         label: formatRowLabel(idx, item),
         dataObj: item,
       }));
 
-      nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys);
+      nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
     }
     // ── Pattern 3: Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows) ──
     else {
@@ -547,24 +635,25 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         const columnKeys = Array.from(allKeys);
 
         const rowEntries = sortedRowKeys.map((rk) => ({
+          rowKey: rk,
           label: formatRowLabel(rk, rowContainer[rk]),
           dataObj: rowContainer[rk],
         }));
 
-        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys);
+        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
       }
       // ── Pattern 4: Flat Parameters (Raw Salt) ──
       else if (data.parameters && typeof data.parameters === 'object') {
         const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
-        const rowEntries = [{ label: 'Daily Parameters', dataObj: data.parameters }];
-        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys);
+        const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
+        nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, columnKeys, labelConfig);
       }
       // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary) ──
       else {
         const flatKeys = Object.keys(data).filter((k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function');
         if (flatKeys.length > 0) {
-          const rowEntries = [{ label: 'Recorded Data', dataObj: data }];
-          nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, flatKeys);
+          const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
+          nextRow = renderTableBlock(sheet, nextRow, null, rowEntries, flatKeys, labelConfig);
         } else {
           // Empty or unknown data shape
           const emptyRow = sheet.getRow(nextRow);
