@@ -253,99 +253,84 @@ function mergeRecordsForAnalysis(records) {
   return primary;
 }
 
+const THIN_BLACK_BORDER = {
+  top: { style: 'thin', color: { argb: 'FF000000' } },
+  left: { style: 'thin', color: { argb: 'FF000000' } },
+  bottom: { style: 'thin', color: { argb: 'FF000000' } },
+  right: { style: 'thin', color: { argb: 'FF000000' } },
+};
+
 /**
- * Apply consistent Excel table styling
+ * Apply consistent Excel table styling (Classic ACL Master Template Design)
  */
-function applyHeaderStyle(cell, hasSubHeader = false) {
-  cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+function applyHeaderStyle(cell) {
+  cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFE2E8F0' },
+    fgColor: { argb: 'FFC4D79B' },
   };
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-  cell.border = {
-    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    bottom: {
-      style: hasSubHeader ? 'thin' : 'medium',
-      color: { argb: hasSubHeader ? 'FF94A3B8' : 'FF1E293B' },
-    },
-    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
-  };
+  cell.border = THIN_BLACK_BORDER;
 }
 
 function applySubHeaderStyle(cell) {
-  cell.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF475569' } };
+  cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFF8FAFC' },
+    fgColor: { argb: 'FFFFFF00' },
   };
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-  cell.border = {
-    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    bottom: { style: 'medium', color: { argb: 'FF1E293B' } },
-    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
-  };
+  cell.border = THIN_BLACK_BORDER;
 }
 
-function applyDataCellStyle(cell, isFirstCol = false, isZebra = false, isMissing = false) {
+function applyDataCellStyle(cell, isFirstCol = false, isMissing = false) {
   if (isFirstCol) {
-    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF660066' } };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFF1F5F9' },
+      fgColor: { argb: 'FFFFC000' },
     };
-    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
   } else {
     cell.font = {
-      name: 'Arial',
-      size: 10,
-      color: { argb: isMissing ? 'FF94A3B8' : 'FF1E293B' },
+      name: 'Calibri',
+      size: 11,
+      color: { argb: isMissing ? 'FF7F7F7F' : 'FF000000' },
     };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: isZebra ? 'FFF8FAFC' : 'FFFFFFFF' },
+      fgColor: { argb: 'FFFFFFFF' },
     };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
   }
 
-  cell.border = {
-    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
-  };
+  cell.border = THIN_BLACK_BORDER;
 }
 
 function applyTitleStyle(cell) {
-  cell.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+  cell.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FF660066' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF1E293B' },
+    fgColor: { argb: 'FFFFC000' },
   };
-  cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: false };
+  cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false };
+  cell.border = THIN_BLACK_BORDER;
 }
 
 function applySectionTitleStyle(cell) {
-  cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF0F172A' } };
+  cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFCBD5E1' },
+    fgColor: { argb: 'FFFFC000' },
   };
-  cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-  cell.border = {
-    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
-    right: { style: 'thin', color: { argb: 'FF94A3B8' } },
-  };
+  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  cell.border = THIN_BLACK_BORDER;
 }
 
 /**
@@ -356,7 +341,7 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
 
   if (sectionTitle) {
     const secRow = sheet.getRow(currentRow);
-    secRow.height = 24;
+    secRow.height = 28;
     secRow.getCell(1).value = sectionTitle;
     applySectionTitleStyle(secRow.getCell(1));
     const mergeWidth = totalMergeCols || Math.max(columnKeys.length + 1, 6);
@@ -398,26 +383,31 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     }));
   }
 
-  const hasSubHeader = Boolean(labelConfig && Array.isArray(labelConfig.columns));
+  // Only show subheader row if at least one column has a unit or range configured
+  const hasSubHeader = Boolean(
+    labelConfig &&
+    Array.isArray(labelConfig.columns) &&
+    labelConfig.columns.some((c) => (c.unit !== null && c.unit !== undefined && c.unit !== '') || (c.range !== null && c.range !== undefined && c.range !== ''))
+  );
 
   // Header row 1: Parameter labels
   const headerRow = sheet.getRow(currentRow);
-  headerRow.height = 24;
+  headerRow.height = 30;
   const col1 = headerRow.getCell(1);
   col1.value = 'SHIFT / SAMPLE / TIME';
-  applyHeaderStyle(col1, hasSubHeader);
+  applyHeaderStyle(col1);
 
   columns.forEach((col, idx) => {
     const cell = headerRow.getCell(idx + 2);
     cell.value = col.label;
-    applyHeaderStyle(cell, hasSubHeader);
+    applyHeaderStyle(cell);
   });
   currentRow++;
 
   // Header row 2 (Subheader): Unit + Range (as text, never number/formula)
   if (hasSubHeader) {
     const subHeaderRow = sheet.getRow(currentRow);
-    subHeaderRow.height = 20;
+    subHeaderRow.height = 34;
 
     const subCol1 = subHeaderRow.getCell(1);
     subCol1.value = 'Unit & Range';
@@ -441,7 +431,7 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
   }
 
   // Data rows
-  rowEntries.forEach(({ rowKey, label, dataObj }, rIdx) => {
+  rowEntries.forEach(({ rowKey, label, dataObj }) => {
     const dRow = sheet.getRow(currentRow);
     dRow.height = 22;
 
@@ -453,14 +443,12 @@ function renderTableBlock(sheet, startRow, sectionTitle, rowEntries, columnKeys,
     labelCell.value = finalLabel;
     applyDataCellStyle(labelCell, true);
 
-    const isZebra = rIdx % 2 === 1;
-
     columns.forEach((col, idx) => {
       const cell = dRow.getCell(idx + 2);
       const val = formatCellValue(dataObj ? dataObj[col.key] : null);
       cell.value = val;
       const isMissing = val === '*';
-      applyDataCellStyle(cell, false, isZebra, isMissing);
+      applyDataCellStyle(cell, false, isMissing);
     });
     currentRow++;
   });
@@ -597,7 +585,11 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
   for (const rec of mergedRecords) {
     const analysisType = rec.analysisType || 'Analysis';
     const labelConfig = getAnalysisConfig(analysisType);
-    const hasSubHeader = Boolean(labelConfig && Array.isArray(labelConfig.columns));
+    const hasSubHeader = Boolean(
+      labelConfig &&
+      Array.isArray(labelConfig.columns) &&
+      labelConfig.columns.some((c) => (c.unit !== null && c.unit !== undefined && c.unit !== '') || (c.range !== null && c.range !== undefined && c.range !== ''))
+    );
     const sheetName = sanitizeSheetName(analysisType, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, {
       views: [{ showGridLines: false }],
@@ -620,7 +612,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
       // Title Banner
       const titleRow = sheet.getRow(1);
-      titleRow.height = 28;
+      titleRow.height = 30;
       const titleCell = titleRow.getCell(1);
       titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
       applyTitleStyle(titleCell);
@@ -663,7 +655,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       const titleMergeCols = Math.max(sheetMaxCols, 6);
 
       const titleRow = sheet.getRow(1);
-      titleRow.height = 28;
+      titleRow.height = 30;
       const titleCell = titleRow.getCell(1);
       titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
       applyTitleStyle(titleCell);
@@ -702,7 +694,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         const titleMergeCols = Math.max(sheetMaxCols, 6);
 
         const titleRow = sheet.getRow(1);
-        titleRow.height = 28;
+        titleRow.height = 30;
         const titleCell = titleRow.getCell(1);
         titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
         applyTitleStyle(titleCell);
@@ -725,7 +717,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         const titleMergeCols = Math.max(sheetMaxCols, 6);
 
         const titleRow = sheet.getRow(1);
-        titleRow.height = 28;
+        titleRow.height = 30;
         const titleCell = titleRow.getCell(1);
         titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
         applyTitleStyle(titleCell);
@@ -744,7 +736,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           const titleMergeCols = Math.max(sheetMaxCols, 6);
 
           const titleRow = sheet.getRow(1);
-          titleRow.height = 28;
+          titleRow.height = 30;
           const titleCell = titleRow.getCell(1);
           titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
           applyTitleStyle(titleCell);
@@ -758,7 +750,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           sheetMaxCols = 6;
           const titleMergeCols = 6;
           const titleRow = sheet.getRow(1);
-          titleRow.height = 28;
+          titleRow.height = 30;
           const titleCell = titleRow.getCell(1);
           titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
           applyTitleStyle(titleCell);
@@ -772,12 +764,17 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       }
     }
 
-    // Freeze panes: single-block sheets freeze row & col 1; dual-block freeze ONLY col 1
+    // Freeze panes:
+    // - Two-block sheets: no freeze
+    // - Single-block sheets:
+    //   - More than 10 columns: freeze first column (xSplit: 1) and header rows (ySplit)
+    //   - 10 columns or fewer: freeze rows only (xSplit: 0), no column freeze
     if (isDualBlock) {
-      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: 0 }];
+      sheet.views = [{ showGridLines: false }];
     } else {
       const splitRow = hasSubHeader ? 4 : 3;
-      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit: 1, ySplit: splitRow }];
+      const xSplit = sheetMaxCols > 10 ? 1 : 0;
+      sheet.views = [{ showGridLines: false, state: 'frozen', xSplit, ySplit: splitRow }];
     }
 
     // Page setup: landscape, fit to 1 page wide, repeat headers, narrow margins
