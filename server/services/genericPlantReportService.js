@@ -167,6 +167,9 @@ function formatRowLabel(key, item = null) {
   if (item && item.sample) {
     return item.time ? `${item.sample} (${item.time})` : item.sample;
   }
+  if (item && item.time != null && String(item.time).trim() !== '') {
+    return String(item.time).trim();
+  }
   const lower = String(key).toLowerCase().trim();
   if (SHIFT_MAP[lower]) {
     return SHIFT_MAP[lower].label;
