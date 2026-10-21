@@ -302,6 +302,37 @@ const ANALYSIS_LABELS = {
       { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', range: '1.26-1.46' },
     ],
   },
+  'TK 419 SC TANK Analysis': {
+    title: 'TK 419 SC TANK ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '1.98-2.18' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', range: '3.96-4.16' },
+    ],
+  },
+  'LSA Shift Analysis': {
+    title: 'LSA SHIFT ANALYSIS',
+    rowLabels: {
+      iShift: 'I SHIFT (06:00 – 14:00)',
+      iiShift: 'II SHIFT (14:00 – 22:00)',
+      iiiShift: 'III SHIFT (22:00 – 06:00)',
+      composite: 'COMPOSITE (24-Hour Composite)',
+    },
+    columns: [
+      { key: 'na2co3',    label: 'Na₂CO₃',            unit: '%',   range: '98.5-99.5' },
+      { key: 'nacl',      label: 'NaCl',              unit: '%',   range: '0.5-1.0' },
+      { key: 'fe',        label: 'Fe',                unit: '%',   range: '0.006-0.008' },
+      { key: 'na2so4',    label: 'Na₂SO₄',            unit: '%',   range: '0.079-0.081' },
+      { key: 'vm',        label: 'VM',                unit: '%',   range: '0.5-2.1' },
+      { key: 'ir',        label: 'IR',                unit: '%',   range: '0.14-0.16' },
+      { key: 'bd',        label: 'BD',                unit: 'g/L', range: '500-750' },
+      { key: 'turbidity', label: 'TURBIDITY SOLUTION', unit: 'NTU', range: '75-85' },
+    ],
+  },
 };
 
 /**
