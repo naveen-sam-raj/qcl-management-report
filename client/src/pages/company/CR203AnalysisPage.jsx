@@ -770,16 +770,24 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
         setEditedFields(savedDoc.editedFields);
       }
       if (savedDoc?.timeRows) {
-        setTimeRows(savedDoc.timeRows);
-        setOriginalTimeRows(JSON.parse(JSON.stringify(savedDoc.timeRows)));
+        const populatedTRows = buildEmptyTimeRows();
+        TIME_SLOTS.forEach((slot) => {
+          if (savedDoc.timeRows[slot.key]) {
+            populatedTRows[slot.key] = { ...populatedTRows[slot.key], ...savedDoc.timeRows[slot.key] };
+          }
+        });
+        setTimeRows(populatedTRows);
+        setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
       }
       if (savedDoc?.fnh3Row) {
-        setFnh3Row(savedDoc.fnh3Row);
-        setOriginalFnh3Row(JSON.parse(JSON.stringify(savedDoc.fnh3Row)));
+        const popF = { ...buildEmptyFnh3Row(), ...savedDoc.fnh3Row };
+        setFnh3Row(popF);
+        setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
       }
       if (savedDoc?.pclRow) {
-        setPclRow(savedDoc.pclRow);
-        setOriginalPclRow(JSON.parse(JSON.stringify(savedDoc.pclRow)));
+        const popP = { ...buildEmptyPclRow(), ...savedDoc.pclRow };
+        setPclRow(popP);
+        setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
       }
 
       if (response.data?.emailRecipient) {
@@ -1101,7 +1109,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                     {/* Stream CNH3 input cells (A to H) */}
                     {STREAMS.map((stream) => {
                       const fieldKey = `${slot.key}_${stream.key}`;
-                      const cellVal = timeRows[slot.key][stream.key];
+                      const cellVal = timeRows[slot.key]?.[stream.key] ?? '';
                       const isEdited = Boolean(editedFields[fieldKey]);
 
                       return (
@@ -1129,7 +1137,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                     <td className="px-2 py-2 text-center align-top bg-slate-50/50">
                       <CR203Cell
                         id={`cr203-input-${slot.key}-avgtcl`}
-                        value={timeRows[slot.key].avgTcl}
+                        value={timeRows[slot.key]?.avgTcl ?? ''}
                         disabled={shiftLocked}
                         onChange={(e) =>
                           handleTimeCellChange(slot.key, 'avgTcl', e.target.value)
@@ -1156,7 +1164,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                 </td>
                 {STREAMS.map((stream) => {
                   const fieldKey = `fnh3_${stream.key}`;
-                  const cellVal = fnh3Row[stream.key];
+                  const cellVal = fnh3Row?.[stream.key] ?? '';
                   const isEdited = Boolean(editedFields[fieldKey]);
 
                   return (
@@ -1184,7 +1192,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                 <td className="px-2 py-2 text-center align-top bg-slate-100/60">
                   <CR203Cell
                     id="cr203-input-fnh3-avgtcl"
-                    value={fnh3Row.avgTcl}
+                    value={fnh3Row?.avgTcl ?? ''}
                     disabled={isViewOnly}
                     onChange={(e) =>
                       handleFnh3CellChange('avgTcl', e.target.value)
@@ -1209,7 +1217,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                 </td>
                 {STREAMS.map((stream) => {
                   const fieldKey = `pcl_${stream.key}`;
-                  const cellVal = pclRow[stream.key];
+                  const cellVal = pclRow?.[stream.key] ?? '';
                   const isEdited = Boolean(editedFields[fieldKey]);
 
                   return (
@@ -1237,7 +1245,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                 <td className="px-2 py-2 text-center align-top bg-slate-100/60">
                   <CR203Cell
                     id="cr203-input-pcl-avgtcl"
-                    value={pclRow.avgTcl}
+                    value={pclRow?.avgTcl ?? ''}
                     disabled={isViewOnly}
                     onChange={(e) =>
                       handlePclCellChange('avgTcl', e.target.value)
