@@ -198,6 +198,52 @@ const ANALYSIS_LABELS = {
       { key: 'h2o',  label: 'H₂O',  unit: '%', range: null },
     ],
   },
+  'ACL 300# Analysis': {
+    title: 'ACL 300# ANALYSIS',
+    rowLabels: {
+      shift1: 'SHIFT 1 (06:00 - 14:00)',
+      shift2: 'SHIFT 2 (14:00 - 22:00)',
+      shift3: 'SHIFT 3 (22:00 - 06:00)',
+    },
+    columns: [
+      { key: 'p18',  label: '+18',  unit: '%', range: null },
+      { key: 'p44',  label: '+44',  unit: '%', range: null },
+      { key: 'nacl', label: 'NaCl', unit: '%', range: null },
+    ],
+  },
+  'Pure Salt Analysis': {
+    title: 'PURE SALT ANALYSIS',
+    rowLabels: {
+      rawSalt:     'RAW SALT',
+      shift1:      'I SHIFT',
+      shift2:      'II SHIFT',
+      shift3:      'III SHIFT',
+      composition: 'COMPOSITION',
+    },
+    columns: [
+      { key: 'nacl', label: 'NaCl', unit: '%', range: null },
+      { key: 'ca',   label: 'Ca',   unit: '%', range: null },
+      { key: 'mg',   label: 'Mg',   unit: '%', range: null },
+      { key: 'so4',  label: 'SO₄',  unit: '%', range: null },
+      { key: 'ir',   label: 'IR',   unit: '%', range: null },
+      { key: 'h2o',  label: 'H₂O',  unit: '%', range: null },
+    ],
+  },
+  'Pure Salt Sieve Analysis': {
+    title: 'PURE SALT SIEVE ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT',
+      shift2: 'II SHIFT',
+      shift3: 'III SHIFT',
+    },
+    columns: [
+      { key: 'p18',  label: 'BSS 18',  unit: '%', range: null },
+      { key: 'p44',  label: 'BSS 44',  unit: '%', range: null },
+      { key: 'p60',  label: 'BSS 60',  unit: '%', range: null },
+      { key: 'p100', label: 'BSS 100', unit: '%', range: null },
+      { key: 'm100', label: '-100',    unit: '%', range: null },
+    ],
+  },
 };
 
 /**
