@@ -522,8 +522,6 @@ function analyzeTableMarkedCells(data, rowEntries, columns) {
   const rowMarksMap = new Map();
 
   for (const row of rowEntries) {
-    const outOfLimitLabels = [];
-    const editedLabels = [];
     const cellMarks = {};
 
     for (const col of columns) {
@@ -533,13 +531,8 @@ function analyzeTableMarkedCells(data, rowEntries, columns) {
       const editInfo = getCellEditInfo(data, row.rowKey, col.key, row.dataObj);
       const isEdited = editInfo.isEdited;
 
-      if (isOutOfLimit) {
+      if (isOutOfLimit || isEdited) {
         hasMarkedCells = true;
-        outOfLimitLabels.push(col.label);
-      }
-      if (isEdited) {
-        hasMarkedCells = true;
-        editedLabels.push(col.label);
       }
 
       cellMarks[col.key] = {
@@ -549,19 +542,7 @@ function analyzeTableMarkedCells(data, rowEntries, columns) {
       };
     }
 
-    const remarksParts = [];
-    if (outOfLimitLabels.length > 0) {
-      remarksParts.push(`Out of limit: ${outOfLimitLabels.join(', ')}`);
-    }
-    if (editedLabels.length > 0) {
-      remarksParts.push(`Edited: ${editedLabels.join(', ')}`);
-    }
-    const remarkText = remarksParts.join(' | ');
-
-    rowMarksMap.set(row.rowKey, {
-      cellMarks,
-      remarkText,
-    });
+    rowMarksMap.set(row.rowKey, cellMarks);
   }
 
   return { hasMarkedCells, rowMarksMap };
@@ -699,7 +680,6 @@ function renderTableBlock(
   columns,
   labelConfig = null,
   totalMergeCols = null,
-  hasRemarksColumn = false,
   rowMarksMap = null
 ) {
   let currentRow = startRow;
@@ -709,7 +689,7 @@ function renderTableBlock(
     secRow.height = 28;
     secRow.getCell(1).value = sectionTitle;
     applySectionTitleStyle(secRow.getCell(1));
-    const mergeWidth = totalMergeCols || Math.max(columns.length + 1 + (hasRemarksColumn ? 1 : 0), 6);
+    const mergeWidth = totalMergeCols || Math.max(columns.length + 1, 6);
     sheet.mergeCells(currentRow, 1, currentRow, mergeWidth);
     currentRow++;
   }
@@ -733,12 +713,6 @@ function renderTableBlock(
     cell.value = col.label;
     applyHeaderStyle(cell);
   });
-
-  if (hasRemarksColumn) {
-    const remHeader = headerRow.getCell(columns.length + 2);
-    remHeader.value = 'REMARKS';
-    applyHeaderStyle(remHeader);
-  }
   currentRow++;
 
   // Header row 2 (Subheader): Unit + Range (as text, never number/formula)
@@ -764,19 +738,14 @@ function renderTableBlock(
       cell.numFmt = '@'; // Store strictly as text format
       applySubHeaderStyle(cell);
     });
-
-    if (hasRemarksColumn) {
-      const remSubHeader = subHeaderRow.getCell(columns.length + 2);
-      remSubHeader.value = '';
-      applySubHeaderStyle(remSubHeader);
-    }
     currentRow++;
   }
 
   // Data rows
   rowEntries.forEach(({ rowKey, label, dataObj }) => {
     const dRow = sheet.getRow(currentRow);
-    const rowMarks = rowMarksMap ? rowMarksMap.get(rowKey) : null;
+    dRow.height = 22;
+    const cellMarks = rowMarksMap ? rowMarksMap.get(rowKey) : null;
 
     const labelCell = dRow.getCell(1);
     let finalLabel = label;
@@ -792,7 +761,7 @@ function renderTableBlock(
       cell.value = val;
       const isMissing = val === '*';
 
-      const mark = rowMarks?.cellMarks?.[col.key];
+      const mark = cellMarks ? cellMarks[col.key] : null;
       const isOol = Boolean(mark?.isOutOfLimit);
       const isEd = Boolean(mark?.isEdited);
 
@@ -803,55 +772,19 @@ function renderTableBlock(
       }
     });
 
-    if (hasRemarksColumn) {
-      const remCell = dRow.getCell(columns.length + 2);
-      const remarkText = rowMarks?.remarkText || '';
-      remCell.value = remarkText;
-      remCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF000000' } };
-      remCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
-      remCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
-      remCell.border = THIN_BLACK_BORDER;
-
-      dRow.height = remarkText ? Math.max(22, Math.ceil(remarkText.length / 30) * 16) : 22;
-    } else {
-      dRow.height = 22;
-    }
-
     currentRow++;
   });
 
-  const totalTableCols = columns.length + 1 + (hasRemarksColumn ? 1 : 0);
-  return { nextRow: currentRow + 1, colsCount: totalTableCols };
+  return { nextRow: currentRow + 1, colsCount: columns.length + 1 };
 }
 
 /**
  * Auto-fits column widths for a worksheet based on content length
  */
-function autoFitColumns(sheet, totalColumns = 1, remarksColIndex = null) {
+function autoFitColumns(sheet, totalColumns = 1) {
   for (let c = 1; c <= totalColumns; c++) {
     const col = sheet.getColumn(c);
-    let isRemarksCol = c === remarksColIndex;
-    if (!isRemarksCol) {
-      // Check if header cell in row 2, 3, or 4 has 'REMARKS'
-      for (let r = 2; r <= 6; r++) {
-        const val = sheet.getRow(r).getCell(c).value;
-        if (typeof val === 'string' && val.trim().toUpperCase() === 'REMARKS') {
-          isRemarksCol = true;
-          break;
-        }
-      }
-    }
-
-    if (isRemarksCol) {
-      let maxLen = 0;
-      col.eachCell({ includeEmpty: false }, (cell) => {
-        if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
-          const s = String(cell.value);
-          if (s.length > maxLen) maxLen = s.length;
-        }
-      });
-      col.width = Math.min(Math.max(maxLen > 0 ? 30 : 28, 28), 45);
-    } else if (c === 1) {
+    if (c === 1) {
       let maxLen = 0;
       col.eachCell({ includeEmpty: false }, (cell) => {
         if (cell.row !== 1 && cell.value !== null && cell.value !== undefined) {
@@ -1004,12 +937,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
       const resChem = analyzeTableMarkedCells(data, chemRows, chemColumns);
       const resBss = analyzeTableMarkedCells(data, bssRows, bssColumns);
-      const hasRemarks = resChem.hasMarkedCells || resBss.hasMarkedCells;
+      const hasMarkedCells = resChem.hasMarkedCells || resBss.hasMarkedCells;
 
-      sheetMaxCols = Math.max(
-        chemColumns.length + 1 + (hasRemarks ? 1 : 0),
-        bssColumns.length + 1 + (hasRemarks ? 1 : 0)
-      );
+      sheetMaxCols = Math.max(chemColumns.length + 1, bssColumns.length + 1);
       const titleMergeCols = Math.max(sheetMaxCols, 6);
 
       // Title Banner
@@ -1028,7 +958,6 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         chemColumns,
         null,
         titleMergeCols,
-        hasRemarks,
         resChem.rowMarksMap
       );
       nextRow = res1.nextRow;
@@ -1041,12 +970,11 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         bssColumns,
         null,
         titleMergeCols,
-        hasRemarks,
         resBss.rowMarksMap
       );
       nextRow = res2.nextRow;
 
-      if (hasRemarks) {
+      if (hasMarkedCells) {
         renderLegend(sheet, nextRow);
         nextRow += 2;
       }
@@ -1071,9 +999,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       }));
 
       const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-      const hasRemarks = analysisRes.hasMarkedCells;
-
-      sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
+      sheetMaxCols = columns.length + 1;
       const titleMergeCols = Math.max(sheetMaxCols, 6);
 
       const titleRow = sheet.getRow(1);
@@ -1091,13 +1017,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         columns,
         labelConfig,
         titleMergeCols,
-        hasRemarks,
         analysisRes.rowMarksMap
       );
       sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
       nextRow = res.nextRow;
 
-      if (hasRemarks) {
+      if (analysisRes.hasMarkedCells) {
         renderLegend(sheet, nextRow);
         nextRow += 2;
       }
@@ -1129,9 +1054,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         }));
 
         const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-        const hasRemarks = analysisRes.hasMarkedCells;
-
-        sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
+        sheetMaxCols = columns.length + 1;
         const titleMergeCols = Math.max(sheetMaxCols, 6);
 
         const titleRow = sheet.getRow(1);
@@ -1149,13 +1072,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           columns,
           labelConfig,
           titleMergeCols,
-          hasRemarks,
           analysisRes.rowMarksMap
         );
         sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
         nextRow = res.nextRow;
 
-        if (hasRemarks) {
+        if (analysisRes.hasMarkedCells) {
           renderLegend(sheet, nextRow);
           nextRow += 2;
         }
@@ -1167,9 +1089,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
 
         const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-        const hasRemarks = analysisRes.hasMarkedCells;
-
-        sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
+        sheetMaxCols = columns.length + 1;
         const titleMergeCols = Math.max(sheetMaxCols, 6);
 
         const titleRow = sheet.getRow(1);
@@ -1187,13 +1107,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           columns,
           labelConfig,
           titleMergeCols,
-          hasRemarks,
           analysisRes.rowMarksMap
         );
         sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
         nextRow = res.nextRow;
 
-        if (hasRemarks) {
+        if (analysisRes.hasMarkedCells) {
           renderLegend(sheet, nextRow);
           nextRow += 2;
         }
@@ -1206,9 +1125,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
 
           const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-          const hasRemarks = analysisRes.hasMarkedCells;
-
-          sheetMaxCols = columns.length + 1 + (hasRemarks ? 1 : 0);
+          sheetMaxCols = columns.length + 1;
           const titleMergeCols = Math.max(sheetMaxCols, 6);
 
           const titleRow = sheet.getRow(1);
@@ -1226,13 +1143,12 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
             columns,
             labelConfig,
             titleMergeCols,
-            hasRemarks,
             analysisRes.rowMarksMap
           );
           sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
           nextRow = res.nextRow;
 
-          if (hasRemarks) {
+          if (analysisRes.hasMarkedCells) {
             renderLegend(sheet, nextRow);
             nextRow += 2;
           }
