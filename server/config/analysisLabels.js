@@ -244,6 +244,64 @@ const ANALYSIS_LABELS = {
       { key: 'm100', label: '-100',    unit: '%', range: null },
     ],
   },
+  'TK 401 Analysis': {
+    title: 'TK 401 ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '3.87-4.07' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', range: '1.82-2.02' },
+      { key: 'tcl',  label: 'TCl',  unit: 'Kgm/m³', range: '5.37-5.57' },
+      { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', range: '3.45-3.65' },
+      { key: 'tcao', label: 'TCaO', unit: null,     range: null },
+    ],
+  },
+  'TK 405 Analysis': {
+    title: 'TK 405 ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '3.76-3.96' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', range: '1.79-1.99' },
+      { key: 'tcl',  label: 'TCl',  unit: 'Kgm/m³', range: '5.29-5.49' },
+      { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', range: '3.40-3.60' },
+      { key: 'tcao', label: 'TCaO', unit: null,     range: null },
+    ],
+  },
+  'TK 414 TSC TANK Analysis': {
+    title: 'TK 414 TSC TANK ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '1.30-1.50' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', range: '4.00-4.20' },
+      { key: 'tcl',  label: 'TCl',  unit: 'Kgm/m³', range: '5.36-5.56' },
+      { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', range: '1.26-1.46' },
+    ],
+  },
+  'P413 WSC TANK Analysis': {
+    title: 'P413 WSC TANK ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH₃', unit: 'Kgm/m³', range: '1.48-1.68' },
+      { key: 'cnh3', label: 'CNH₃', unit: 'Kgm/m³', range: '3.99-4.19' },
+      { key: 'tcl',  label: 'TCl',  unit: 'Kgm/m³', range: '5.35-5.55' },
+      { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', range: '1.26-1.46' },
+    ],
+  },
 };
 
 /**
