@@ -461,6 +461,28 @@ const ANALYSIS_LABELS = {
       { key: 'ema',       label: 'EMA',       unit: 'ppm',   range: '90-110' },
     ],
   },
+  'Analysis For DM Water / Anion unit': {
+    title: 'DM WATER ANALYSIS',
+    strictColumns: true,
+    columns: [
+      { key: 'ph',   label: 'pH',   unit: null,      range: '7.0-9.5' },
+      { key: 'cond', label: 'Cond', unit: 'umho/cm', range: '5-15' },
+      { key: 'th',   label: 'TH',   unit: 'ppm',     range: null },
+      { key: 'alk',  label: 'Alk',  unit: 'ppm',     range: '1-9' },
+      { key: 'sio2', label: 'SiO₂', unit: 'ppm',     range: null },
+    ],
+  },
+  'Boiler Feed Water / Super Heated Steam Analysis': {
+    title: 'BOILER FEED WATER / SUPER HEATED STEAM',
+    strictColumns: true,
+    columns: [
+      { key: 'ph',   label: 'pH',   unit: null,      range: '7.0-9.5' },
+      { key: 'cond', label: 'Cond', unit: 'umho/cm', range: '5-15' },
+      { key: 'th',   label: 'TH',   unit: 'ppm',     range: null },
+      { key: 'alk',  label: 'Alk',  unit: 'ppm',     range: '1-9' },
+      { key: 'sio2', label: 'SiO₂', unit: 'ppm',     range: null },
+    ],
+  },
 };
 
 /**
