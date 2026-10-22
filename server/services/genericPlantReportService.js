@@ -500,6 +500,10 @@ function resolveColumns(columnKeys, labelConfig = null) {
       });
     });
 
+    if (labelConfig.strictColumns === true) {
+      return columns;
+    }
+
     columnKeys.forEach((k) => {
       if (!configMap.has(String(k).toLowerCase())) {
         columns.push({
