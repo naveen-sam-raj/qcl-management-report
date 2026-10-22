@@ -483,22 +483,67 @@ const ANALYSIS_LABELS = {
       { key: 'sio2', label: 'SiO₂', unit: 'ppm',     range: null },
     ],
   },
+  'Cooling Water (C.W Water) Analysis': {
+    title: 'COOLING WATER ANALYSIS',
+    sheetName: 'Cooling Water',
+    splitByUnit: true,
+    strictColumns: true,
+    columns: [
+      { key: 'ph',        label: 'pH',        unit: null,    range: '7.2-7.9' },
+      { key: 'frc',       label: 'FRC',       unit: 'ppm',   range: '0.2-0.5' },
+      { key: 'opo4',      label: 'O-PO₄',     unit: 'ppm',   range: '6-8' },
+      { key: 'cl',        label: 'Cl',        unit: 'ppm',   range: '600-800' },
+      { key: 'turbidity', label: 'Turbidity', unit: 'NTU',   range: '40-60' },
+      { key: 'tds',       label: 'TDS',       unit: 'ppm',   range: '1800-2500' },
+      { key: 'fe',        label: 'Fe',        unit: 'ppm',   range: '1.8-2.2' },
+      { key: 'sio2',      label: 'SiO₂',      unit: 'ppm',   range: '60-80' },
+      { key: 'alk',       label: 'ALK',       unit: 'ppm',   range: '250-350' },
+      { key: 'so4',       label: 'SO₄',       unit: 'ppm',   range: '450-550' },
+      { key: 'th',        label: 'TH',        unit: 'ppm',   range: '450-550' },
+      { key: 'cah',       label: 'CaH',       unit: 'ppm',   range: '250-350' },
+      { key: 'mgh',       label: 'MgH',       unit: 'ppm',   range: '150-250' },
+      { key: 'ammn',      label: 'Amm.N',     unit: 'ppm',   range: null },
+    ],
+  },
+  'Cooling Water (C.W Water) Analysis::cooling water 200#': {
+    title: 'COOLING WATER 200# ANALYSIS',
+    sheetName: 'Cooling Water 200#',
+    strictColumns: true,
+    columns: [
+      { key: 'ph',   label: 'pH',    unit: null,  range: '7.2-7.9' },
+      { key: 'frc',  label: 'FRC',   unit: 'ppm', range: '0.2-0.5' },
+      { key: 'opo4', label: 'O-PO₄', unit: 'ppm', range: '6-8' },
+      { key: 'cl',   label: 'Cl',    unit: 'ppm', range: '600-800' },
+    ],
+  },
 };
 
 /**
  * Returns the analysis config if found (case-insensitive, space-trimmed).
+ * If unit is provided as a non-empty string, checks compound key "<analysisType>::<unit>" first.
  * Returns null (does not throw) if analysisType is unknown or not provided.
  *
  * @param {string} analysisType
+ * @param {string|null} [unit]
  * @returns {object|null}
  */
-function getAnalysisConfig(analysisType) {
+function getAnalysisConfig(analysisType, unit = null) {
   if (!analysisType || typeof analysisType !== 'string') {
     return null;
   }
-  const clean = analysisType.trim().toLowerCase();
+  const cleanType = analysisType.trim().toLowerCase();
+
+  if (typeof unit === 'string' && unit.trim() !== '') {
+    const compoundKey = `${cleanType}::${unit.trim().toLowerCase()}`;
+    for (const [key, config] of Object.entries(ANALYSIS_LABELS)) {
+      if (key.trim().toLowerCase() === compoundKey) {
+        return config;
+      }
+    }
+  }
+
   for (const [key, config] of Object.entries(ANALYSIS_LABELS)) {
-    if (key.trim().toLowerCase() === clean) {
+    if (key.trim().toLowerCase() === cleanType) {
       return config;
     }
   }

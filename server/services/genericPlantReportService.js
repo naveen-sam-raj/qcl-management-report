@@ -900,16 +900,27 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
   const groupedByType = {};
   for (const r of records) {
     const at = (r.analysisType || 'Unknown Analysis').trim();
-    if (!groupedByType[at]) {
-      groupedByType[at] = [];
+    const baseConfig = getAnalysisConfig(at);
+    let groupKey = at;
+    if (baseConfig?.splitByUnit === true) {
+      const normUnit = String(r.unit || '').toLowerCase().includes('200') ? 'cooling water 200#' : 'cooling water';
+      groupKey = `${at}::${normUnit}`;
+      r.unit = normUnit;
     }
-    groupedByType[at].push(r);
+    if (!groupedByType[groupKey]) {
+      groupedByType[groupKey] = [];
+    }
+    groupedByType[groupKey].push(r);
   }
 
-  const mergedRecords = Object.keys(groupedByType).map((at) => mergeRecordsForAnalysis(groupedByType[at]));
+  const mergedRecords = Object.keys(groupedByType).map((gk) => mergeRecordsForAnalysis(groupedByType[gk]));
 
-  // Sort analyses alphabetically
-  mergedRecords.sort((a, b) => (a.analysisType || '').localeCompare(b.analysisType || ''));
+  // Sort analyses alphabetically by analysisType, tie-break by unit
+  mergedRecords.sort((a, b) => {
+    const atCompare = (a.analysisType || '').localeCompare(b.analysisType || '');
+    if (atCompare !== 0) return atCompare;
+    return (a.unit || '').localeCompare(b.unit || '');
+  });
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'QCL Management Report System';
@@ -919,13 +930,15 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
   for (const rec of mergedRecords) {
     const analysisType = rec.analysisType || 'Analysis';
-    const labelConfig = getAnalysisConfig(analysisType);
+    const baseConfig = getAnalysisConfig(analysisType);
+    const unitToPass = baseConfig?.splitByUnit === true ? rec.unit : null;
+    const labelConfig = getAnalysisConfig(analysisType, unitToPass);
     const hasSubHeader = Boolean(
       labelConfig &&
       Array.isArray(labelConfig.columns) &&
       labelConfig.columns.some((c) => (c.unit !== null && c.unit !== undefined && c.unit !== '') || (c.range !== null && c.range !== undefined && c.range !== ''))
     );
-    const sheetName = sanitizeSheetName(analysisType, usedSheetNames);
+    const sheetName = sanitizeSheetName(labelConfig?.sheetName || analysisType, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, {
       views: [{ showGridLines: true }],
     });
