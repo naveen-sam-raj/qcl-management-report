@@ -61,18 +61,23 @@ const METADATA_KEYS = new Set([
   'date',
   'plant',
   'plantCode',
+  'plantName',
   'unit',
+  'tank',
   'analysisType',
   'frequency',
   'sample',
   'time',
   'shift',
+  'status',
   'isSaved',
   'isLocked',
+  'initialSaved',
   'editCount',
   'editedFields',
   'editAuditHistory',
   'lockedShifts',
+  'lockedSlots',
   'submittedBy',
   'submittedById',
   'submittedAt',
@@ -82,6 +87,9 @@ const METADATA_KEYS = new Set([
   'emailStatus',
   'emailRecipient',
   'assignedOperatorEmail',
+  'resolvedDate',
+  'displayDate',
+  'shiftKey',
 ]);
 
 /**
@@ -161,9 +169,76 @@ function sanitizeSheetName(name, existingNames) {
 }
 
 /**
- * Format a row key into a user-friendly label (e.g. 'shift1' -> 'I Shift', 't07' -> '07:00')
+ * Check if a value is a plain row object containing measurements (not an array, primitive, or boolean map)
  */
-function formatRowLabel(key, item = null) {
+function isPlainRowObject(val) {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) {
+    return false;
+  }
+  const vals = Object.values(val);
+  if (vals.length === 0) return true;
+  // If all values are booleans, it is a boolean state map (e.g. lockedShifts, editedFields)
+  const isBooleanMap = vals.every((v) => typeof v === 'boolean');
+  if (isBooleanMap) return false;
+  return true;
+}
+
+/**
+ * Resolves the row container from analysis data:
+ * 1. Checks explicit containers (data.rows, data.shifts, data.shiftRows, data.timeRows)
+ * 2. Checks data itself if it contains plain row objects (excluding metadata keys)
+ */
+function findRowContainer(data) {
+  if (!data || typeof data !== 'object') return null;
+
+  // 1. Explicit container candidates
+  const explicitCandidates = [data.rows, data.shifts, data.shiftRows, data.timeRows];
+  for (const cand of explicitCandidates) {
+    if (cand && typeof cand === 'object') {
+      if (Array.isArray(cand) && cand.length > 0) {
+        return cand;
+      }
+      const keys = Object.keys(cand).filter((k) => !METADATA_KEYS.has(k) && typeof cand[k] !== 'function');
+      if (keys.length > 0 && keys.some((k) => isPlainRowObject(cand[k]))) {
+        return cand;
+      }
+    }
+  }
+
+  // 2. Data itself as container (e.g. data = { week: { cl, so4, ... } } or data = { day: { ... } })
+  const validDataKeys = Object.keys(data).filter(
+    (k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function' && isPlainRowObject(data[k])
+  );
+  if (validDataKeys.length > 0) {
+    const directContainer = {};
+    validDataKeys.forEach((k) => {
+      directContainer[k] = data[k];
+    });
+    return directContainer;
+  }
+
+  return null;
+}
+
+/**
+ * Format a row key into a user-friendly label:
+ * 1. config.rowLabels[key] (case-insensitive priority)
+ * 2. item metadata (sample, stream, time)
+ * 3. SHIFT_MAP or SLOT_TIME_ORDER
+ * 4. Key uppercased fallback
+ */
+function formatRowLabel(key, item = null, labelConfig = null) {
+  // 1. Config rowLabels priority (case-insensitive)
+  if (labelConfig && labelConfig.rowLabels && typeof labelConfig.rowLabels === 'object') {
+    const kStr = String(key || '').trim().toLowerCase();
+    for (const [rk, rLabel] of Object.entries(labelConfig.rowLabels)) {
+      if (String(rk).trim().toLowerCase() === kStr && rLabel) {
+        return String(rLabel).trim();
+      }
+    }
+  }
+
+  // 2. Item metadata properties
   if (item && item.sample) {
     return item.time ? `${item.sample} (${item.time})` : item.sample;
   }
@@ -173,7 +248,9 @@ function formatRowLabel(key, item = null) {
   if (item && item.time != null && String(item.time).trim() !== '') {
     return String(item.time).trim();
   }
-  const lower = String(key).toLowerCase().trim();
+
+  // 3. Known shift / time slot maps
+  const lower = String(key || '').toLowerCase().trim();
   if (SHIFT_MAP[lower]) {
     return SHIFT_MAP[lower].label;
   }
@@ -190,6 +267,8 @@ function formatRowLabel(key, item = null) {
   if (!isNaN(Number(key))) {
     return `Reading ${Number(key) + 1}`;
   }
+
+  // 4. Uppercase fallback
   return String(key).toUpperCase();
 }
 
@@ -1020,7 +1099,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
       const rowEntries = data.readings.map((item, idx) => ({
         rowKey: String(idx),
-        label: formatRowLabel(idx, item),
+        label: formatRowLabel(idx, item, labelConfig),
         dataObj: item,
       }));
 
@@ -1053,12 +1132,47 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         nextRow += 2;
       }
     }
-    // ── Pattern 3: Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows) ──
+    // ── Pattern 4: Flat Parameters Priority (Raw Salt) ──
+    else if (data.parameters && typeof data.parameters === 'object') {
+      const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
+      const columns = resolveColumns(columnKeys, labelConfig);
+      const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
+
+      const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+      sheetMaxCols = columns.length + 1;
+      const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+      const titleRow = sheet.getRow(1);
+      titleRow.height = 30;
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+      applyTitleStyle(titleCell);
+      sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+      const res = renderTableBlock(
+        sheet,
+        nextRow,
+        null,
+        rowEntries,
+        columns,
+        labelConfig,
+        titleMergeCols,
+        analysisRes.rowMarksMap
+      );
+      sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+      nextRow = res.nextRow;
+
+      if (analysisRes.hasMarkedCells) {
+        renderLegend(sheet, nextRow);
+        nextRow += 2;
+      }
+    }
+    // ── Pattern 3: Generalized Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows, or row objects in data) ──
     else {
-      const rowContainer = data.rows || data.shifts || data.shiftRows || data.timeRows || null;
+      const rowContainer = findRowContainer(data);
 
       if (rowContainer && typeof rowContainer === 'object' && Object.keys(rowContainer).length > 0) {
-        // Collect all column keys
+        // Collect all column keys ONLY from inside row objects
         const allKeys = new Set();
         const sortedRowKeys = Object.keys(rowContainer).sort((a, b) => getRowOrderWeight(a) - getRowOrderWeight(b));
 
@@ -1075,7 +1189,7 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
 
         const rowEntries = sortedRowKeys.map((rk) => ({
           rowKey: rk,
-          label: formatRowLabel(rk, rowContainer[rk]),
+          label: formatRowLabel(rk, rowContainer[rk], labelConfig),
           dataObj: rowContainer[rk],
         }));
 
@@ -1108,44 +1222,9 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
           nextRow += 2;
         }
       }
-      // ── Pattern 4: Flat Parameters (Raw Salt) ──
-      else if (data.parameters && typeof data.parameters === 'object') {
-        const columnKeys = Object.keys(data.parameters).filter((k) => !METADATA_KEYS.has(k));
-        const columns = resolveColumns(columnKeys, labelConfig);
-        const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
-
-        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-        sheetMaxCols = columns.length + 1;
-        const titleMergeCols = Math.max(sheetMaxCols, 6);
-
-        const titleRow = sheet.getRow(1);
-        titleRow.height = 30;
-        const titleCell = titleRow.getCell(1);
-        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
-        applyTitleStyle(titleCell);
-        sheet.mergeCells(1, 1, 1, titleMergeCols);
-
-        const res = renderTableBlock(
-          sheet,
-          nextRow,
-          null,
-          rowEntries,
-          columns,
-          labelConfig,
-          titleMergeCols,
-          analysisRes.rowMarksMap
-        );
-        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
-        nextRow = res.nextRow;
-
-        if (analysisRes.hasMarkedCells) {
-          renderLegend(sheet, nextRow);
-          nextRow += 2;
-        }
-      }
-      // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary) ──
+      // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary of primitive parameters) ──
       else {
-        const flatKeys = Object.keys(data).filter((k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function');
+        const flatKeys = Object.keys(data).filter((k) => !METADATA_KEYS.has(k) && typeof data[k] !== 'function' && !isPlainRowObject(data[k]));
         if (flatKeys.length > 0) {
           const columns = resolveColumns(flatKeys, labelConfig);
           const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
