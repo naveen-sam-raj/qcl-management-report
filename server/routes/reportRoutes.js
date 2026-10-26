@@ -128,6 +128,64 @@ router.get('/generic', async (req, res) => {
   }
 });
 
+/**
+ * @desc    Generate and download combined All Plants Master Excel report (ACL, SA, OFFSITE, CO2)
+ * @route   GET /api/reports/generic-all?date=YYYY-MM-DD
+ * @access  Private (super_admin, company_admin, admin only)
+ */
+router.get('/generic-all', async (req, res) => {
+  try {
+    const { date } = req.query;
+
+    // 1. Mandatory date parameter and strict YYYY-MM-DD validation
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format. Expected YYYY-MM-DD.',
+      });
+    }
+
+    // 2. Role Authorization: super_admin, company_admin, admin only
+    const allowedRoles = ['super_admin', 'company_admin', 'admin'];
+    const userRole = req.user?.role;
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Generating the All Plants Master Report requires super_admin, company_admin, or admin privileges.',
+      });
+    }
+
+    // 3. Generate combined workbook (user company filtering handled inside service)
+    const { generateAllPlantsReportWorkbook } = require('../services/genericPlantReportService');
+    const { workbook, totalRecordCount } = await generateAllPlantsReportWorkbook({
+      date: String(date).trim(),
+      user: req.user,
+    });
+
+    // 4. Return 404 if no records found across all plants
+    if (!workbook || totalRecordCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No analysis records found for any plant on date "${date}".`,
+      });
+    }
+
+    // 5. Stream download directly to client
+    const filename = `ALL_PLANTS_Report_${date}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[All Plants Report Error]:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate all plants report: ' + err.message,
+    });
+  }
+});
+
 router.route('/')
   .get(getReports)
   .post(createReport);

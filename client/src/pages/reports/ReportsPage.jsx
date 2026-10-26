@@ -243,6 +243,63 @@ const ReportsPage = () => {
     }
   };
 
+  // ── All Plants Master Report Download (super_admin, company_admin, admin only) ──
+  const [downloadingAllPlants, setDownloadingAllPlants] = useState(false);
+  const canDownloadAllPlants = ['super_admin', 'company_admin', 'admin'].includes(user?.role);
+
+  const handleDownloadAllPlantsReport = async () => {
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate).trim())) {
+      showToast('Please select a valid date (YYYY-MM-DD)', 'error');
+      return;
+    }
+
+    const targetDate = String(startDate).trim();
+
+    try {
+      setDownloadingAllPlants(true);
+      showToast(`Generating All Plants Master Report for ${targetDate}...`, 'info');
+
+      const response = await api.get('/reports/generic-all', {
+        params: { date: targetDate },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `ALL_PLANTS_Report_${targetDate}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast('All Plants Master Report downloaded successfully!', 'success');
+    } catch (err) {
+      let errorMessage = 'Failed to download all plants report.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) {
+            errorMessage = json.message;
+          }
+        } catch (parseErr) {
+          console.warn('Could not parse error blob as JSON:', parseErr);
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      showToast(errorMessage, 'error');
+    } finally {
+      setDownloadingAllPlants(false);
+    }
+  };
+
   // Aggregate statistics
   const totalOutput = reports.reduce((sum, r) => sum + (r.metrics?.totalOutputTons || 0), 0);
   const avgEfficiency =
@@ -295,7 +352,7 @@ const ReportsPage = () => {
           <button
             id="btn-download-generic-report"
             onClick={handleDownloadGenericReport}
-            disabled={downloadingGeneric || exporting}
+            disabled={downloadingGeneric || exporting || downloadingAllPlants}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
             title="Download dynamic multi-sheet plant management report (.xlsx)"
           >
@@ -306,6 +363,24 @@ const ReportsPage = () => {
             )}
             <span>{downloadingGeneric ? 'Downloading...' : 'Download Report'}</span>
           </button>
+
+          {/* Download All Plants Master Report Button (super_admin, company_admin, admin only) */}
+          {canDownloadAllPlants && (
+            <button
+              id="btn-download-all-plants-report"
+              onClick={handleDownloadAllPlantsReport}
+              disabled={downloadingAllPlants || downloadingGeneric || exporting}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-purple-600 hover:bg-purple-700 transition shadow-sm shadow-purple-600/20 disabled:opacity-50 cursor-pointer"
+              title="Download combined Master report for all plants (ACL, SA, OFFSITE, CO2) with SUMMARY sheet"
+            >
+              {downloadingAllPlants ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloadingAllPlants ? 'Downloading All Plants...' : 'Download All Plants Report'}</span>
+            </button>
+          )}
         </div>
       </div>
 
