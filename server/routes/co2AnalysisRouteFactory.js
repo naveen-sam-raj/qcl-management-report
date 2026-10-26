@@ -242,8 +242,8 @@ function createCO2ShiftAnalysisRouter({
       let lockedShifts = existingData.lockedShifts
         ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: targetShifts })
         : getInitialLockState({ type: 'shift', items: targetShifts });
-      let editedFields = existingData.editedFields || {};
-      let editAuditHistory = existingData.editAuditHistory || [];
+      let editedFields = { ...(existingData.editedFields || {}) };
+      let editAuditHistory = Array.isArray(existingData.editAuditHistory) ? [ ...existingData.editAuditHistory ] : [];
 
       // Check for lock violations on modified shifts
       for (const key of targetShifts) {
@@ -306,35 +306,73 @@ function createCO2ShiftAnalysisRouter({
       const oldShift = mergedRows[activeShiftKey] || {};
       const newShift = payload.rows[activeShiftKey] || {};
 
-      const isPriorSavedShift = saveValidation.isCorrection;
+      try {
+        const isPriorSavedShift = saveValidation.isCorrection;
 
-      if (isPriorSavedShift) {
-        parameters.forEach((paramKey) => {
-          const oVal = oldShift[paramKey] ?? null;
-          let nVal = newShift[paramKey] ?? null;
-          if (nVal === '') nVal = null;
+        if (isPriorSavedShift) {
+          const isEmpty = (v) => v === null || v === '' || v === undefined;
 
-          let isParamChanged = false;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            isParamChanged = Number(oVal) !== Number(nVal);
-          } else {
-            isParamChanged = oVal !== nVal;
-          }
+          parameters.forEach((paramKey) => {
+            const rawOld = oldShift[paramKey];
+            const rawNew = newShift[paramKey];
 
-          if (isParamChanged) {
-            editedFields[`${activeShiftKey}_${paramKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: activeShiftKey,
-              shiftName: SHIFT_DISPLAY_NAMES[activeShiftKey],
-              paramKey,
-              oldValue: oVal !== null ? Number(oVal) : null,
-              newValue: nVal !== null ? Number(nVal) : null,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              editedById: req.user?._id || null,
-              timestamp: new Date(),
-            });
-          }
-        });
+            const oldIsEmpty = isEmpty(rawOld);
+            const newIsEmpty = isEmpty(rawNew);
+
+            // If both old and new values are empty (null, '', undefined), no edit
+            if (oldIsEmpty && newIsEmpty) {
+              return;
+            }
+
+            // If old value was filled and new value is cleared, record as edit with newValue null
+            if (!oldIsEmpty && newIsEmpty) {
+              const oVal = !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld;
+              editedFields[`${activeShiftKey}_${paramKey}`] = true;
+              editAuditHistory.push({
+                shiftKey: activeShiftKey,
+                shiftName: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
+                paramKey,
+                stream: paramKey.toUpperCase(),
+                oldValue: oVal,
+                newValue: null,
+                editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                editedById: req.user?._id || null,
+                timestamp: new Date(),
+              });
+              return;
+            }
+
+            // If old value was empty and new value is filled for the first time, no edit
+            if (oldIsEmpty && !newIsEmpty) {
+              return;
+            }
+
+            // Both old and new are filled: compare with numeric tolerance
+            let isParamChanged = false;
+            if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
+              isParamChanged = Number(rawOld) !== Number(rawNew);
+            } else {
+              isParamChanged = String(rawOld).trim() !== String(rawNew).trim();
+            }
+
+            if (isParamChanged) {
+              editedFields[`${activeShiftKey}_${paramKey}`] = true;
+              editAuditHistory.push({
+                shiftKey: activeShiftKey,
+                shiftName: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
+                paramKey,
+                stream: paramKey.toUpperCase(),
+                oldValue: !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld,
+                newValue: !isNaN(Number(rawNew)) ? Number(rawNew) : rawNew,
+                editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                editedById: req.user?._id || null,
+                timestamp: new Date(),
+              });
+            }
+          });
+        }
+      } catch (trackErr) {
+        console.warn(`[CO2 Edit Tracking] Failed tracking edits for ${analysisType} (${activeShiftKey}):`, trackErr.message);
       }
 
       mergedRows[activeShiftKey] = newShift;
@@ -671,43 +709,84 @@ function createCO2WeeklyAnalysisRouter({
       let initialSaved = Boolean(existingData.initialSaved);
       let editCount = existingData.editCount || 0;
       let isLocked = false; // Analyses without shifts or timings remain open for normal saving and editing
-      let editedFields = existingData.editedFields || {};
-      let editAuditHistory = existingData.editAuditHistory || [];
+      let editedFields = { ...(existingData.editedFields || {}) };
+      let editAuditHistory = Array.isArray(existingData.editAuditHistory) ? [ ...existingData.editAuditHistory ] : [];
 
       const incomingWeek = (payload.rows && payload.rows.week) || payload.rows || {};
       const oldWeek = (existingRows && existingRows.week) || existingRows || {};
 
-      if (initialSaved) {
-        parameters.forEach((paramKey) => {
-          const oVal = oldWeek[paramKey] ?? null;
-          let nVal = incomingWeek[paramKey] ?? null;
-          if (nVal === '') nVal = null;
+      try {
+        if (initialSaved) {
+          const isEmpty = (v) => v === null || v === '' || v === undefined;
 
-          let isParamChanged = false;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            isParamChanged = Number(oVal) !== Number(nVal);
-          } else {
-            isParamChanged = oVal !== nVal;
-          }
+          parameters.forEach((paramKey) => {
+            const rawOld = oldWeek[paramKey];
+            const rawNew = incomingWeek[paramKey];
 
-          if (isParamChanged) {
-            editedFields[`week_${paramKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: 'week',
-              shiftName: 'Weekly Analysis',
-              paramKey,
-              oldValue: oVal !== null ? Number(oVal) : null,
-              newValue: nVal !== null ? Number(nVal) : null,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              editedById: req.user?._id || null,
-              timestamp: new Date(),
-            });
-          }
-        });
+            const oldIsEmpty = isEmpty(rawOld);
+            const newIsEmpty = isEmpty(rawNew);
 
-        editCount += 1;
-      } else {
-        initialSaved = true;
+            // If both old and new values are empty (null, '', undefined), no edit
+            if (oldIsEmpty && newIsEmpty) {
+              return;
+            }
+
+            // If old value was filled and new value is cleared, record as edit with newValue null
+            if (!oldIsEmpty && newIsEmpty) {
+              const oVal = !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld;
+              editedFields[`week_${paramKey}`] = true;
+              editAuditHistory.push({
+                shiftKey: 'week',
+                shiftName: 'Weekly Analysis',
+                paramKey,
+                stream: paramKey.toUpperCase(),
+                oldValue: oVal,
+                newValue: null,
+                editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                editedById: req.user?._id || null,
+                timestamp: new Date(),
+              });
+              return;
+            }
+
+            // If old value was empty and new value is filled for the first time, no edit
+            if (oldIsEmpty && !newIsEmpty) {
+              return;
+            }
+
+            // Both old and new are filled: compare with numeric tolerance
+            let isParamChanged = false;
+            if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
+              isParamChanged = Number(rawOld) !== Number(rawNew);
+            } else {
+              isParamChanged = String(rawOld).trim() !== String(rawNew).trim();
+            }
+
+            if (isParamChanged) {
+              editedFields[`week_${paramKey}`] = true;
+              editAuditHistory.push({
+                shiftKey: 'week',
+                shiftName: 'Weekly Analysis',
+                paramKey,
+                stream: paramKey.toUpperCase(),
+                oldValue: !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld,
+                newValue: !isNaN(Number(rawNew)) ? Number(rawNew) : rawNew,
+                editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                editedById: req.user?._id || null,
+                timestamp: new Date(),
+              });
+            }
+          });
+
+          editCount += 1;
+        } else {
+          initialSaved = true;
+        }
+      } catch (trackErr) {
+        console.warn(`[CO2 Edit Tracking] Failed tracking edits for ${analysisType} (week):`, trackErr.message);
+        if (!initialSaved) {
+          initialSaved = true;
+        }
       }
 
       const updatedRecordData = {
