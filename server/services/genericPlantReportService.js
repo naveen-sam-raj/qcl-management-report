@@ -96,9 +96,9 @@ const METADATA_KEYS = new Set([
  * Format cell value safely:
  * - null/undefined/''/NaN -> '*'
  * - number -> Number(val) (preserves raw numeric value in Excel)
- * - object/array -> flattened key: value or '*'
+ * - object/array -> '*' with console warning (never prints [object Object] or key: value text)
  */
-function formatCellValue(val) {
+function formatCellValue(val, context = null) {
   if (val === null || val === undefined || val === '') {
     return '*';
   }
@@ -115,29 +115,15 @@ function formatCellValue(val) {
     if (!isNaN(num)) return num;
     return trimmed;
   }
-  if (Array.isArray(val)) {
-    if (val.length === 0) return '*';
-    const flattened = val
-      .map((item) => {
-        if (typeof item === 'object' && item !== null) {
-          return Object.entries(item)
-            .filter(([k]) => !METADATA_KEYS.has(k))
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(', ');
-        }
-        return String(item);
-      })
-      .filter(Boolean)
-      .join('; ');
-    return flattened || '*';
-  }
   if (typeof val === 'object') {
-    const entries = Object.entries(val).filter(([k, v]) => !METADATA_KEYS.has(k) && v !== null && v !== undefined && v !== '');
-    if (entries.length === 0) return '*';
-    return entries.map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ');
+    const at = context?.analysisType || 'Analysis';
+    const key = context?.key || 'unknown';
+    console.warn(`[Report Service] Unexpected nested object in cell for ${at} key: ${key}`, val);
+    return '*';
   }
   return String(val);
 }
+
 
 /**
  * Sanitize a string into a valid, unique Excel worksheet name (<= 31 chars, no invalid chars)
@@ -398,7 +384,30 @@ function formatTimestampIST(ts) {
 }
 
 /**
- * Safely inspects editedFields across various data structures (Object, Map, Array, Set, nested)
+ * Safely inspects a nested object path using segments (supports Map or Object at each level)
+ */
+function checkNestedPath(obj, segments) {
+  if (!obj || typeof obj !== 'object' || segments.length === 0) return false;
+  let curr = obj;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (!curr || typeof curr !== 'object') return false;
+    let next = undefined;
+    if (typeof curr.get === 'function') {
+      next = curr.get(seg) !== undefined ? curr.get(seg) : curr.get(seg.toLowerCase());
+    } else {
+      next = curr[seg] !== undefined ? curr[seg] : curr[seg.toLowerCase()];
+    }
+    if (i === segments.length - 1) {
+      return Boolean(next);
+    }
+    curr = next;
+  }
+  return false;
+}
+
+/**
+ * Safely inspects editedFields across various data structures (Object, Map, Array, Set, nested up to 3 levels)
  */
 function isFieldMarkedEdited(editedFields, candidateKeys) {
   if (!editedFields) return false;
@@ -447,19 +456,18 @@ function isFieldMarkedEdited(editedFields, candidateKeys) {
           return true;
         }
       }
-      // Nested check e.g. editedFields[rowKey][colKey]
+      // Deep path checks
       for (const key of candidateKeys) {
-        const parts = key.split('_');
-        if (parts.length >= 2) {
-          const rKey = parts[0];
-          const cKey = parts.slice(1).join('_');
-          const nestedRow = editedFields[rKey] || editedFields[rKey.toLowerCase()];
-          if (nestedRow && typeof nestedRow === 'object') {
-            if (typeof nestedRow.get === 'function') {
-              if (nestedRow.get(cKey) || nestedRow.get(cKey.toLowerCase())) return true;
-            } else if (nestedRow[cKey] || nestedRow[cKey.toLowerCase()]) {
-              return true;
-            }
+        if (key.includes('.')) {
+          const segments = key.split('.');
+          if (checkNestedPath(editedFields, segments)) return true;
+        }
+        if (key.includes('_')) {
+          const parts = key.split('_');
+          if (checkNestedPath(editedFields, parts)) return true;
+          if (checkNestedPath(editedFields, [parts[0], parts.slice(1).join('_')])) return true;
+          if (parts.length >= 3 && checkNestedPath(editedFields, [parts[0], parts[1], parts.slice(2).join('_')])) {
+            return true;
           }
         }
       }
@@ -487,6 +495,14 @@ function getCellAuditEntries(editAuditHistory, rowKey, colKey, dataObj = null) {
       if (dataObj.id) candidateRowIds.add(String(dataObj.id).toLowerCase().trim());
       if (dataObj.sample) candidateRowIds.add(String(dataObj.sample).toLowerCase().trim());
       if (dataObj.shift) candidateRowIds.add(String(dataObj.shift).toLowerCase().trim());
+      if (dataObj.unitKey) candidateRowIds.add(String(dataObj.unitKey).toLowerCase().trim());
+    }
+
+    const candidateParamKeys = new Set([cLower]);
+    if (cLower.includes('__')) {
+      const [grpLower, pLower] = cLower.split('__');
+      candidateParamKeys.add(pLower);
+      candidateParamKeys.add(`${grpLower}_${pLower}`);
     }
 
     return editAuditHistory.filter((entry) => {
@@ -495,7 +511,7 @@ function getCellAuditEntries(editAuditHistory, rowKey, colKey, dataObj = null) {
       const pKey = String(entry.paramKey || entry.stream || entry.parameter || entry.field || entry.key || '')
         .toLowerCase()
         .trim();
-      if (pKey !== cLower) return false;
+      if (!candidateParamKeys.has(pKey)) return false;
 
       const sKey = String(entry.shiftKey || entry.shiftName || entry.rowKey || entry.timeKey || entry.time || entry.rowId || '')
         .toLowerCase()
@@ -533,8 +549,54 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
     `${cStr.toLowerCase()}`,
   ];
   if (dataObj && typeof dataObj === 'object') {
-    if (dataObj.time) candidateKeys.push(`${dataObj.time}_${cStr}`);
-    if (dataObj.id) candidateKeys.push(`${dataObj.id}_${cStr}`);
+    if (dataObj.time) {
+      candidateKeys.push(`${dataObj.time}_${cStr}`);
+      candidateKeys.push(`${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${dataObj.time}_${cStr}`);
+      candidateKeys.push(`hourly.${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+    }
+    if (dataObj.id) {
+      candidateKeys.push(`${dataObj.id}_${cStr}`);
+      candidateKeys.push(`${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${dataObj.id}_${cStr}`);
+      candidateKeys.push(`hourly.${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+    }
+    if (dataObj.unitKey) {
+      const uStr = String(dataObj.unitKey).trim();
+      candidateKeys.push(`${uStr}_${rStr}_${cStr}`);
+      candidateKeys.push(`${uStr.toLowerCase()}_${rStr.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`${uStr}.${rStr}.${cStr}`);
+      candidateKeys.push(`${uStr.toLowerCase()}.${rStr.toLowerCase()}.${cStr.toLowerCase()}`);
+      candidateKeys.push(`${uStr}_${cStr}`);
+      candidateKeys.push(`${uStr.toLowerCase()}_${cStr.toLowerCase()}`);
+    }
+  }
+
+  // Handle compound group columns (e.g. Sewer Water: sec200__fnh3)
+  if (cStr.includes('__')) {
+    const [grp, pKey] = cStr.split('__');
+    candidateKeys.push(`${grp}_${pKey}`);
+    candidateKeys.push(`${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+    candidateKeys.push(`${grp}.${pKey}`);
+    candidateKeys.push(`${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+    candidateKeys.push(`${rStr}_${grp}_${pKey}`);
+    candidateKeys.push(`${rStr.toLowerCase()}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+    candidateKeys.push(`${rStr}.${grp}.${pKey}`);
+    candidateKeys.push(`${rStr.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+    if (dataObj && typeof dataObj === 'object') {
+      if (dataObj.time) {
+        candidateKeys.push(`${dataObj.time}_${grp}_${pKey}`);
+        candidateKeys.push(`${dataObj.time.toLowerCase()}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+        candidateKeys.push(`${dataObj.time}.${grp}.${pKey}`);
+        candidateKeys.push(`${dataObj.time.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+      }
+      if (dataObj.id) {
+        candidateKeys.push(`${dataObj.id}_${grp}_${pKey}`);
+        candidateKeys.push(`${dataObj.id.toLowerCase()}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+        candidateKeys.push(`${dataObj.id}.${grp}.${pKey}`);
+        candidateKeys.push(`${dataObj.id.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+      }
+    }
   }
 
   const editedFields = data.editedFields || null;
@@ -563,6 +625,24 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
 }
 
 /**
+ * Formats compound keys like "finalOutlet__pcl" -> "FINAL OUTLET PCL"
+ */
+function formatCompoundLabel(key) {
+  if (typeof key !== 'string') return String(key).toUpperCase();
+  if (key.includes('__')) {
+    const parts = key.split('__');
+    const groupFormatted = parts[0]
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .toUpperCase();
+    const paramFormatted = parts.slice(1).join(' ').trim().toUpperCase();
+    return `${groupFormatted} ${paramFormatted}`;
+  }
+  return key.toUpperCase();
+}
+
+/**
  * Resolves standard column objects from columnKeys and labelConfig
  */
 function resolveColumns(columnKeys, labelConfig = null) {
@@ -573,7 +653,7 @@ function resolveColumns(columnKeys, labelConfig = null) {
       configMap.set(String(c.key).toLowerCase(), c);
       columns.push({
         key: c.key,
-        label: c.label || String(c.key).toUpperCase(),
+        label: c.label || formatCompoundLabel(c.key),
         unit: c.unit !== undefined ? c.unit : null,
         range: c.range !== undefined ? c.range : null,
       });
@@ -587,7 +667,7 @@ function resolveColumns(columnKeys, labelConfig = null) {
       if (!configMap.has(String(k).toLowerCase())) {
         columns.push({
           key: k,
-          label: String(k).toUpperCase(),
+          label: formatCompoundLabel(k),
           unit: null,
           range: null,
         });
@@ -597,7 +677,7 @@ function resolveColumns(columnKeys, labelConfig = null) {
     columnKeys.forEach((colKey) => {
       columns.push({
         key: colKey,
-        label: String(colKey).toUpperCase(),
+        label: formatCompoundLabel(colKey),
         unit: null,
         range: null,
       });
@@ -849,7 +929,10 @@ function renderTableBlock(
 
     columns.forEach((col, idx) => {
       const cell = dRow.getCell(idx + 2);
-      const val = formatCellValue(dataObj ? dataObj[col.key] : null);
+      const val = formatCellValue(dataObj ? dataObj[col.key] : null, {
+        analysisType: sectionTitle || 'Analysis',
+        key: col.key,
+      });
       cell.value = val;
       const isMissing = val === '*';
 
@@ -1084,24 +1167,268 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         nextRow += 2;
       }
     }
-    // ── Pattern 2: Readings Array (BFW, DM Water, CaCl2, Cooling Water, etc.) ──
-    else if (Array.isArray(data.readings) && data.readings.length > 0) {
-      const allKeys = new Set();
-      data.readings.forEach((item) => {
-        if (item && typeof item === 'object') {
-          Object.keys(item).forEach((k) => {
-            if (!METADATA_KEYS.has(k)) allKeys.add(k);
+    // ── Pattern 1B: Shift Analysis & Hourly Readings (LSA Bagging) ──
+    else if (
+      data.shiftAnalysis &&
+      typeof data.shiftAnalysis === 'object' &&
+      (Array.isArray(data.hourlyReadings) || Array.isArray(data.hourly))
+    ) {
+      isDualBlock = true;
+      const hourlyList = Array.isArray(data.hourlyReadings) ? data.hourlyReadings : data.hourly;
+
+      // 1. Shift Analysis Block
+      const shiftKeys = ['shift1', 'shift2', 'shift3'].filter((k) => data.shiftAnalysis[k]);
+      const shiftParamKeys = [];
+      shiftKeys.forEach((sk) => {
+        const sObj = data.shiftAnalysis[sk];
+        if (sObj && typeof sObj === 'object') {
+          Object.keys(sObj).forEach((pk) => {
+            if (!METADATA_KEYS.has(pk) && !shiftParamKeys.includes(pk)) {
+              shiftParamKeys.push(pk);
+            }
           });
         }
       });
-      const columnKeys = Array.from(allKeys);
-      const columns = resolveColumns(columnKeys, labelConfig);
+      const shiftColumns = resolveColumns(shiftParamKeys, labelConfig);
+      const shiftRows = shiftKeys.map((sk) => ({
+        rowKey: sk,
+        label: formatRowLabel(sk, data.shiftAnalysis[sk], labelConfig),
+        dataObj: data.shiftAnalysis[sk],
+      }));
 
-      const rowEntries = data.readings.map((item, idx) => ({
-        rowKey: String(idx),
-        label: formatRowLabel(idx, item, labelConfig),
+      // 2. Hourly Readings Block (keep order of hourlyReadings as stored)
+      const hourlyParamKeys = [];
+      hourlyList.forEach((item) => {
+        if (item && typeof item === 'object') {
+          Object.keys(item).forEach((pk) => {
+            if (!METADATA_KEYS.has(pk) && !['id', 'time', 'shift'].includes(pk) && !hourlyParamKeys.includes(pk)) {
+              hourlyParamKeys.push(pk);
+            }
+          });
+        }
+      });
+      const hourlyColumns = resolveColumns(hourlyParamKeys, labelConfig);
+      const hourlyRows = hourlyList.map((item, idx) => ({
+        rowKey: item.time || item.id || String(idx),
+        label: item.time || item.id || `Reading ${idx + 1}`,
         dataObj: item,
       }));
+
+      const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns);
+      const resHourly = analyzeTableMarkedCells(data, hourlyRows, hourlyColumns);
+      const hasMarkedCells = resShift.hasMarkedCells || resHourly.hasMarkedCells;
+
+      sheetMaxCols = Math.max(shiftColumns.length + 1, hourlyColumns.length + 1);
+      const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+      // Title Banner
+      const titleRow = sheet.getRow(1);
+      titleRow.height = 30;
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+      applyTitleStyle(titleCell);
+      sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+      const res1 = renderTableBlock(
+        sheet,
+        nextRow,
+        'SHIFT ANALYSIS',
+        shiftRows,
+        shiftColumns,
+        labelConfig,
+        titleMergeCols,
+        resShift.rowMarksMap
+      );
+      nextRow = res1.nextRow;
+
+      const res2 = renderTableBlock(
+        sheet,
+        nextRow,
+        'HOURLY READINGS',
+        hourlyRows,
+        hourlyColumns,
+        labelConfig,
+        titleMergeCols,
+        resHourly.rowMarksMap
+      );
+      nextRow = res2.nextRow;
+
+      if (hasMarkedCells) {
+        renderLegend(sheet, nextRow);
+        nextRow += 2;
+      }
+    }
+    // ── Pattern 1C: Nested Unit Towers (T 401 Analysis) ──
+    // Uses ONLY data.units (falling back to data.towers if units is missing, never both).
+    // Runs BEFORE findRowContainer so data.shifts is never picked as a flat row container.
+    else if (
+      (data.units || (!data.units && data.towers)) &&
+      typeof (data.units || data.towers) === 'object' &&
+      !Array.isArray(data.units || data.towers) &&
+      Object.values(data.units || data.towers).some(
+        (u) => u && typeof u === 'object' && !Array.isArray(u) && Object.values(u).some((s) => s && typeof s === 'object' && !Array.isArray(s))
+      )
+    ) {
+      isDualBlock = true;
+      const unitContainer = data.units || data.towers;
+      const unitKeys = Object.keys(unitContainer).sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+      );
+
+      // Collect all parameter keys across all units & shifts in first-seen order
+      const allParamKeys = [];
+      unitKeys.forEach((uk) => {
+        const uObj = unitContainer[uk];
+        if (uObj && typeof uObj === 'object') {
+          Object.values(uObj).forEach((sObj) => {
+            if (sObj && typeof sObj === 'object') {
+              Object.keys(sObj).forEach((pk) => {
+                if (!METADATA_KEYS.has(pk) && !allParamKeys.includes(pk)) {
+                  allParamKeys.push(pk);
+                }
+              });
+            }
+          });
+        }
+      });
+      const unitColumns = resolveColumns(allParamKeys, labelConfig);
+
+      let anyMarked = false;
+      const unitBlocksData = [];
+
+      unitKeys.forEach((uk) => {
+        const uObj = unitContainer[uk] || {};
+        const shiftKeys = Object.keys(uObj).sort((a, b) => getRowOrderWeight(a) - getRowOrderWeight(b));
+        const unitRowEntries = shiftKeys.map((sk) => ({
+          rowKey: sk,
+          label: formatRowLabel(sk, uObj[sk], labelConfig),
+          dataObj: { ...(uObj[sk] || {}), unitKey: uk },
+        }));
+
+        const resUnit = analyzeTableMarkedCells(data, unitRowEntries, unitColumns);
+        if (resUnit.hasMarkedCells) anyMarked = true;
+
+        unitBlocksData.push({
+          unitKey: uk,
+          unitTitle: `UNIT ${uk.toUpperCase()}`,
+          rowEntries: unitRowEntries,
+          rowMarksMap: resUnit.rowMarksMap,
+        });
+      });
+
+      sheetMaxCols = unitColumns.length + 1;
+      const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+      // Title Banner
+      const titleRow = sheet.getRow(1);
+      titleRow.height = 30;
+      const titleCell = titleRow.getCell(1);
+      titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+      applyTitleStyle(titleCell);
+      sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+      unitBlocksData.forEach((ub) => {
+        const resBlock = renderTableBlock(
+          sheet,
+          nextRow,
+          ub.unitTitle,
+          ub.rowEntries,
+          unitColumns,
+          labelConfig,
+          titleMergeCols,
+          ub.rowMarksMap
+        );
+        nextRow = resBlock.nextRow;
+      });
+
+      if (anyMarked) {
+        renderLegend(sheet, nextRow);
+        nextRow += 2;
+      }
+    }
+    // ── Pattern 2: Readings Array (Sewer Water, BFW, DM Water, CaCl2, Cooling Water, etc.) ──
+    else if (Array.isArray(data.readings) && data.readings.length > 0) {
+      const hasNestedGroups = data.readings.some(
+        (item) => item && typeof item === 'object' && Object.entries(item).some(
+          ([k, v]) => !METADATA_KEYS.has(k) && v && typeof v === 'object' && !Array.isArray(v)
+        )
+      );
+
+      let columns = [];
+      let rowEntries = [];
+
+      if (hasNestedGroups) {
+        // Sewer Water Analysis: group order as first appear (sec200, sec400, finalOutlet), params in first-seen order
+        const orderedGroups = [];
+        const groupParamsMap = new Map();
+
+        data.readings.forEach((item) => {
+          if (!item || typeof item !== 'object') return;
+          Object.entries(item).forEach(([k, v]) => {
+            if (METADATA_KEYS.has(k)) return;
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              if (!groupParamsMap.has(k)) {
+                orderedGroups.push(k);
+                groupParamsMap.set(k, []);
+              }
+              const existingParams = groupParamsMap.get(k);
+              Object.keys(v).forEach((pk) => {
+                if (!METADATA_KEYS.has(pk) && !existingParams.includes(pk)) {
+                  existingParams.push(pk);
+                }
+              });
+            }
+          });
+        });
+
+        orderedGroups.forEach((grp) => {
+          const params = groupParamsMap.get(grp);
+          params.forEach((pk) => {
+            const colKey = `${grp}__${pk}`;
+            columns.push({
+              key: colKey,
+              label: formatCompoundLabel(colKey),
+              unit: null,
+              range: null,
+            });
+          });
+        });
+
+        rowEntries = data.readings.map((item, idx) => {
+          const flatDataObj = { id: item.id, time: item.time };
+          orderedGroups.forEach((grp) => {
+            const grpObj = item[grp] || {};
+            groupParamsMap.get(grp).forEach((pk) => {
+              flatDataObj[`${grp}__${pk}`] = (grpObj[pk] !== undefined && grpObj[pk] !== null && grpObj[pk] !== '')
+                ? grpObj[pk]
+                : '*';
+            });
+          });
+
+          return {
+            rowKey: item.time || item.id || String(idx),
+            label: item.time || formatRowLabel(idx, item, labelConfig),
+            dataObj: flatDataObj,
+          };
+        });
+      } else {
+        const allKeys = new Set();
+        data.readings.forEach((item) => {
+          if (item && typeof item === 'object') {
+            Object.keys(item).forEach((k) => {
+              if (!METADATA_KEYS.has(k)) allKeys.add(k);
+            });
+          }
+        });
+        const columnKeys = Array.from(allKeys);
+        columns = resolveColumns(columnKeys, labelConfig);
+
+        rowEntries = data.readings.map((item, idx) => ({
+          rowKey: String(idx),
+          label: formatRowLabel(idx, item, labelConfig),
+          dataObj: item,
+        }));
+      }
 
       const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
       sheetMaxCols = columns.length + 1;
@@ -1167,59 +1494,187 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
         nextRow += 2;
       }
     }
-    // ── Pattern 3: Generalized Keyed Rows (data.rows, data.shifts, data.shiftRows, data.timeRows, or row objects in data) ──
+    // ── Pattern 3: Generalized Keyed Rows (Lean Analysis, SA Tanks, CO2 Weekly, TK 204, Brine, etc.) ──
     else {
       const rowContainer = findRowContainer(data);
 
       if (rowContainer && typeof rowContainer === 'object' && Object.keys(rowContainer).length > 0) {
-        // Collect all column keys ONLY from inside row objects
-        const allKeys = new Set();
-        const sortedRowKeys = Object.keys(rowContainer).sort((a, b) => getRowOrderWeight(a) - getRowOrderWeight(b));
+        const rowKeys = Object.keys(rowContainer);
+        const hasDay = rowKeys.some((k) => k.toLowerCase() === 'day');
+        const hasShift = rowKeys.some((k) => ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].includes(k.toLowerCase()));
+        const isLeanShiftDay = hasDay && hasShift;
 
-        sortedRowKeys.forEach((rk) => {
-          const rowObj = rowContainer[rk];
-          if (rowObj && typeof rowObj === 'object') {
-            Object.keys(rowObj).forEach((k) => {
-              if (!METADATA_KEYS.has(k)) allKeys.add(k);
-            });
+        if (isLeanShiftDay) {
+          isDualBlock = true;
+          const shiftOrder = ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'];
+          const shiftKeys = shiftOrder.filter((k) => rowContainer[k]);
+          const dayKeys = rowKeys.filter((k) => k.toLowerCase() === 'day');
+          const otherKeys = rowKeys.filter((k) => !shiftKeys.includes(k) && !dayKeys.includes(k));
+
+          // 1. Shift Analysis Block
+          const shiftParamKeys = [];
+          shiftKeys.forEach((sk) => {
+            const sObj = rowContainer[sk];
+            if (sObj && typeof sObj === 'object') {
+              Object.keys(sObj).forEach((pk) => {
+                if (!METADATA_KEYS.has(pk) && !shiftParamKeys.includes(pk)) {
+                  shiftParamKeys.push(pk);
+                }
+              });
+            }
+          });
+          const shiftColumns = resolveColumns(shiftParamKeys, labelConfig);
+          const shiftRows = shiftKeys.map((sk) => ({
+            rowKey: sk,
+            label: formatRowLabel(sk, rowContainer[sk], labelConfig),
+            dataObj: rowContainer[sk],
+          }));
+
+          // 2. Day Routine Block
+          const dayParamKeys = [];
+          dayKeys.forEach((dk) => {
+            const dObj = rowContainer[dk];
+            if (dObj && typeof dObj === 'object') {
+              Object.keys(dObj).forEach((pk) => {
+                if (!METADATA_KEYS.has(pk) && !dayParamKeys.includes(pk)) {
+                  dayParamKeys.push(pk);
+                }
+              });
+            }
+          });
+          const dayColumns = resolveColumns(dayParamKeys, labelConfig);
+          const dayRows = dayKeys.map((dk) => ({
+            rowKey: dk,
+            label: formatRowLabel(dk, rowContainer[dk], labelConfig),
+            dataObj: rowContainer[dk],
+          }));
+
+          const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns);
+          const resDay = analyzeTableMarkedCells(data, dayRows, dayColumns);
+          let hasMarkedCells = resShift.hasMarkedCells || resDay.hasMarkedCells;
+
+          sheetMaxCols = Math.max(shiftColumns.length + 1, dayColumns.length + 1);
+          const titleMergeCols = Math.max(sheetMaxCols, 6);
+
+          // Title Banner
+          const titleRow = sheet.getRow(1);
+          titleRow.height = 30;
+          const titleCell = titleRow.getCell(1);
+          titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+          applyTitleStyle(titleCell);
+          sheet.mergeCells(1, 1, 1, titleMergeCols);
+
+          const res1 = renderTableBlock(
+            sheet,
+            nextRow,
+            'SHIFT ANALYSIS',
+            shiftRows,
+            shiftColumns,
+            labelConfig,
+            titleMergeCols,
+            resShift.rowMarksMap
+          );
+          nextRow = res1.nextRow;
+
+          const res2 = renderTableBlock(
+            sheet,
+            nextRow,
+            'DAY ROUTINE',
+            dayRows,
+            dayColumns,
+            labelConfig,
+            titleMergeCols,
+            resDay.rowMarksMap
+          );
+          nextRow = res2.nextRow;
+
+          // 3. Other Blocks if any other keys exist
+          otherKeys.forEach((ok) => {
+            const oParamKeys = [];
+            const oObj = rowContainer[ok];
+            if (oObj && typeof oObj === 'object') {
+              Object.keys(oObj).forEach((pk) => {
+                if (!METADATA_KEYS.has(pk) && !oParamKeys.includes(pk)) {
+                  oParamKeys.push(pk);
+                }
+              });
+            }
+            const oColumns = resolveColumns(oParamKeys, labelConfig);
+            const oRows = [{
+              rowKey: ok,
+              label: formatRowLabel(ok, rowContainer[ok], labelConfig),
+              dataObj: rowContainer[ok],
+            }];
+            const resOther = analyzeTableMarkedCells(data, oRows, oColumns);
+            if (resOther.hasMarkedCells) hasMarkedCells = true;
+            const resO = renderTableBlock(
+              sheet,
+              nextRow,
+              ok.toUpperCase(),
+              oRows,
+              oColumns,
+              labelConfig,
+              titleMergeCols,
+              resOther.rowMarksMap
+            );
+            nextRow = resO.nextRow;
+          });
+
+          if (hasMarkedCells) {
+            renderLegend(sheet, nextRow);
+            nextRow += 2;
           }
-        });
-        const columnKeys = Array.from(allKeys);
-        const columns = resolveColumns(columnKeys, labelConfig);
+        } else {
+          // Standard Single-Block Keyed Rows
+          // Collect all column keys ONLY from inside row objects
+          const allKeys = new Set();
+          const sortedRowKeys = Object.keys(rowContainer).sort((a, b) => getRowOrderWeight(a) - getRowOrderWeight(b));
 
-        const rowEntries = sortedRowKeys.map((rk) => ({
-          rowKey: rk,
-          label: formatRowLabel(rk, rowContainer[rk], labelConfig),
-          dataObj: rowContainer[rk],
-        }));
+          sortedRowKeys.forEach((rk) => {
+            const rowObj = rowContainer[rk];
+            if (rowObj && typeof rowObj === 'object') {
+              Object.keys(rowObj).forEach((k) => {
+                if (!METADATA_KEYS.has(k)) allKeys.add(k);
+              });
+            }
+          });
+          const columnKeys = Array.from(allKeys);
+          const columns = resolveColumns(columnKeys, labelConfig);
 
-        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
-        sheetMaxCols = columns.length + 1;
-        const titleMergeCols = Math.max(sheetMaxCols, 6);
+          const rowEntries = sortedRowKeys.map((rk) => ({
+            rowKey: rk,
+            label: formatRowLabel(rk, rowContainer[rk], labelConfig),
+            dataObj: rowContainer[rk],
+          }));
 
-        const titleRow = sheet.getRow(1);
-        titleRow.height = 30;
-        const titleCell = titleRow.getCell(1);
-        titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
-        applyTitleStyle(titleCell);
-        sheet.mergeCells(1, 1, 1, titleMergeCols);
+          const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+          sheetMaxCols = columns.length + 1;
+          const titleMergeCols = Math.max(sheetMaxCols, 6);
 
-        const res = renderTableBlock(
-          sheet,
-          nextRow,
-          null,
-          rowEntries,
-          columns,
-          labelConfig,
-          titleMergeCols,
-          analysisRes.rowMarksMap
-        );
-        sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
-        nextRow = res.nextRow;
+          const titleRow = sheet.getRow(1);
+          titleRow.height = 30;
+          const titleCell = titleRow.getCell(1);
+          titleCell.value = `${normPlant} PLANT — ${displayTitle} | DATE: ${date}`;
+          applyTitleStyle(titleCell);
+          sheet.mergeCells(1, 1, 1, titleMergeCols);
 
-        if (analysisRes.hasMarkedCells) {
-          renderLegend(sheet, nextRow);
-          nextRow += 2;
+          const res = renderTableBlock(
+            sheet,
+            nextRow,
+            null,
+            rowEntries,
+            columns,
+            labelConfig,
+            titleMergeCols,
+            analysisRes.rowMarksMap
+          );
+          sheetMaxCols = Math.max(sheetMaxCols, res.colsCount);
+          nextRow = res.nextRow;
+
+          if (analysisRes.hasMarkedCells) {
+            renderLegend(sheet, nextRow);
+            nextRow += 2;
+          }
         }
       }
       // ── Pattern 5: Generic Key-Value Fallback (if data is flat dictionary of primitive parameters) ──
