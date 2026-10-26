@@ -300,6 +300,76 @@ const ReportsPage = () => {
     }
   };
 
+  // ── Overall Master Report Download (super_admin, company_admin, admin only) ──
+  const [downloadingOverall, setDownloadingOverall] = useState(false);
+
+  const handleDownloadOverallReport = async () => {
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate).trim())) {
+      showToast('Please select a valid "from" date (YYYY-MM-DD) in Start Date', 'error');
+      return;
+    }
+
+    const fromDateStr = String(startDate).trim();
+    const toDateStr = endDate && /^\d{4}-\d{2}-\d{2}$/.test(String(endDate).trim())
+      ? String(endDate).trim()
+      : fromDateStr;
+
+    if (fromDateStr > toDateStr) {
+      showToast('Start Date ("from") must be earlier than or equal to End Date ("to")', 'error');
+      return;
+    }
+
+    const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 31) {
+      showToast('Date range cannot exceed 31 days', 'error');
+      return;
+    }
+
+    try {
+      setDownloadingOverall(true);
+      showToast(`Generating Overall Master Report for ${fromDateStr} to ${toDateStr}...`, 'info');
+
+      const response = await api.get('/reports/generic-overall', {
+        params: { from: fromDateStr, to: toDateStr },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `OVERALL_Report_${fromDateStr}_${toDateStr}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast('Overall Master Report downloaded successfully!', 'success');
+    } catch (err) {
+      let errorMessage = 'Failed to download overall report.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) {
+            errorMessage = json.message;
+          }
+        } catch (parseErr) {
+          console.warn('Could not parse error blob as JSON:', parseErr);
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      showToast(errorMessage, 'error');
+    } finally {
+      setDownloadingOverall(false);
+    }
+  };
+
   // Aggregate statistics
   const totalOutput = reports.reduce((sum, r) => sum + (r.metrics?.totalOutputTons || 0), 0);
   const avgEfficiency =
@@ -352,7 +422,7 @@ const ReportsPage = () => {
           <button
             id="btn-download-generic-report"
             onClick={handleDownloadGenericReport}
-            disabled={downloadingGeneric || exporting || downloadingAllPlants}
+            disabled={downloadingGeneric || exporting || downloadingAllPlants || downloadingOverall}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
             title="Download dynamic multi-sheet plant management report (.xlsx)"
           >
@@ -369,7 +439,7 @@ const ReportsPage = () => {
             <button
               id="btn-download-all-plants-report"
               onClick={handleDownloadAllPlantsReport}
-              disabled={downloadingAllPlants || downloadingGeneric || exporting}
+              disabled={downloadingAllPlants || downloadingGeneric || exporting || downloadingOverall}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-purple-600 hover:bg-purple-700 transition shadow-sm shadow-purple-600/20 disabled:opacity-50 cursor-pointer"
               title="Download combined Master report for all plants (ACL, SA, OFFSITE, CO2) with SUMMARY sheet"
             >
@@ -379,6 +449,24 @@ const ReportsPage = () => {
                 <Download className="w-4 h-4" />
               )}
               <span>{downloadingAllPlants ? 'Downloading All Plants...' : 'Download All Plants Report'}</span>
+            </button>
+          )}
+
+          {/* Download Overall Master Report Button (super_admin, company_admin, admin only) */}
+          {canDownloadAllPlants && (
+            <button
+              id="btn-download-overall-report"
+              onClick={handleDownloadOverallReport}
+              disabled={downloadingOverall || downloadingAllPlants || downloadingGeneric || exporting}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-teal-600 hover:bg-teal-700 transition shadow-sm shadow-teal-600/20 disabled:opacity-50 cursor-pointer"
+              title="Download multi-day Overall Report (manager shift sheet) for all plants"
+            >
+              {downloadingOverall ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{downloadingOverall ? 'Downloading Overall...' : 'Download Overall Report'}</span>
             </button>
           )}
         </div>

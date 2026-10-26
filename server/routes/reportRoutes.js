@@ -186,6 +186,89 @@ router.get('/generic-all', async (req, res) => {
   }
 });
 
+/**
+ * @desc    Generate and download multi-day Overall Report (manager shift sheet) for all plants
+ * @route   GET /api/reports/generic-overall?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * @access  Private (super_admin, company_admin, admin only)
+ */
+router.get('/generic-overall', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    // 1. Mandatory date parameters and strict YYYY-MM-DD validation
+    if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(String(from).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or missing "from" date. Expected YYYY-MM-DD.',
+      });
+    }
+
+    if (!to || !/^\d{4}-\d{2}-\d{2}$/.test(String(to).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or missing "to" date. Expected YYYY-MM-DD.',
+      });
+    }
+
+    const fromDateStr = String(from).trim();
+    const toDateStr = String(to).trim();
+
+    if (fromDateStr > toDateStr) {
+      return res.status(400).json({
+        success: false,
+        message: '"from" date must be earlier than or equal to "to" date.',
+      });
+    }
+
+    const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 31) {
+      return res.status(400).json({
+        success: false,
+        message: 'Date range cannot exceed 31 days.',
+      });
+    }
+
+    // 2. Role Authorization: super_admin, company_admin, admin only
+    const allowedRoles = ['super_admin', 'company_admin', 'admin'];
+    const userRole = req.user?.role;
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Generating the Overall Report requires super_admin, company_admin, or admin privileges.',
+      });
+    }
+
+    // 3. Generate Overall Report workbook
+    const { generateOverallReportWorkbook } = require('../services/genericPlantReportService');
+    const { workbook, totalRecordCount } = await generateOverallReportWorkbook({
+      from: fromDateStr,
+      to: toDateStr,
+      user: req.user,
+    });
+
+    if (!workbook || totalRecordCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No analysis records found for any plant between "${fromDateStr}" and "${toDateStr}".`,
+      });
+    }
+
+    // 4. Stream download directly to client
+    const filename = `OVERALL_Report_${fromDateStr}_${toDateStr}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[Overall Report Error]:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate overall report: ' + err.message,
+    });
+  }
+});
+
 router.route('/')
   .get(getReports)
   .post(createReport);
