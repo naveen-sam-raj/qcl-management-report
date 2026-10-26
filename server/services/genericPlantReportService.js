@@ -277,43 +277,488 @@ function getRowOrderWeight(key) {
 }
 
 /**
+ * Extract numerical timestamp for deterministic chronological sorting (oldest to newest)
+ */
+function getRecordTimestamp(rec) {
+  if (!rec) return 0;
+  const d = rec.data || {};
+  const upd = rec.updatedAt || d.updatedAt;
+  if (upd) {
+    const t = new Date(upd).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const saved = rec.savedAt || d.savedAt;
+  if (saved) {
+    const t = new Date(saved).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const cr = rec.createdAt || d.createdAt;
+  if (cr) {
+    const t = new Date(cr).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const sub = rec.submittedAt || d.submittedAt;
+  if (sub) {
+    const t = new Date(sub).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const idStr = String(rec._id || d._id || d.id || '');
+  if (/^[0-9a-fA-F]{24}$/.test(idStr)) {
+    const t = parseInt(idStr.substring(0, 8), 16) * 1000;
+    if (!isNaN(t)) return t;
+  }
+  return 0;
+}
+
+/**
+ * Checks whether a value is non-empty (not null, undefined, '', NaN)
+ */
+function isNonEmptyValue(val) {
+  if (val === null || val === undefined || val === '') return false;
+  if (typeof val === 'number' && Number.isNaN(val)) return false;
+  return true;
+}
+
+/**
+ * Log cell-level conflicts capped at 20 warnings per analysis
+ */
+function logCellConflict(atName, recDate, rowKey, colKey, olderVal, newerVal, olderId, newerId, context) {
+  if (context.warningCount < 20) {
+    context.warningCount++;
+    console.warn(
+      `[Report Merge Conflict] ${atName} (${recDate}) [Row: ${rowKey}, Col: ${colKey}]: Newer doc (${newerId}) value "${newerVal}" overrides older doc (${olderId}) value "${olderVal}".`
+    );
+    if (context.warningCount === 20) {
+      console.warn(
+        `[Report Merge Conflict] ${atName} (${recDate}): Reached 20 logged conflict warnings. Further conflicts for this analysis will be resolved silently.`
+      );
+    }
+  }
+}
+
+/**
+ * Deep merges two row objects cell by cell:
+ * - A non-empty value from newerRow overrides olderRow
+ * - An empty value from newerRow never overwrites a non-empty olderRow value
+ * - Retains keys present only in olderRow
+ */
+function mergeRowObject(olderRow, newerRow, atName, recDate, rowKey, olderId, newerId, context) {
+  if (!olderRow && !newerRow) return {};
+  if (!olderRow) return { ...newerRow };
+  if (!newerRow) return { ...olderRow };
+
+  const merged = { ...olderRow };
+  for (const [colKey, nVal] of Object.entries(newerRow)) {
+    if (METADATA_KEYS.has(colKey)) {
+      if (nVal !== undefined) merged[colKey] = nVal;
+      continue;
+    }
+    const oVal = olderRow[colKey];
+    if (isNonEmptyValue(nVal)) {
+      if (isNonEmptyValue(oVal)) {
+        let isDiff = false;
+        if (typeof nVal === 'object' || typeof oVal === 'object') {
+          if (nVal && typeof nVal === 'object' && !Array.isArray(nVal) && oVal && typeof oVal === 'object' && !Array.isArray(oVal)) {
+            merged[colKey] = mergeRowObject(oVal, nVal, atName, recDate, `${rowKey}.${colKey}`, olderId, newerId, context);
+            continue;
+          }
+          isDiff = JSON.stringify(oVal) !== JSON.stringify(nVal);
+        } else {
+          isDiff = !isNaN(Number(oVal)) && !isNaN(Number(nVal))
+            ? Math.abs(Number(oVal) - Number(nVal)) > EPSILON
+            : String(oVal).trim() !== String(nVal).trim();
+        }
+        if (isDiff) {
+          logCellConflict(atName, recDate, rowKey, colKey, oVal, nVal, olderId, newerId, context);
+        }
+      }
+      merged[colKey] = nVal;
+    } else {
+      if (isNonEmptyValue(oVal)) {
+        merged[colKey] = oVal;
+      } else {
+        merged[colKey] = nVal;
+      }
+    }
+  }
+  return merged;
+}
+
+/**
+ * Merges keyed row containers (e.g. rows, shifts, shiftRows, timeRows)
+ */
+function mergeKeyedRowsContainer(olderContainer, newerContainer, atName, recDate, olderId, newerId, context) {
+  if (!olderContainer && !newerContainer) return {};
+  if (!olderContainer) return { ...newerContainer };
+  if (!newerContainer) return { ...olderContainer };
+
+  const merged = {};
+  const allRowKeys = new Set([
+    ...Object.keys(olderContainer).filter((k) => !METADATA_KEYS.has(k)),
+    ...Object.keys(newerContainer).filter((k) => !METADATA_KEYS.has(k)),
+  ]);
+
+  for (const rk of allRowKeys) {
+    const oRow = olderContainer[rk];
+    const nRow = newerContainer[rk];
+    merged[rk] = mergeRowObject(oRow, nRow, atName, recDate, rk, olderId, newerId, context);
+  }
+  return merged;
+}
+
+/**
+ * Resolves a stable key for a readings array item
+ */
+function getReadingItemKey(item, idx) {
+  if (!item || typeof item !== 'object') return `idx_${idx}`;
+  if (item.time && String(item.time).trim() !== '') return String(item.time).trim();
+  if (item.id && String(item.id).trim() !== '') return String(item.id).trim();
+  if (item.sample && String(item.sample).trim() !== '') return String(item.sample).trim();
+  return `idx_${idx}`;
+}
+
+/**
+ * Merges arrays of readings/hourly items by stable key (time, id, sample)
+ */
+function mergeReadingsArray(olderArr, newerArr, atName, recDate, olderId, newerId, context) {
+  if (!Array.isArray(olderArr) && !Array.isArray(newerArr)) return [];
+  if (!Array.isArray(olderArr)) return [...newerArr];
+  if (!Array.isArray(newerArr)) return [...olderArr];
+
+  const itemMap = new Map();
+  const keyOrder = [];
+
+  olderArr.forEach((item, idx) => {
+    const k = getReadingItemKey(item, idx);
+    keyOrder.push(k);
+    itemMap.set(k, { ...item });
+  });
+
+  newerArr.forEach((nItem, idx) => {
+    const k = getReadingItemKey(nItem, idx);
+    if (!itemMap.has(k)) {
+      keyOrder.push(k);
+      itemMap.set(k, { ...nItem });
+    } else {
+      const oItem = itemMap.get(k);
+      const mergedItem = mergeRowObject(oItem, nItem, atName, recDate, k, olderId, newerId, context);
+      itemMap.set(k, mergedItem);
+    }
+  });
+
+  const mergedList = keyOrder.map((k) => itemMap.get(k));
+  const hasTime = mergedList.some((m) => m && m.time);
+  if (hasTime) {
+    mergedList.sort((a, b) => {
+      const wA = getRowOrderWeight(a?.time || '');
+      const wB = getRowOrderWeight(b?.time || '');
+      if (wA !== wB) return wA - wB;
+      return String(a?.time || '').localeCompare(String(b?.time || ''));
+    });
+  }
+  return mergedList;
+}
+
+/**
  * Merges multiple records of the same analysisType into a single unified record
+ * using deterministic, cell-by-cell non-empty precedence (newest document wins).
  */
 function mergeRecordsForAnalysis(records) {
   if (!records || records.length === 0) return null;
-  if (records.length === 1) return records[0];
+  if (records.length === 1) {
+    const single = { ...records[0] };
+    single.mergedCount = 1;
+    return single;
+  }
 
-  const primary = { ...records[0] };
-  const mergedData = { ...(primary.data || {}) };
+  // 1. Sort records chronologically oldest to newest
+  const sorted = [...records].sort((a, b) => {
+    const tA = getRecordTimestamp(a);
+    const tB = getRecordTimestamp(b);
+    if (tA !== tB) return tA - tB;
+    const idA = String(a._id || a.id || '');
+    const idB = String(b._id || b.id || '');
+    return idA.localeCompare(idB);
+  });
 
-  for (let i = 1; i < records.length; i++) {
-    const rec = records[i];
-    const d = rec.data || {};
+  const newestDoc = sorted[sorted.length - 1];
+  const atName = newestDoc.analysisType || 'Unknown Analysis';
+  const recDate = newestDoc.date || '';
+  const docIds = sorted.map((r) => String(r._id || r.id || 'no_id')).join(', ');
 
-    // 8. Merge editedFields safely
-    if (d.editedFields && typeof d.editedFields === 'object') {
-      if (Array.isArray(d.editedFields)) {
-        mergedData.editedFields = [
-          ...(Array.isArray(mergedData.editedFields) ? mergedData.editedFields : []),
-          ...d.editedFields,
-        ];
-      } else {
-        mergedData.editedFields = { ...(mergedData.editedFields || {}), ...d.editedFields };
+  console.warn(
+    `[Report Merge] Merging ${sorted.length} duplicate documents for analysis "${atName}" on date "${recDate}". Document IDs: [${docIds}]`
+  );
+
+  const context = { warningCount: 0 };
+  const primary = { ...newestDoc };
+  primary.mergedCount = sorted.length;
+
+  let mergedData = { ...(sorted[0].data || {}) };
+
+  // Helper to map legacy shift name (e.g. 'I SHIFT') to shift key ('shift1')
+  // Helper to map legacy shift name (e.g. 'I SHIFT', 'II SHIFT') to shift key ('shift1', 'shift2')
+  const mapLegacyShift = (sName) => {
+    const lower = String(sName || '').toLowerCase().trim();
+    if (/\biii(\s*shift)?\b/i.test(lower) || lower === 's3' || lower === 'shift3') return 'shift3';
+    if (/\bii(\s*shift)?\b/i.test(lower) || lower === 's2' || lower === 'shift2') return 'shift2';
+    if (/\bi(\s*shift)?\b/i.test(lower) || lower === 's1' || lower === 'shift1') return 'shift1';
+    return null;
+  };
+
+  let hasInfilledLegacyShift = false;
+  // If oldest doc has legacy shift & parameters, infill into rows
+  if (sorted[0].shift && sorted[0].data?.parameters && !sorted[0].data?.rows) {
+    const sk = mapLegacyShift(sorted[0].shift);
+    if (sk) {
+      mergedData.rows = { [sk]: { ...sorted[0].data.parameters } };
+      hasInfilledLegacyShift = true;
+    }
+  }
+
+  // Iteratively merge from index 1 to sorted.length - 1
+  for (let i = 1; i < sorted.length; i++) {
+    const olderDoc = sorted[i - 1];
+    const newerDoc = sorted[i];
+    const olderId = String(olderDoc._id || olderDoc.id || `idx_${i - 1}`);
+    const newerId = String(newerDoc._id || newerDoc.id || `idx_${i}`);
+    const nData = newerDoc.data || {};
+
+    // 1. Legacy per-shift document infill (e.g. r.shift = 'I SHIFT' with data.parameters)
+    if (newerDoc.shift && nData.parameters && !nData.rows) {
+      const sk = mapLegacyShift(newerDoc.shift);
+      if (sk) {
+        if (!mergedData.rows) mergedData.rows = {};
+        mergedData.rows[sk] = mergeRowObject(
+          mergedData.rows[sk] || {},
+          nData.parameters,
+          atName,
+          recDate,
+          sk,
+          olderId,
+          newerId,
+          context
+        );
+        hasInfilledLegacyShift = true;
       }
     }
-    // 9. Merge editAuditHistory safely
-    if (Array.isArray(d.editAuditHistory)) {
-      mergedData.editAuditHistory = [...(mergedData.editAuditHistory || []), ...d.editAuditHistory];
+
+    // 2. Chemical & BSS (ACL Product)
+    if (nData.chemical || mergedData.chemical || nData.bss || mergedData.bss) {
+      if (nData.chemical || mergedData.chemical) {
+        mergedData.chemical = mergeRowObject(
+          mergedData.chemical || {},
+          nData.chemical || {},
+          atName,
+          recDate,
+          'chemical',
+          olderId,
+          newerId,
+          context
+        );
+      }
+      if (nData.bss || mergedData.bss) {
+        mergedData.bss = mergeRowObject(
+          mergedData.bss || {},
+          nData.bss || {},
+          atName,
+          recDate,
+          'bss',
+          olderId,
+          newerId,
+          context
+        );
+      }
+    }
+
+    // 3. Units / Towers (T 401 nested units)
+    if (nData.units || mergedData.units || nData.towers || mergedData.towers) {
+      const containerKey = nData.units || mergedData.units ? 'units' : 'towers';
+      const oContainer = mergedData[containerKey] || {};
+      const nContainer = nData[containerKey] || {};
+      const allUnitKeys = new Set([
+        ...Object.keys(oContainer).filter((k) => !METADATA_KEYS.has(k)),
+        ...Object.keys(nContainer).filter((k) => !METADATA_KEYS.has(k)),
+      ]);
+      const mergedUnits = {};
+      for (const uk of allUnitKeys) {
+        mergedUnits[uk] = mergeKeyedRowsContainer(
+          oContainer[uk] || {},
+          nContainer[uk] || {},
+          atName,
+          recDate,
+          olderId,
+          newerId,
+          context
+        );
+      }
+      mergedData[containerKey] = mergedUnits;
+    }
+
+    // 4. ShiftAnalysis & HourlyReadings (LSA Bagging)
+    if (
+      nData.shiftAnalysis ||
+      mergedData.shiftAnalysis ||
+      nData.hourlyReadings ||
+      mergedData.hourlyReadings ||
+      nData.hourly ||
+      mergedData.hourly
+    ) {
+      if (nData.shiftAnalysis || mergedData.shiftAnalysis) {
+        mergedData.shiftAnalysis = mergeKeyedRowsContainer(
+          mergedData.shiftAnalysis || {},
+          nData.shiftAnalysis || {},
+          atName,
+          recDate,
+          olderId,
+          newerId,
+          context
+        );
+      }
+      const oHourly = mergedData.hourlyReadings || mergedData.hourly;
+      const nHourly = nData.hourlyReadings || nData.hourly;
+      if (oHourly || nHourly) {
+        const mergedHourly = mergeReadingsArray(oHourly, nHourly, atName, recDate, olderId, newerId, context);
+        if (nData.hourlyReadings || mergedData.hourlyReadings) {
+          mergedData.hourlyReadings = mergedHourly;
+        } else {
+          mergedData.hourly = mergedHourly;
+        }
+      }
+    }
+
+    // 5. Readings Array (Sewer Water, BFW, Cooling Water, DM Water, Distiller Waste, CaCl2)
+    if (Array.isArray(nData.readings) || Array.isArray(mergedData.readings)) {
+      mergedData.readings = mergeReadingsArray(
+        mergedData.readings,
+        nData.readings,
+        atName,
+        recDate,
+        olderId,
+        newerId,
+        context
+      );
+    }
+
+    // 6. Keyed Rows Containers: rows, shifts, shiftRows, timeRows
+    const keyedContainers = ['rows', 'shifts', 'shiftRows', 'timeRows'];
+    for (const kc of keyedContainers) {
+      if (nData[kc] || mergedData[kc]) {
+        mergedData[kc] = mergeKeyedRowsContainer(
+          mergedData[kc] || {},
+          nData[kc] || {},
+          atName,
+          recDate,
+          olderId,
+          newerId,
+          context
+        );
+      }
+    }
+
+    // 7. Flat parameters object (Raw Salt, etc. - skip if infilled from legacy shift document)
+    if (!hasInfilledLegacyShift && (nData.parameters || mergedData.parameters)) {
+      mergedData.parameters = mergeRowObject(
+        mergedData.parameters || {},
+        nData.parameters || {},
+        atName,
+        recDate,
+        'parameters',
+        olderId,
+        newerId,
+        context
+      );
+    }
+
+    // 8. Direct row keys on data (e.g. shift1, shift2, shift3, day, t07..t05, tk109, tk110, week)
+    const directRowKeys = Object.keys(nData).filter(
+      (k) =>
+        !METADATA_KEYS.has(k) &&
+        !keyedContainers.includes(k) &&
+        !['chemical', 'bss', 'units', 'towers', 'shiftAnalysis', 'hourlyReadings', 'hourly', 'readings', 'parameters'].includes(k) &&
+        isPlainRowObject(nData[k])
+    );
+    for (const drk of directRowKeys) {
+      mergedData[drk] = mergeRowObject(
+        mergedData[drk] || {},
+        nData[drk] || {},
+        atName,
+        recDate,
+        drk,
+        olderId,
+        newerId,
+        context
+      );
+    }
+
+    // 9. Flat primitives directly on data (fallback if not in sub-container)
+    const flatPrimitiveKeys = Object.keys(nData).filter(
+      (k) =>
+        !METADATA_KEYS.has(k) &&
+        !keyedContainers.includes(k) &&
+        !['chemical', 'bss', 'units', 'towers', 'shiftAnalysis', 'hourlyReadings', 'hourly', 'readings', 'parameters'].includes(k) &&
+        !directRowKeys.includes(k)
+    );
+    for (const fpk of flatPrimitiveKeys) {
+      const nVal = nData[fpk];
+      const oVal = mergedData[fpk];
+      if (typeof nVal !== 'object') {
+        if (isNonEmptyValue(nVal)) {
+          if (isNonEmptyValue(oVal) && String(oVal).trim() !== String(nVal).trim()) {
+            logCellConflict(atName, recDate, 'data', fpk, oVal, nVal, olderId, newerId, context);
+          }
+          mergedData[fpk] = nVal;
+        }
+      } else {
+        if (nVal !== null && !Array.isArray(nVal)) {
+          console.warn(
+            `[Report Merge Unrecognized Key] Analysis "${atName}" has unrecognized data key "${fpk}". Retaining newest document's value.`
+          );
+          mergedData[fpk] = nVal;
+        }
+      }
     }
   }
 
-  // Also pull edited fields/audit history from primary record root if present
-  if (primary.editedFields && !mergedData.editedFields) {
-    mergedData.editedFields = primary.editedFields;
+  if (hasInfilledLegacyShift && mergedData.parameters) {
+    delete mergedData.parameters;
   }
-  if (primary.editAuditHistory && !mergedData.editAuditHistory) {
-    mergedData.editAuditHistory = primary.editAuditHistory;
+
+  // 10. Merge editedFields (union) across all documents
+  let allEditedFields = {};
+  for (const doc of sorted) {
+    const ef = doc.data?.editedFields || doc.editedFields;
+    if (ef && typeof ef === 'object') {
+      if (Array.isArray(ef)) {
+        for (const item of ef) {
+          const k = typeof item === 'string' ? item : (item.field || item.key || item.paramKey || '');
+          if (k) allEditedFields[k] = true;
+        }
+      } else {
+        Object.assign(allEditedFields, ef);
+      }
+    }
   }
+  mergedData.editedFields = allEditedFields;
+
+  // 11. Merge editAuditHistory (union with de-duplication) across all documents
+  const seenAuditKeys = new Set();
+  const allAuditEntries = [];
+  for (const doc of sorted) {
+    const ah = doc.data?.editAuditHistory || doc.editAuditHistory;
+    if (Array.isArray(ah)) {
+      for (const entry of ah) {
+        if (!entry || typeof entry !== 'object') continue;
+        const tsStr = entry.timestamp ? new Date(entry.timestamp).toISOString() : '';
+        const auditKey = `${entry.paramKey || ''}|${entry.shiftKey || ''}|${entry.oldValue ?? ''}|${entry.newValue ?? ''}|${tsStr}`;
+        if (!seenAuditKeys.has(auditKey)) {
+          seenAuditKeys.add(auditKey);
+          allAuditEntries.push(entry);
+        }
+      }
+    }
+  }
+  mergedData.editAuditHistory = allAuditEntries;
 
   primary.data = mergedData;
   return primary;
@@ -1706,6 +2151,16 @@ function renderAnalysisSheet({
     }
   }
 
+  // Merge note at the bottom of the sheet if merged from multiple records
+  if (rec.mergedCount > 1) {
+    const noteRow = sheet.getRow(nextRow);
+    noteRow.height = 18;
+    const noteCell = noteRow.getCell(1);
+    noteCell.value = `Merged from ${rec.mergedCount} records`;
+    noteCell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } };
+    nextRow += 2;
+  }
+
   // Freeze panes:
   // - Two-block sheets: no freeze
   // - Single-block sheets:
@@ -1746,6 +2201,7 @@ function renderAnalysisSheet({
     edCount: totalEd,
     hasConfiguredRanges: anyRangeConfigured,
     hasMarkedCells: hasMarked,
+    mergedCount: rec.mergedCount || 1,
   };
 }
 
@@ -1783,20 +2239,20 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
   // Fetch all matching records
   const records = await PlantAnalysisRecord.find(query).lean();
 
-  // 2. Fallbacks for ACL Pure Salt and Pure Salt Sieve
+  // 2. Fallbacks for ACL Pure Salt and Pure Salt Sieve (merge with PlantAnalysisRecord if both exist)
   if (normPlant === 'ACL') {
-    const hasPureSalt = records.some((r) => (r.analysisType || '').toLowerCase().includes('pure salt analysis'));
-    const hasPureSaltSieve = records.some((r) => (r.analysisType || '').toLowerCase().includes('pure salt sieve'));
-
     const fallbackCompanyQuery = user && user.role !== 'super_admin' && (user.company?._id || user.company)
       ? { $or: [{ company: user.company?._id || user.company }, { company: null }] }
       : {};
 
-    if (!hasPureSalt && PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
+    if (PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
       const queryRes = PureSaltAnalysis.findOne({ date, ...fallbackCompanyQuery });
       const pureSaltDoc = queryRes && typeof queryRes.lean === 'function' ? await queryRes.lean() : await queryRes;
-      if (pureSaltDoc) {
+      if (pureSaltDoc && !records.some((r) => String(r._id || '') === String(pureSaltDoc._id || ''))) {
         records.push({
+          _id: pureSaltDoc._id,
+          createdAt: pureSaltDoc.createdAt,
+          updatedAt: pureSaltDoc.updatedAt,
           plantCode: 'ACL',
           analysisType: 'Pure Salt Analysis',
           date,
@@ -1805,11 +2261,14 @@ async function generateGenericPlantReportWorkbook({ plant, date, user = null }) 
       }
     }
 
-    if (!hasPureSaltSieve && PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findOne === 'function') {
+    if (PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findOne === 'function') {
       const sieveQueryRes = PureSaltSieveAnalysis.findOne({ date, ...fallbackCompanyQuery });
       const sieveDoc = sieveQueryRes && typeof sieveQueryRes.lean === 'function' ? await sieveQueryRes.lean() : await sieveQueryRes;
-      if (sieveDoc) {
+      if (sieveDoc && !records.some((r) => String(r._id || '') === String(sieveDoc._id || ''))) {
         records.push({
+          _id: sieveDoc._id,
+          createdAt: sieveDoc.createdAt,
+          updatedAt: sieveDoc.updatedAt,
           plantCode: 'ACL',
           analysisType: 'Pure Salt Sieve Analysis',
           date,
@@ -1968,28 +2427,41 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
       // Single database query per plant using lean()
       const records = await PlantAnalysisRecord.find(query).lean();
 
-      // Legacy fallback for ACL Pure Salt & Sieve
+      // Legacy fallback for ACL Pure Salt & Sieve (merge with PlantAnalysisRecord if both exist)
       if (p === 'ACL') {
-        const hasPureSalt = records.some((r) => (r.analysisType || '').toLowerCase().includes('pure salt analysis'));
-        const hasPureSaltSieve = records.some((r) => (r.analysisType || '').toLowerCase().includes('pure salt sieve'));
-
         const fallbackCompanyQuery = user && user.role !== 'super_admin' && (user.company?._id || user.company)
           ? { $or: [{ company: user.company?._id || user.company }, { company: null }] }
           : {};
 
-        if (!hasPureSalt && PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
+        if (PureSaltAnalysis && typeof PureSaltAnalysis.findOne === 'function') {
           const queryRes = PureSaltAnalysis.findOne({ date, ...fallbackCompanyQuery });
           const pureSaltDoc = queryRes && typeof queryRes.lean === 'function' ? await queryRes.lean() : await queryRes;
-          if (pureSaltDoc) {
-            records.push({ plantCode: 'ACL', analysisType: 'Pure Salt Analysis', date, data: pureSaltDoc });
+          if (pureSaltDoc && !records.some((r) => String(r._id || '') === String(pureSaltDoc._id || ''))) {
+            records.push({
+              _id: pureSaltDoc._id,
+              createdAt: pureSaltDoc.createdAt,
+              updatedAt: pureSaltDoc.updatedAt,
+              plantCode: 'ACL',
+              analysisType: 'Pure Salt Analysis',
+              date,
+              data: pureSaltDoc,
+            });
           }
         }
 
-        if (!hasPureSaltSieve && PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findOne === 'function') {
+        if (PureSaltSieveAnalysis && typeof PureSaltSieveAnalysis.findOne === 'function') {
           const sieveQueryRes = PureSaltSieveAnalysis.findOne({ date, ...fallbackCompanyQuery });
           const sieveDoc = sieveQueryRes && typeof sieveQueryRes.lean === 'function' ? await sieveQueryRes.lean() : await sieveQueryRes;
-          if (sieveDoc) {
-            records.push({ plantCode: 'ACL', analysisType: 'Pure Salt Sieve Analysis', date, data: sieveDoc });
+          if (sieveDoc && !records.some((r) => String(r._id || '') === String(sieveDoc._id || ''))) {
+            records.push({
+              _id: sieveDoc._id,
+              createdAt: sieveDoc.createdAt,
+              updatedAt: sieveDoc.updatedAt,
+              plantCode: 'ACL',
+              analysisType: 'Pure Salt Sieve Analysis',
+              date,
+              data: sieveDoc,
+            });
           }
         }
       }
@@ -2077,7 +2549,7 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
   const titleCell = titleRow.getCell(1);
   titleCell.value = `ALL PLANTS REPORT | DATE: ${date}`;
   applyTitleStyle(titleCell);
-  summarySheet.mergeCells(1, 1, 1, 5);
+  summarySheet.mergeCells(1, 1, 1, 6);
 
   // Headers (Row 3)
   const headerRow = summarySheet.getRow(3);
@@ -2086,8 +2558,9 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
     { text: 'PLANT', col: 1 },
     { text: 'FULL ANALYSIS NAME', col: 2 },
     { text: 'SHEET NAME', col: 3 },
-    { text: 'OUT-OF-LIMIT CELLS', col: 4 },
-    { text: 'EDITED CELLS', col: 5 },
+    { text: 'DUPLICATE DOCS', col: 4 },
+    { text: 'OUT-OF-LIMIT CELLS', col: 5 },
+    { text: 'EDITED CELLS', col: 6 },
   ];
   headerCols.forEach(({ text, col }) => {
     const c = headerRow.getCell(col);
@@ -2117,22 +2590,28 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
         c3.value = sh.sheetName;
         applyDataCellStyle(c3, false);
 
-        // Col 4: Out-of-Limit Cells
+        // Col 4: Duplicate Docs (0 normally, or mergedCount - 1)
         const c4 = row.getCell(4);
+        const dupCount = sh.mergedCount > 1 ? (sh.mergedCount - 1) : 0;
+        c4.value = dupCount;
+        applyDataCellStyle(c4, false);
+
+        // Col 5: Out-of-Limit Cells
+        const c5 = row.getCell(5);
         if (!sh.hasConfiguredRanges) {
-          c4.value = 'range not configured';
-          applyDataCellStyle(c4, false, true); // gray text
+          c5.value = 'range not configured';
+          applyDataCellStyle(c5, false, true); // gray text
         } else {
-          c4.value = sh.oolCount;
+          c5.value = sh.oolCount;
           const isOol = sh.oolCount > 0;
-          applyDataCellStyle(c4, false, false, isOol, false);
+          applyDataCellStyle(c5, false, false, isOol, false);
         }
 
-        // Col 5: Edited Cells
-        const c5 = row.getCell(5);
-        c5.value = sh.edCount;
+        // Col 6: Edited Cells
+        const c6 = row.getCell(6);
+        c6.value = sh.edCount;
         const isEd = sh.edCount > 0;
-        applyDataCellStyle(c5, false, false, false, isEd);
+        applyDataCellStyle(c6, false, false, false, isEd);
 
         sumRowIdx++;
       });
@@ -2160,6 +2639,10 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
       const c5 = row.getCell(5);
       c5.value = '—';
       applyDataCellStyle(c5, false, true);
+
+      const c6 = row.getCell(6);
+      c6.value = '—';
+      applyDataCellStyle(c6, false, true);
 
       sumRowIdx++;
     }
@@ -2190,7 +2673,7 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
     printTitlesRow: '3:3',
   };
-  autoFitColumns(summarySheet, 5);
+  autoFitColumns(summarySheet, 6);
 
   return { workbook, totalRecordCount };
 }
