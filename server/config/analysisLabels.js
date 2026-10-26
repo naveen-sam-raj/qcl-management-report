@@ -626,6 +626,96 @@ const ANALYSIS_LABELS = {
       { key: 'alk', label: 'ALK', unit: 'g/L', range: '2-5' },
     ],
   },
+  'Gas Conc. Analysis': {
+    title: 'GAS CONC. ANALYSIS',
+    strictColumns: true,
+    columns: [
+      { key: 'seal',           label: 'SEAL',             unit: null, range: null },
+      { key: 'recoveryCo2Con', label: 'RECOVERY CO2 CON', unit: '%',  range: '75-85' },
+      { key: 'cleaningGas',    label: 'CLEANING GAS',     unit: '%',  range: '9-11' },
+      { key: 'bottomGas',      label: 'BOTTOM GAS',       unit: '%',  range: '80-90' },
+    ],
+  },
+  'P417-2 Analysis': {
+    title: 'P417-2 ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH3', unit: null, range: null },
+      { key: 'cnh3', label: 'CNH3', unit: null, range: null },
+      { key: 'tcl',  label: 'TCl',  unit: null, range: null },
+      { key: 'nacl', label: 'NaCl', unit: null, range: null },
+    ],
+  },
+  'P417-3 Analysis': {
+    title: 'P417-3 ANALYSIS',
+    rowLabels: {
+      s1: 'I SHIFT (07:00 – 15:00)',
+      s2: 'II SHIFT (15:00 – 23:00)',
+      s3: 'III SHIFT (23:00 – 07:00)',
+    },
+    columns: [
+      { key: 'fnh3', label: 'FNH3', unit: null, range: null },
+      { key: 'cnh3', label: 'CNH3', unit: null, range: null },
+      { key: 'tcl',  label: 'TCl',  unit: null, range: null },
+      { key: 'nacl', label: 'NaCl', unit: null, range: null },
+    ],
+  },
+  'DCC DRAIN LIQ Analysis': {
+    title: 'DCC DRAIN LIQ ANALYSIS',
+    rowLabels: {
+      week: 'WEEKLY',
+    },
+    columns: [
+      { key: 'cl',  label: 'Cl',  unit: 'PPM', range: '490-510' },
+      { key: 'so4', label: 'SO4', unit: 'PPM', range: '1400-1600' },
+      { key: 'fe',  label: 'Fe',  unit: 'PPM', range: '8-12' },
+      { key: 'tss', label: 'TSS', unit: 'PPM', range: '40-60' },
+    ],
+  },
+  'SOX DRAIN LIQ Analysis': {
+    title: 'SOX DRAIN LIQ ANALYSIS',
+    rowLabels: {
+      week: 'WEEKLY',
+    },
+    columns: [
+      { key: 'cl',  label: 'Cl',  unit: 'PPM', range: '290-310' },
+      { key: 'so4', label: 'SO4', unit: 'PPM', range: '290-310' },
+      { key: 'fe',  label: 'Fe',  unit: 'PPM', range: '1-3' },
+      { key: 'tss', label: 'TSS', unit: 'PPM', range: '0-20' },
+    ],
+  },
+  'ABSORBER DRAIN LIQ Analysis': {
+    title: 'ABSORBER DRAIN LIQ ANALYSIS',
+    rowLabels: {
+      week: 'WEEKLY',
+    },
+    columns: [
+      { key: 'cl',  label: 'Cl',  unit: 'PPM', range: '290-310' },
+      { key: 'so4', label: 'SO4', unit: 'PPM', range: '90-110' },
+      { key: 'fe',  label: 'Fe',  unit: 'PPM', range: '1-3' },
+      { key: 'tss', label: 'TSS', unit: 'PPM', range: '0-20' },
+    ],
+  },
+  'LEAN Weekly Analysis': {
+    title: 'LEAN WEEKLY ANALYSIS',
+    rowLabels: {
+      week: 'WEEKLY',
+    },
+    columns: [
+      { key: 'cl',  label: 'Cl',  unit: 'PPM', range: '450-550' },
+      { key: 'so4', label: 'SO4', unit: 'PPM', range: '140-160' },
+      { key: 'fe',  label: 'Fe',  unit: 'PPM', range: '28-32' },
+      { key: 'tss', label: 'TSS', unit: 'PPM', range: '20-40' },
+      { key: 'na',  label: 'Na',  unit: 'PPM', range: '490-510' },
+      { key: 'k',   label: 'K',   unit: 'PPM', range: '950-1050' },
+      { key: 'no2', label: 'NO2', unit: 'PPM', range: '20-40' },
+      { key: 'no3', label: 'NO3', unit: 'PPM', range: '590-610' },
+    ],
+  },
 };
 
 /**
