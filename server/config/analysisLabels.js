@@ -516,6 +516,116 @@ const ANALYSIS_LABELS = {
       { key: 'cl',   label: 'Cl',    unit: 'ppm', range: '600-800' },
     ],
   },
+  'BL1204/BL1203 Analysis': {
+    title: 'BL1204/BL1203 ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'co2', label: 'CO2', unit: '%',   range: '14-16' },
+      { key: 'o2',  label: 'O2',  unit: '%',   range: '5-7' },
+      { key: 'co',  label: 'CO',  unit: 'PPM', range: '950-1050' },
+    ],
+  },
+  'Absorber Inlet Analysis': {
+    title: 'ABSORBER INLET ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'co2', label: 'CO2', unit: '%',   range: '10-12' },
+      { key: 'o2',  label: 'O2',  unit: '%',   range: '8-10' },
+      { key: 'co',  label: 'CO',  unit: 'PPM', range: '450-550' },
+      { key: 'no',  label: 'NO',  unit: 'PPM', range: '30-70' },
+      { key: 'nox', label: 'NOX', unit: 'PPM', range: '30-70' },
+      { key: 'no2', label: 'NO2', unit: 'PPM', range: '1-3' },
+    ],
+  },
+  'Outlet Analysis': {
+    title: 'OUTLET ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'co2', label: 'CO2', unit: '%',   range: '0-2' },
+      { key: 'co',  label: 'CO',  unit: 'PPM', range: '250-350' },
+    ],
+  },
+  'Rich Analysis': {
+    title: 'RICH ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'loading', label: 'LOADING', unit: 'g of CO2/g of solvent', range: '0.5500-0.6500' },
+      { key: 'density', label: 'DENSITY', unit: 'Kg/cc',                 range: '1070-1090' },
+    ],
+  },
+  'Washwater Analysis': {
+    title: 'WASHWATER ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'alk', label: 'ALK', unit: '%', range: '0.10-0.30' },
+    ],
+  },
+  'P1256 Analysis': {
+    title: 'P1256 ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'alk', label: 'ALK', unit: '%', range: '0.10-0.30' },
+    ],
+  },
+  'Reflux Analysis': {
+    title: 'REFLUX ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'alk', label: 'ALK', unit: '%', range: '0.20-0.40' },
+    ],
+  },
+  'TK1251 Analysis': {
+    title: 'TK1251 ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'ph',  label: 'pH',  unit: null,  range: '8.0-9.5' },
+      { key: 'alk', label: 'ALK', unit: 'g/L', range: '2-5' },
+    ],
+  },
+  'TK1252 Analysis': {
+    title: 'TK1252 ANALYSIS',
+    rowLabels: {
+      shift1: 'I SHIFT (06:00 – 14:00)',
+      shift2: 'II SHIFT (14:00 – 22:00)',
+      shift3: 'III SHIFT (22:00 – 06:00)',
+    },
+    columns: [
+      { key: 'ph',  label: 'pH',  unit: null,  range: '8.0-9.5' },
+      { key: 'alk', label: 'ALK', unit: 'g/L', range: '2-5' },
+    ],
+  },
 };
 
 /**

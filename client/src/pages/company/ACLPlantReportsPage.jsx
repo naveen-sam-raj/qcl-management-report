@@ -319,6 +319,16 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
     }
   }, [plantId, params?.id, user?.plant]);
 
+  // Resolve plant code using plantCodeHelper (computed once for both render and downloads)
+  const { plantCode: currentPlantCode, source: plantCodeSource } = resolvePlantCode([
+    { source: 'plantId prop', value: plantId },
+    { source: 'resolved plant object', value: resolvedPlant },
+    { source: 'route param id', value: params?.id },
+    { source: 'user.plant', value: user?.plant },
+  ]);
+  // Show old ACL button only for ACL or when resolution fails (null), hide for SA, OFFSITE, CO2
+  const showOldACLButton = !(currentPlantCode && currentPlantCode !== 'ACL');
+
   const handleDownloadGenericReport = async () => {
     const targetDate = masterDate || dateTo || dateFrom || todayStr;
 
@@ -327,26 +337,18 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
       return;
     }
 
-    // Resolve plant code strictly without location.pathname
-    const { plantCode, source } = resolvePlantCode([
-      { source: 'plantId prop', value: plantId },
-      { source: 'resolved plant object', value: resolvedPlant },
-      { source: 'route param id', value: params?.id },
-      { source: 'user.plant', value: user?.plant },
-    ]);
-
-    if (!plantCode) {
+    if (!currentPlantCode) {
       showToast('Plant not identified', 'error');
       return;
     }
 
-    console.debug('[Download Report] plant resolved:', plantCode, 'from', source);
+    console.debug('[Download Report] plant resolved:', currentPlantCode, 'from', plantCodeSource);
 
     setDownloadingGeneric(true);
     try {
-      showToast(`Generating ${plantCode} Management Report...`, 'info');
+      showToast(`Generating ${currentPlantCode} Management Report...`, 'info');
       const response = await api.get('/reports/generic', {
-        params: { plant: plantCode, date: targetDate },
+        params: { plant: currentPlantCode, date: targetDate },
         responseType: 'blob',
       });
 
@@ -670,19 +672,21 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
               </select>
             </div>
 
-            <button
-              id="btn-generate-acl-master-excel"
-              onClick={() => handleDownloadMasterExcel()}
-              disabled={downloadingMaster}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 mt-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition shadow-md disabled:opacity-50 cursor-pointer"
-            >
-              {downloadingMaster ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              <span>{downloadingMaster ? 'Generating...' : 'Generate ACL Report'}</span>
-            </button>
+            {showOldACLButton && (
+              <button
+                id="btn-generate-acl-master-excel"
+                onClick={() => handleDownloadMasterExcel()}
+                disabled={downloadingMaster}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 mt-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition shadow-md disabled:opacity-50 cursor-pointer"
+              >
+                {downloadingMaster ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                <span>{downloadingMaster ? 'Generating...' : 'Generate ACL Report'}</span>
+              </button>
+            )}
 
             <button
               id="btn-download-generic-report"
