@@ -210,7 +210,7 @@ const LeanWeeklyAnalysisPage = ({ plantId = 'co2' }) => {
               setOriginalData(null);
             }
 
-            setIsLocked(Boolean(record.isLocked || record.data?.isLocked));
+            setIsLocked(Boolean(record.isLocked || record.data?.isLocked || ((record.editCount || record.data?.editCount || 0) >= 1)));
             setInitialSaved(Boolean(record.initialSaved || record.data?.initialSaved));
             setEditCount(Number(record.editCount || record.data?.editCount || 0));
             setEditedFields(record.editedFields || record.data?.editedFields || {});
@@ -384,7 +384,7 @@ const LeanWeeklyAnalysisPage = ({ plantId = 'co2' }) => {
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
         setRecordId(savedDoc._id || savedDoc.id);
       }
-      setIsLocked(Boolean(savedDoc?.isLocked));
+      setIsLocked(Boolean(savedDoc?.isLocked || ((savedDoc?.editCount || 0) >= 1)));
       setInitialSaved(Boolean(savedDoc?.initialSaved));
       setEditCount(Number(savedDoc?.editCount || 0));
       if (savedDoc?.editedFields) {

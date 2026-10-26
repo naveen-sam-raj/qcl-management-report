@@ -708,9 +708,16 @@ function createCO2WeeklyAnalysisRouter({
 
       let initialSaved = Boolean(existingData.initialSaved);
       let editCount = existingData.editCount || 0;
-      let isLocked = false; // Analyses without shifts or timings remain open for normal saving and editing
+      let isLocked = Boolean(existingData.isLocked || (editCount >= 1));
       let editedFields = { ...(existingData.editedFields || {}) };
       let editAuditHistory = Array.isArray(existingData.editAuditHistory) ? [ ...existingData.editAuditHistory ] : [];
+
+      if (isLocked) {
+        return res.status(400).json({
+          success: false,
+          message: `This weekly analysis is locked after one correction. No further edits permitted.`,
+        });
+      }
 
       const incomingWeek = (payload.rows && payload.rows.week) || payload.rows || {};
       const oldWeek = (existingRows && existingRows.week) || existingRows || {};
@@ -719,6 +726,8 @@ function createCO2WeeklyAnalysisRouter({
         if (initialSaved) {
           const isEmpty = (v) => v === null || v === '' || v === undefined;
 
+          // Check if there are any real differences between oldWeek and incomingWeek
+          let hasRealChanges = false;
           parameters.forEach((paramKey) => {
             const rawOld = oldWeek[paramKey];
             const rawNew = incomingWeek[paramKey];
@@ -726,61 +735,87 @@ function createCO2WeeklyAnalysisRouter({
             const oldIsEmpty = isEmpty(rawOld);
             const newIsEmpty = isEmpty(rawNew);
 
-            // If both old and new values are empty (null, '', undefined), no edit
-            if (oldIsEmpty && newIsEmpty) {
+            if (oldIsEmpty && newIsEmpty) return;
+            if (oldIsEmpty !== newIsEmpty) {
+              hasRealChanges = true;
               return;
             }
-
-            // If old value was filled and new value is cleared, record as edit with newValue null
-            if (!oldIsEmpty && newIsEmpty) {
-              const oVal = !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld;
-              editedFields[`week_${paramKey}`] = true;
-              editAuditHistory.push({
-                shiftKey: 'week',
-                shiftName: 'Weekly Analysis',
-                paramKey,
-                stream: paramKey.toUpperCase(),
-                oldValue: oVal,
-                newValue: null,
-                editedBy: req.user?.name || payload.submittedBy || 'Admin',
-                editedById: req.user?._id || null,
-                timestamp: new Date(),
-              });
-              return;
-            }
-
-            // If old value was empty and new value is filled for the first time, no edit
-            if (oldIsEmpty && !newIsEmpty) {
-              return;
-            }
-
-            // Both old and new are filled: compare with numeric tolerance
-            let isParamChanged = false;
             if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
-              isParamChanged = Number(rawOld) !== Number(rawNew);
-            } else {
-              isParamChanged = String(rawOld).trim() !== String(rawNew).trim();
-            }
-
-            if (isParamChanged) {
-              editedFields[`week_${paramKey}`] = true;
-              editAuditHistory.push({
-                shiftKey: 'week',
-                shiftName: 'Weekly Analysis',
-                paramKey,
-                stream: paramKey.toUpperCase(),
-                oldValue: !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld,
-                newValue: !isNaN(Number(rawNew)) ? Number(rawNew) : rawNew,
-                editedBy: req.user?.name || payload.submittedBy || 'Admin',
-                editedById: req.user?._id || null,
-                timestamp: new Date(),
-              });
+              if (Number(rawOld) !== Number(rawNew)) hasRealChanges = true;
+            } else if (String(rawOld).trim() !== String(rawNew).trim()) {
+              hasRealChanges = true;
             }
           });
 
-          editCount += 1;
+          // If no values changed at all, do NOT consume the edit and do not lock
+          if (!hasRealChanges) {
+            isLocked = false;
+          } else {
+            parameters.forEach((paramKey) => {
+              const rawOld = oldWeek[paramKey];
+              const rawNew = incomingWeek[paramKey];
+
+              const oldIsEmpty = isEmpty(rawOld);
+              const newIsEmpty = isEmpty(rawNew);
+
+              // If both old and new values are empty (null, '', undefined), no edit
+              if (oldIsEmpty && newIsEmpty) {
+                return;
+              }
+
+              // If old value was filled and new value is cleared, record as edit with newValue null
+              if (!oldIsEmpty && newIsEmpty) {
+                const oVal = !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld;
+                editedFields[`week_${paramKey}`] = true;
+                editAuditHistory.push({
+                  shiftKey: 'week',
+                  shiftName: 'Weekly Analysis',
+                  paramKey,
+                  stream: paramKey.toUpperCase(),
+                  oldValue: oVal,
+                  newValue: null,
+                  editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                  editedById: req.user?._id || null,
+                  timestamp: new Date(),
+                });
+                return;
+              }
+
+              // If old value was empty and new value is filled for the first time, no edit badge/audit entry
+              if (oldIsEmpty && !newIsEmpty) {
+                return;
+              }
+
+              // Both old and new are filled: compare with numeric tolerance
+              let isParamChanged = false;
+              if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
+                isParamChanged = Number(rawOld) !== Number(rawNew);
+              } else {
+                isParamChanged = String(rawOld).trim() !== String(rawNew).trim();
+              }
+
+              if (isParamChanged) {
+                editedFields[`week_${paramKey}`] = true;
+                editAuditHistory.push({
+                  shiftKey: 'week',
+                  shiftName: 'Weekly Analysis',
+                  paramKey,
+                  stream: paramKey.toUpperCase(),
+                  oldValue: !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld,
+                  newValue: !isNaN(Number(rawNew)) ? Number(rawNew) : rawNew,
+                  editedBy: req.user?.name || payload.submittedBy || 'Admin',
+                  editedById: req.user?._id || null,
+                  timestamp: new Date(),
+                });
+              }
+            });
+
+            editCount += 1;
+            isLocked = true; // Permitted correction consumed -> permanently locked
+          }
         } else {
           initialSaved = true;
+          isLocked = false;
         }
       } catch (trackErr) {
         console.warn(`[CO2 Edit Tracking] Failed tracking edits for ${analysisType} (week):`, trackErr.message);
