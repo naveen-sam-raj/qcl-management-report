@@ -415,35 +415,70 @@ async function runTests() {
     assert.strictEqual(String(targetUpdatedId), 'doc_canonical_data', 'Route must update the canonical doc with data, not empty duplicate');
     console.log('  [PASS] Route picked canonical document and updated it.');
 
-    // ── TEST 10: Date Guard with Header x-test-mode When NODE_ENV !== test ──
-    console.log('\n--- TEST 10: Date Guard with x-test-mode Header ---');
-    const origEnv = process.env.NODE_ENV;
-    const origTestMode = process.env.TEST_MODE;
-    try {
-      process.env.NODE_ENV = 'production';
-      delete process.env.TEST_MODE;
+    // ── TEST 10: Date Guard: x-test-now / x-test-mode / payload.now must NOT change date behavior ──
+    console.log('\n--- TEST 10: Date Guard (x-test-now, x-test-mode, payload.now must NOT bypass) ---');
+    // 10A: x-test-mode header
+    const req10A = makeReq({
+      headers: { 'x-test-mode': 'true', 'x-test-env': 'true' },
+      body: {
+        date: '2026-01-01', // Past date
+        isTestMode: true,
+        rows: { t07: { fnh3: 3.17 } },
+      },
+    });
+    const res10A = makeRes();
+    await postHandler(req10A, res10A);
+    assert.strictEqual(res10A.statusCode, 400, 'Past date must be rejected with x-test-mode header');
+    assert(res10A.body.message.includes('Date restriction enforced'));
 
-      const req10 = makeReq({
-        headers: { 'x-test-mode': 'true', 'x-test-env': 'true' },
-        body: {
-          date: '2026-01-01', // Past date
-          isTestMode: true,
-          rows: { t07: { fnh3: 3.17 } },
-        },
-      });
-      const res10 = makeRes();
-      await postHandler(req10, res10);
+    // 10B: payload.now
+    const req10B = makeReq({
+      body: {
+        date: '2026-01-01',
+        now: '2026-01-01T10:00:00Z',
+        rows: { t07: { fnh3: 3.17 } },
+      },
+    });
+    const res10B = makeRes();
+    await postHandler(req10B, res10B);
+    assert.strictEqual(res10B.statusCode, 400, 'Past date must be rejected with payload.now');
+    assert(res10B.body.message.includes('Date restriction enforced'));
 
-      assert.strictEqual(res10.statusCode, 400, 'Past date must be rejected even with x-test-mode header in production');
-      assert(res10.body.message.includes('Date restriction enforced'), 'Error specifies date restriction');
-      console.log('  [PASS] Header x-test-mode does NOT bypass date restriction.');
-    } finally {
-      process.env.NODE_ENV = origEnv;
-      if (origTestMode) process.env.TEST_MODE = origTestMode;
-    }
+    // 10C: x-test-now header
+    const req10C = makeReq({
+      headers: { 'x-test-now': '2026-01-01T10:00:00Z' },
+      body: {
+        date: '2026-01-01',
+        rows: { t07: { fnh3: 3.17 } },
+      },
+    });
+    const res10C = makeRes();
+    await postHandler(req10C, res10C);
+    assert.strictEqual(res10C.statusCode, 400, 'Past date must be rejected with x-test-now header');
+    assert(res10C.body.message.includes('Date restriction enforced'));
+    console.log('  [PASS] x-test-now / x-test-mode / payload.now do NOT change date behavior.');
+
+    // ── TEST 11: Route factory injection of now via options.getNow ──
+    console.log('\n--- TEST 11: Route factory injection of now ---');
+    const { createTk205Router } = require('../routes/tk205AnalysisRoutes');
+    const customNow = new Date('2026-05-15T10:00:00+05:30');
+    const factoryRouter = createTk205Router({ getNow: () => customNow });
+    const factoryPostLayer = factoryRouter.stack.find((l) => l.route && l.route.path === '/' && l.route.methods.post);
+    const factoryPostHandler = factoryPostLayer.route.stack[0].handle;
+
+    const factoryReq = makeReq({
+      body: {
+        date: '2026-05-15',
+        rows: { t07: { fnh3: 3.17 } },
+      },
+    });
+    const factoryRes = makeRes();
+    await factoryPostHandler(factoryReq, factoryRes);
+    assert.strictEqual(factoryRes.statusCode, 200, 'Factory injected now operating date must be accepted');
+    console.log('  [PASS] Factory injected now via function parameter controls date behavior.');
 
     console.log('\n========================================================================');
-    console.log('✅ ALL TK 205 ROUTE UNIT TESTS PASSED (10/10)!');
+    console.log('✅ ALL TK 205 ROUTE UNIT TESTS PASSED (11/11)!');
     console.log('========================================================================');
   } finally {
     // Restore original Model methods

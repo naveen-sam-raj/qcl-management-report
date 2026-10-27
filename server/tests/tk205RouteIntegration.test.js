@@ -71,7 +71,17 @@ async function run() {
     next();
   };
 
-  const tk205Router = require('../routes/tk205AnalysisRoutes');
+  function createISTDate(year, month, day, hour, minute) {
+    const istMinutes = hour * 60 + minute;
+    const utcMinutes = istMinutes - 330;
+    return new Date(Date.UTC(year, month - 1, day, 0, utcMinutes, 0));
+  }
+
+  let currentInjectedNow = createISTDate(2026, 10, 27, 10, 0);
+  const { createTk205Router } = require('../routes/tk205AnalysisRoutes');
+  const tk205Router = createTk205Router({
+    getNow: () => (currentInjectedNow ? new Date(currentInjectedNow) : new Date()),
+  });
   const app = express();
   app.use(express.json());
   app.use('/api/tk-205-analysis', tk205Router);
@@ -81,14 +91,38 @@ async function run() {
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}/api/tk-205-analysis`;
 
-  async function postSave(body) {
-    const res = await fetch(baseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  async function postSave(body, extraHeaders = {}) {
+    return new Promise((resolve, reject) => {
+      const data = JSON.stringify(body);
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/tk-205-analysis',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            ...extraHeaders,
+          },
+          agent: false,
+        },
+        (res) => {
+          let raw = '';
+          res.on('data', (c) => (raw += c));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(raw) });
+            } catch (e) {
+              resolve({ status: res.statusCode, body: raw });
+            }
+          });
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
     });
-    const json = await res.json();
-    return { status: res.status, body: json };
   }
 
   try {
@@ -107,6 +141,10 @@ async function run() {
     assert.strictEqual(res1.status, 200, `Expected 200, got ${res1.status}: ${res1.body.message}`);
     assert.strictEqual(res1.body.targetUnit, 't07');
     assert.strictEqual(res1.body.isCorrection, false);
+    assert.strictEqual(res1.body.dotPathUpdates, undefined, 'dotPathUpdates must NOT be returned in response');
+    assert.ok(res1.body.data, 'Response must return data object for client hydration');
+    assert.strictEqual(res1.body.data.rows.t07.fnh3, '1.25');
+    assert.strictEqual(res1.body.data.lockedSlots.t07.isSaved, true);
 
     const doc1 = await PlantAnalysisRecord.findOne({ date: testDate, plantCode: 'ACL', analysisType: 'TK 205 Analysis' });
     assert.ok(doc1, 'Document should be created in DB via updateOne upsert');
@@ -120,6 +158,8 @@ async function run() {
     // -------------------------------------------------------------------------
     assert.strictEqual(doc1.data.editedFields, undefined, 'First save must NOT write editedFields');
     assert.strictEqual(doc1.data.editAuditHistory, undefined, 'First save must NOT write editAuditHistory');
+    assert.deepStrictEqual(res1.body.data.editedFields, {}, 'Response data.editedFields must be empty');
+    assert.deepStrictEqual(res1.body.data.editAuditHistory, [], 'Response data.editAuditHistory must be empty');
     console.log('  [PASS] Verified first save of t07 did NOT write editedFields or editAuditHistory.');
 
     // -------------------------------------------------------------------------
@@ -258,6 +298,7 @@ async function run() {
     console.log('--- TEST 9: Duplicate docs (shift "" with data + shift "All Shifts" empty) ---');
     // -------------------------------------------------------------------------
     const dupDate = '2026-10-28';
+    currentInjectedNow = createISTDate(2026, 10, 28, 10, 0);
     // Doc 1: Has legacy shift "" and existing t07 data
     const docWithData = await PlantAnalysisRecord.create({
       plantName: 'ACL Plant',
@@ -306,13 +347,14 @@ async function run() {
     assert.ok(reloadedDocWithData.data.rows.t09, 'Canonical doc with data should have been updated with t09');
     assert.strictEqual(reloadedDocWithData.data.rows.t09.fnh3, '9.1');
     assert.strictEqual(reloadedDocWithData.data.rows.t07.fnh3, '5.0', 't07 data must be preserved (no whole-data overwrite)');
-    assert.strictEqual(Object.keys(reloadedEmptyDoc.data.rows).length, 0, 'Placeholder doc must remain untouched');
+    assert.strictEqual(Object.keys(reloadedEmptyDoc.data?.rows || {}).length, 0, 'Placeholder doc must remain untouched');
     console.log('  [PASS] Canonical doc updated; placeholder untouched; no whole-data overwrite.');
 
     // -------------------------------------------------------------------------
     console.log('--- TEST 10: data.lockedShifts legacy values exact for each of 12 slot states ---');
     // -------------------------------------------------------------------------
     const stateDate = '2026-10-29';
+    currentInjectedNow = createISTDate(2026, 10, 29, 10, 0);
     let currentRows = {};
 
     for (let i = 0; i < UNITS_ORDER.length; i++) {
@@ -381,8 +423,155 @@ async function run() {
     assert.strictEqual(finalLs.shift3, true);
     console.log('  [PASS] All 12 slot legacy states and final lock verified exact.');
 
+    // -------------------------------------------------------------------------
+    console.log('--- TEST 11: Date tests with injected now (06:00-06:00 IST Operational Date) ---');
+    // -------------------------------------------------------------------------
+    // 11A: 2026-10-28 01:00 IST + date 2026-10-27 -> allowed (t23 saved earlier)
+    console.log('  Testing 11A: 2026-10-28 01:00 IST + date 2026-10-27 (t23 saved earlier) -> allowed...');
+    const slotsPriorToT01 = ['t07', 't09', 't11', 't13', 't15', 't17', 't19', 't21', 't23'];
+    const preSavedRows = {};
+    const preSavedLocks = {};
+    slotsPriorToT01.forEach((s) => {
+      preSavedRows[s] = { fnh3: '2.0', cnh3: '2.0', tcl: '3.0', pcl: '3.0' };
+      preSavedLocks[s] = { isSaved: true, isLocked: true, correctionUsed: false };
+    });
+    preSavedLocks.t23.isLocked = false; // t23 was the most recent save
+
+    await PlantAnalysisRecord.updateOne(
+      { date: '2026-10-27', plantCode: 'ACL', analysisType: 'TK 205 Analysis' },
+      { $set: { 'data.rows': preSavedRows, 'data.lockedSlots': preSavedLocks } }
+    );
+
+    const now0100 = createISTDate(2026, 10, 28, 1, 0); // 01:00 IST on Oct 28 -> belongs to operating date Oct 27
+    currentInjectedNow = now0100;
+    const payload11A = {
+      date: '2026-10-27',
+      rows: {
+        ...preSavedRows,
+        t01: { fnh3: '2.5', cnh3: '2.5', tcl: '3.5', pcl: '3.5' },
+      },
+    };
+    const res11A = await postSave(payload11A);
+    assert.strictEqual(res11A.status, 200, `Expected 200, got ${res11A.status}: ${res11A.body?.message}`);
+    assert.strictEqual(res11A.body.targetUnit, 't01');
+    console.log('  [PASS] 2026-10-28 01:00 IST + date 2026-10-27 allowed (t23 saved earlier).');
+
+    // 11B: 2026-10-28 01:00 IST + date 2026-10-28 -> 400
+    console.log('  Testing 11B: 2026-10-28 01:00 IST + date 2026-10-28 -> 400...');
+    currentInjectedNow = now0100;
+    const payload11B = {
+      date: '2026-10-28',
+      rows: { t07: { fnh3: '1.0' } },
+    };
+    const res11B = await postSave(payload11B);
+    assert.strictEqual(res11B.status, 400, `Expected 400, got ${res11B.status}`);
+    assert.ok(
+      res11B.body.message.includes('operating date (2026-10-27)'),
+      `Error message must mention the operating date: ${res11B.body.message}`
+    );
+    console.log('  [PASS] 2026-10-28 01:00 IST + date 2026-10-28 returned 400 with operating date in message.');
+
+    // 11C: 05:59 IST + 2026-10-28 -> 400
+    console.log('  Testing 11C: 2026-10-28 05:59 IST + date 2026-10-28 -> 400...');
+    const now0559 = createISTDate(2026, 10, 28, 5, 59); // 05:59 IST -> belongs to operating date Oct 27
+    currentInjectedNow = now0559;
+    const payload11C = {
+      date: '2026-10-28',
+      rows: { t07: { fnh3: '1.0' } },
+    };
+    const res11C = await postSave(payload11C);
+    assert.strictEqual(res11C.status, 400, `Expected 400, got ${res11C.status}`);
+    assert.ok(
+      res11C.body.message.includes('operating date (2026-10-27)'),
+      `Error message must mention the operating date: ${res11C.body.message}`
+    );
+    console.log('  [PASS] 2026-10-28 05:59 IST + date 2026-10-28 returned 400 with operating date in message.');
+
+    // 11D: 2026-10-28 06:00 IST + date 2026-10-28 -> allowed
+    console.log('  Testing 11D: 2026-10-28 06:00 IST + date 2026-10-28 -> allowed...');
+    // Clean any prior Oct 28 test docs for clean first save t07 test
+    await PlantAnalysisRecord.deleteMany({ date: '2026-10-28' });
+    const now0600 = createISTDate(2026, 10, 28, 6, 0); // 06:00 IST -> belongs to operating date Oct 28
+    currentInjectedNow = now0600;
+    const payload11D = {
+      date: '2026-10-28',
+      rows: {
+        t07: { fnh3: '3.0', cnh3: '3.0', tcl: '4.0', pcl: '4.0' },
+      },
+    };
+    const res11D = await postSave(payload11D);
+    assert.strictEqual(res11D.status, 200, `Expected 200, got ${res11D.status}: ${res11D.body?.message}`);
+    assert.strictEqual(res11D.body.targetUnit, 't07');
+    console.log('  [PASS] 2026-10-28 06:00 IST + date 2026-10-28 allowed (first save t07).');
+
+    // -------------------------------------------------------------------------
+    console.log('--- TEST 12: Request headers (x-test-now, x-test-mode) and payload.now must NOT alter date behavior ---');
+    // -------------------------------------------------------------------------
+    currentInjectedNow = createISTDate(2026, 10, 30, 10, 0); // Active operating date is 2026-10-30
+    const bypassRows = { t07: { fnh3: '1.0', cnh3: '1.0', tcl: '1.0', pcl: '1.0' } };
+
+    // 12A: payload.now with past date
+    const res12A = await postSave({
+      date: '2026-10-01',
+      now: '2026-10-01T10:00:00Z',
+      rows: bypassRows,
+    });
+    assert.strictEqual(res12A.status, 400, 'payload.now must not bypass date restriction');
+    assert.ok(res12A.body.message.includes('Date restriction enforced'));
+
+    // 12B: x-test-now header with past date
+    const res12B = await postSave(
+      { date: '2026-10-01', rows: bypassRows },
+      { 'x-test-now': '2026-10-01T10:00:00Z' }
+    );
+    assert.strictEqual(res12B.status, 400, 'x-test-now header must not bypass date restriction');
+    assert.ok(res12B.body.message.includes('Date restriction enforced'));
+
+    // 12C: x-test-mode header
+    const res12C = await postSave(
+      { date: '2026-10-01', rows: bypassRows },
+      { 'x-test-mode': 'true' }
+    );
+    assert.strictEqual(res12C.status, 400, 'x-test-mode header must not bypass date restriction');
+    assert.ok(res12C.body.message.includes('Date restriction enforced'));
+    console.log('  [PASS] Verified x-test-now, x-test-mode, and payload.now do NOT change date behavior.');
+
+    // -------------------------------------------------------------------------
+    console.log('--- TEST 13: Concurrent first-save race (doc missing, two simultaneous t07 saves) ---');
+    // -------------------------------------------------------------------------
+    const raceDate = '2026-10-31';
+    currentInjectedNow = createISTDate(2026, 10, 31, 10, 0);
+    await PlantAnalysisRecord.deleteMany({ date: raceDate });
+
+    const raceT07PayloadA = {
+      date: raceDate,
+      rows: { t07: { fnh3: '1.0', cnh3: '2.0', tcl: '3.0', pcl: '4.0' } },
+    };
+    const raceT07PayloadB = {
+      date: raceDate,
+      rows: { t07: { fnh3: '1.5', cnh3: '2.5', tcl: '3.5', pcl: '4.5' } },
+    };
+
+    const [raceRes1, raceRes2] = await Promise.all([
+      postSave(raceT07PayloadA),
+      postSave(raceT07PayloadB),
+    ]);
+    const raceStatuses = [raceRes1.status, raceRes2.status].sort();
+    assert.deepStrictEqual(
+      raceStatuses,
+      [200, 409],
+      `Expected [200, 409] for concurrent first t07 saves on missing doc, got ${JSON.stringify(raceStatuses)}`
+    );
+    const raceCount = await PlantAnalysisRecord.countDocuments({
+      date: raceDate,
+      plantCode: 'ACL',
+      analysisType: 'TK 205 Analysis',
+    });
+    assert.strictEqual(raceCount, 1, 'Exactly one document must be created');
+    console.log('  [PASS] Concurrent first-save race: exactly one request got 200, one got 409 deterministically.');
+
     console.log('\n========================================================================');
-    console.log('✅ ALL TK 205 ROUTE INTEGRATION TESTS PASSED (10/10)!');
+    console.log('✅ ALL TK 205 ROUTE INTEGRATION TESTS PASSED (13/13)!');
     console.log('========================================================================');
   } finally {
     authMiddleware.protect = originalProtect;

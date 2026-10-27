@@ -30,5 +30,8 @@
     "nodemailer": "^10.1.1",
     "qcl-management-report": "file:..",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0"
   }
 }
