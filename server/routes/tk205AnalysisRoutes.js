@@ -6,8 +6,9 @@ const { validateAnalysisPayload } = require('../services/analysisValidation');
 const {
   hydrateLockState,
   getInitialLockState,
-  validateSequentialSave,
-  applySequentialSaveTransition,
+  computeSlotTransition,
+  recordFieldEdits,
+  pickCanonicalDoc,
 } = require('../services/analysisLockEngine');
 
 // In-memory fallback
@@ -16,11 +17,7 @@ const tk205Records = [];
 // Apply authentication middleware
 router.use(protect);
 
-const SHIFT_TIME_SLOTS = {
-  shift1: ['t07', 't09', 't11', 't13'],
-  shift2: ['t15', 't17', 't19', 't21'],
-  shift3: ['t23', 't01', 't03', 't05'],
-};
+const UNITS_ORDER = ['t07', 't09', 't11', 't13', 't15', 't17', 't19', 't21', 't23', 't01', 't03', 't05'];
 
 const SHIFT_DISPLAY_NAMES = {
   shift1: 'I SHIFT',
@@ -29,19 +26,6 @@ const SHIFT_DISPLAY_NAMES = {
 };
 
 const PARAMETERS = ['fnh3', 'cnh3', 'tcl', 'pcl'];
-
-const defaultLocks = {
-  shift1: false,
-  shift1Locked: false,
-  shift2: true,
-  shift2Locked: true,
-  shift3: true,
-  shift3Locked: true,
-  shift1Saved: false,
-  shift2Saved: false,
-  shift3Saved: false,
-  shift3Edits: 0,
-};
 
 // Asia/Kolkata date helper
 const getTodayKolkata = () => {
@@ -58,7 +42,7 @@ const getTodayKolkata = () => {
 };
 
 /**
- * @desc    Save TK 205 Analysis data (Shift-wise workflow, today date restriction, locking & instant email)
+ * @desc    Save TK 205 Analysis data (Sequential slot-level locking per FINAL SPEC 1-9)
  * @route   POST /api/tk-205-analysis
  * @access  Private
  */
@@ -90,14 +74,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const isTestMode =
-      process.env.NODE_ENV === 'test' ||
-      process.env.TEST_MODE === 'true' ||
-      req.headers['x-test-mode'] === 'true' ||
-      req.headers['x-test-env'] === 'true' ||
-      payload.isTestMode === true;
-
-    // 2. Strict Today's Date Restriction (Asia/Kolkata)
+    // 1. Date guard: process.env.NODE_ENV==='test' || process.env.TEST_MODE==='true' ONLY
+    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true';
     const todayKolkata = getTodayKolkata();
     if (payload.date !== todayKolkata && !isTestMode) {
       return res.status(400).json({
@@ -106,11 +84,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const plantTarget = payload.plant || 'ACL Plant';
-    const targetShifts = ['shift1', 'shift2', 'shift3'];
-    const newlySavedShifts = [];
-
-    // Query existing record for this date
+    // 2. Load docs where plantCode in ['ACL','ACL Plant','ACL PLANT'] + analysisType + date
     const query = {
       date: payload.date,
       plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
@@ -120,245 +94,172 @@ router.post('/', async (req, res) => {
       query.$or = [{ company: req.user.company }, { company: null }];
     }
 
-    let existingDoc = await PlantAnalysisRecord.findOne(query);
-    let existingData = existingDoc?.data || {};
-    let existingRows = existingData.rows || existingData;
-    let incomingRows = payload.shiftRows || payload.rows || {};
+    const matchingDocs = await PlantAnalysisRecord.find(query);
+    const existingDoc = pickCanonicalDoc(matchingDocs);
+    const existingData = existingDoc?.data || {};
+    const existingRows = existingData.rows || {};
+    const existingLockedSlots = existingData.lockedSlots || {};
+    const incomingRows = payload.rows || payload.shiftRows || {};
 
-    // Helper: check if a shift has non-empty values
-    const hasShiftData = (shiftKey, rowsSource) => {
-      if (!rowsSource) return false;
-      const hasShiftContainers = Boolean(rowsSource.shift1 || rowsSource.shift2 || rowsSource.shift3);
-      if (hasShiftContainers) {
-        const source = rowsSource[shiftKey];
-        if (!source) return false;
-        const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
-        return slotKeys.some((sKey) => {
-          const slot = source[sKey];
-          return slot && Object.values(slot).some((v) => v !== null && v !== '');
-        });
-      }
-      const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
-      return slotKeys.some((sKey) => {
-        const slot = rowsSource[sKey];
-        return slot && Object.values(slot).some((v) => v !== null && v !== '');
+    // 3. Compute slot transition using pure engine
+    const transition = computeSlotTransition({
+      unitsOrder: UNITS_ORDER,
+      lockedSlots: existingLockedSlots,
+      storedRows: existingRows,
+      incomingRows,
+      isTestMode,
+      now: new Date(),
+    });
+
+    // 6. Identical re-save: HTTP 200 {success:true, noChange:true, message:'No changes'}, no write.
+    if (transition.noChange) {
+      return res.status(200).json({
+        success: true,
+        noChange: true,
+        message: 'No changes',
       });
-    };
-
-    // Helper: check if incoming shift data differs from existing
-    const isShiftDiff = (shiftKey, oldRows, newRows) => {
-      if (!oldRows && !newRows) return false;
-      const hasShiftContainers = Boolean(newRows && (newRows.shift1 || newRows.shift2 || newRows.shift3));
-      if (hasShiftContainers && !newRows[shiftKey]) {
-        return false;
-      }
-      const oldSrc = (oldRows && oldRows[shiftKey]) ? oldRows[shiftKey] : oldRows;
-      const newSrc = (newRows && newRows[shiftKey]) ? newRows[shiftKey] : newRows;
-      const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
-      return slotKeys.some((sKey) => {
-        const oldSlot = (oldSrc && oldSrc[sKey]) || (oldRows && oldRows[sKey]) || {};
-        const newSlot = (newSrc && newSrc[sKey]) || (newRows && newRows[sKey]) || {};
-        return PARAMETERS.some((p) => {
-          let oVal = oldSlot[p] ?? null;
-          let nVal = newSlot[p] ?? null;
-          if (nVal === '') nVal = null;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            return Number(oVal) !== Number(nVal);
-          }
-          return oVal !== nVal;
-        });
-      });
-    };
-
-    let lockedShifts = existingData.lockedShifts
-      ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: targetShifts })
-      : getInitialLockState({ type: 'shift', items: targetShifts });
-    let editedFields = existingData.editedFields || {};
-    let editAuditHistory = existingData.editAuditHistory || [];
-
-    const isShiftLocked = (key) => {
-      const check = validateSequentialSave({
-        lockState: lockedShifts,
-        targetItem: key,
-        itemsOrder: targetShifts,
-        isDiff: true,
-        type: 'shift',
-      });
-      return !check.allowed;
-    };
-
-    if (lockedShifts.allPermanentlyLocked) {
-      const hasShiftChanges = targetShifts.some(
-        (key) => hasShiftData(key, incomingRows) && isShiftDiff(key, existingRows, incomingRows)
-      );
-      if (hasShiftChanges) {
-        return res.status(400).json({
-          success: false,
-          message: 'All shifts for this date are permanently locked. No further edits permitted.',
-        });
-      }
     }
 
-    const willSave = {};
-
-    // Check lock violations
-    for (const key of targetShifts) {
-      if (hasShiftData(key, incomingRows) && isShiftLocked(key)) {
-        if (isShiftDiff(key, existingRows, incomingRows)) {
-          const check = validateSequentialSave({
-            lockState: lockedShifts,
-            targetItem: key,
-            itemsOrder: targetShifts,
-            isDiff: true,
-            type: 'shift',
-          });
-          return res.status(400).json({
-            success: false,
-            message: check.message || `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is locked.`,
-          });
-        }
-      }
+    // 7. Errors: 400 for empty / locked-unit edit / skip-ahead / multi-unit / correction-clears-all
+    if (!transition.ok) {
+      return res.status(transition.status || 400).json({
+        success: false,
+        message: transition.message,
+      });
     }
 
-    // Determine which shift has changes and is unlocked
-    for (const key of targetShifts) {
-      if (hasShiftData(key, incomingRows) && isShiftDiff(key, existingRows, incomingRows) && !isShiftLocked(key)) {
-        willSave[key] = true;
-      }
-    }
+    const targetUnit = transition.targetUnit;
 
-    // Enforce Shift-Wise Locking: Only one shift can be saved at a time
-    const shiftsToSave = targetShifts.filter((k) => willSave[k]);
-    if (shiftsToSave.length > 1) {
+    // 3. Doc missing: first save must be t07
+    if (!existingDoc && targetUnit !== 't07') {
       return res.status(400).json({
         success: false,
-        message: 'Shift-wise input locking enforced: Only one shift can be entered and saved at a time.',
+        message: `Sequential restriction: t07 must be completed and saved before proceeding to ${targetUnit}.`,
       });
     }
 
-    const activeShiftKey = shiftsToSave[0];
-    if (!activeShiftKey) {
-      return res.status(400).json({
-        success: false,
-        message: 'No unlocked shifts with valid new or modified data were found to save.',
+    // 5. Audit tracking entries via recordFieldEdits in same update (only on corrections)
+    if (transition.isCorrection) {
+      const auditResult = recordFieldEdits({
+        fields: PARAMETERS,
+        oldRows: existingRows[targetUnit] || {},
+        newRows: incomingRows[targetUnit] || {},
+        editorName: req.user?.name || payload.submittedBy || 'Plant Operator',
+        editorId: req.user?._id || null,
+        itemKey: targetUnit,
+        existingEditedFields: existingData.editedFields || {},
+        existingAuditHistory: existingData.editAuditHistory || [],
       });
+      transition.dotPathUpdates['data.editedFields'] = auditResult.editedFields;
+      transition.dotPathUpdates['data.editAuditHistory'] = auditResult.editAuditHistory;
     }
 
-    // Authoritative sequential save check
-    const saveValidation = validateSequentialSave({
-      lockState: lockedShifts,
-      targetItem: activeShiftKey,
-      itemsOrder: targetShifts,
-      isDiff: true,
-      type: 'shift',
-    });
-    if (!saveValidation.allowed) {
-      return res.status(saveValidation.statusCode || 400).json({
-        success: false,
-        message: saveValidation.message,
-      });
-    }
-
-    // Merge rows separately without overwriting untouched slots
-    const mergedRows = { ...(existingRows || {}) };
-    const slotKeysToUpdate = SHIFT_TIME_SLOTS[activeShiftKey] || [];
-
-    const isPriorSavedShift =
-      (activeShiftKey === 'shift1' && lockedShifts.shift1Saved) ||
-      (activeShiftKey === 'shift2' && lockedShifts.shift2Saved) ||
-      (activeShiftKey === 'shift3' && lockedShifts.shift3Saved);
-
-    slotKeysToUpdate.forEach((sKey) => {
-      const oldSlot = mergedRows[sKey] || {};
-      const newSlot = (incomingRows[activeShiftKey] && incomingRows[activeShiftKey][sKey]) || incomingRows[sKey] || {};
-
-      if (isPriorSavedShift) {
-        PARAMETERS.forEach((paramKey) => {
-          const oVal = oldSlot[paramKey] ?? null;
-          let nVal = newSlot[paramKey] ?? null;
-          if (nVal === '') nVal = null;
-
-          let isParamChanged = false;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            isParamChanged = Number(oVal) !== Number(nVal);
-          } else {
-            isParamChanged = oVal !== nVal;
-          }
-
-          if (isParamChanged) {
-            editedFields[`${sKey}_${paramKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: activeShiftKey,
-              timeSlot: sKey,
-              paramKey,
-              oldValue: oVal !== null ? Number(oVal) : null,
-              newValue: nVal !== null ? Number(nVal) : null,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              editedById: req.user?._id || null,
-              timestamp: new Date(),
-            });
-          }
-        });
-      }
-
-      mergedRows[sKey] = newSlot;
-    });
-
-    newlySavedShifts.push(activeShiftKey);
-
-    // Update locked status via universal locking engine
-    lockedShifts = applySequentialSaveTransition({
-      lockState: lockedShifts,
-      targetItem: activeShiftKey,
-      itemsOrder: targetShifts,
-      isCorrection: saveValidation.isCorrection,
-      type: 'shift',
-    });
-
-    // Package complete data structure
-    const updatedRecordData = {
-      id: existingData.id || `tk205_${Date.now()}`,
-      date: payload.date,
-      plant: plantTarget,
-      analysisType: 'TK 205 Analysis',
-      tank: 'TK 205',
-      unit: 'TK 205',
-      shift: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
-      rows: mergedRows,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id || null,
-      submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company || null,
+    // Keep legacy data.lockedShifts in sync via dot-paths
+    const currentSlots = { ...existingLockedSlots };
+    currentSlots[targetUnit] = {
+      ...(currentSlots[targetUnit] || {}),
+      isSaved: true,
+      isLocked: transition.isCorrection ? true : false,
+      correctionUsed: transition.isCorrection ? true : false,
     };
+    const targetIdx = UNITS_ORDER.indexOf(targetUnit);
+    for (let p = 0; p < targetIdx; p++) {
+      const pKey = UNITS_ORDER[p];
+      currentSlots[pKey] = { ...(currentSlots[pKey] || {}), isLocked: true };
+    }
 
-    // Save / Upsert directly to MongoDB PlantAnalysisRecord
-    const savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
-      {
-        plantCode: { $in: ['ACL', 'ACL Plant', 'ACL PLANT'] },
-        analysisType: 'TK 205 Analysis',
-        date: payload.date,
-      },
-      {
-        plantName: 'ACL Plant',
+    const shift1Saved = Boolean(currentSlots.t07?.isSaved);
+    const shift1Locked = Boolean(currentSlots.t13?.isLocked || currentSlots.t15?.isSaved);
+    const shift2Saved = Boolean(currentSlots.t15?.isSaved);
+    const shift2Locked = Boolean(currentSlots.t21?.isLocked || currentSlots.t23?.isSaved);
+    const shift3Saved = Boolean(currentSlots.t23?.isSaved);
+    const shift3Locked = Boolean(currentSlots.t05?.isLocked);
+
+    transition.dotPathUpdates['data.lockedShifts.shift1Saved'] = shift1Saved;
+    transition.dotPathUpdates['data.lockedShifts.shift2Saved'] = shift2Saved;
+    transition.dotPathUpdates['data.lockedShifts.shift3Saved'] = shift3Saved;
+    transition.dotPathUpdates['data.lockedShifts.shift1Locked'] = shift1Locked;
+    transition.dotPathUpdates['data.lockedShifts.shift2Locked'] = shift2Locked;
+    transition.dotPathUpdates['data.lockedShifts.shift3Locked'] = shift3Locked;
+    transition.dotPathUpdates['data.lockedShifts.shift1'] = Boolean(shift1Locked);
+    transition.dotPathUpdates['data.lockedShifts.shift2'] = !shift1Saved || Boolean(shift2Locked);
+    transition.dotPathUpdates['data.lockedShifts.shift3'] = !shift2Saved || Boolean(shift3Locked);
+
+    // Top-level fields
+    transition.dotPathUpdates['submittedBy'] = req.user?.name || payload.submittedBy || 'Plant Operator';
+    transition.dotPathUpdates['submittedById'] = req.user?._id || null;
+    transition.dotPathUpdates['savedAt'] = new Date();
+    const activeShiftKey = ['t07', 't09', 't11', 't13'].includes(targetUnit) ? 'shift1' :
+                           ['t15', 't17', 't19', 't21'].includes(targetUnit) ? 'shift2' : 'shift3';
+    transition.dotPathUpdates['shift'] = SHIFT_DISPLAY_NAMES[activeShiftKey] || 'I SHIFT';
+
+    let savedDoc = null;
+
+    if (!existingDoc) {
+      // 3. Doc missing: updateOne with $setOnInsert + $set, upsert: true
+      const missingFilter = {
         plantCode: 'ACL',
         analysisType: 'TK 205 Analysis',
-        unit: 'TK 205',
         date: payload.date,
-        shift: SHIFT_DISPLAY_NAMES[activeShiftKey] || activeShiftKey,
-        data: updatedRecordData,
-        submittedBy: updatedRecordData.submittedBy,
-        submittedById: updatedRecordData.submittedById,
-        company: updatedRecordData.company,
-        savedAt: new Date(),
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+      };
+      const updateDoc = {
+        $setOnInsert: {
+          plantName: 'ACL Plant',
+          plantCode: 'ACL',
+          analysisType: 'TK 205 Analysis',
+          unit: 'TK 205',
+          date: payload.date,
+          shift: 'All Shifts',
+          company: req.user?.company?._id || req.user?.company || null,
+          submittedById: req.user?._id || null,
+          createdAt: new Date(),
+        },
+        $set: transition.dotPathUpdates,
+      };
 
-    // Update in-memory cache
-    tk205Records.unshift(updatedRecordData);
+      try {
+        await PlantAnalysisRecord.updateOne(missingFilter, updateDoc, { upsert: true });
+        savedDoc = await PlantAnalysisRecord.findOne(missingFilter);
+      } catch (err) {
+        if (err.code === 11000 || String(err.message).includes('E11000')) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: Document for this date was created concurrently. Please retry.',
+          });
+        }
+        throw err;
+      }
+    } else {
+      // 4. Doc exists: findOneAndUpdate by _id, NO upsert, conditional guard
+      const existsFilter = {
+        _id: existingDoc._id,
+        ...(transition.isCorrection
+          ? {
+              [`data.lockedSlots.${targetUnit}.isSaved`]: true,
+              [`data.lockedSlots.${targetUnit}.correctionUsed`]: false,
+              [`data.lockedSlots.${targetUnit}.isLocked`]: false,
+            }
+          : {
+              $or: [
+                { [`data.lockedSlots.${targetUnit}.isSaved`]: { $ne: true } },
+                { [`data.lockedSlots.${targetUnit}`]: { $exists: false } },
+              ],
+            }),
+      };
+
+      savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
+        existsFilter,
+        { $set: transition.dotPathUpdates },
+        { new: true }
+      );
+
+      if (!savedDoc) {
+        return res.status(409).json({
+          success: false,
+          message: `Conflict: Slot ${targetUnit} has already been saved or locked by another session. Please refresh.`,
+        });
+      }
+    }
 
     // Activity Log Entry
     try {
@@ -367,77 +268,21 @@ router.post('/', async (req, res) => {
           action: 'TK_205_ANALYSIS_SAVED',
           user: req.user?._id,
           userName: req.user?.name,
-          details: `TK 205 Analysis saved for date: ${payload.date}, shift: ${SHIFT_DISPLAY_NAMES[activeShiftKey]}.`,
+          details: `TK 205 Analysis saved for date: ${payload.date}, slot: ${targetUnit}.`,
           timestamp: new Date(),
         });
       }
     } catch (logErr) {}
 
-    // Generate unique Save Event ID for this exact save operation
-    const saveEventId = 'SE_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-
-    // ── Execute Instant Email Dispatch Workflow ──
-    const { executeSaveAndEmailWorkflow } = require('../services/plantNotificationService');
-
-    let lastEmailResult = null;
-    let emailTimedOut = false;
-
-    try {
-      const emailPromise = executeSaveAndEmailWorkflow({
-        plantIdentifier: 'ACL',
-        analysisType: 'TK 205 Analysis',
-        unit: 'TK 205',
-        shift: SHIFT_DISPLAY_NAMES[activeShiftKey],
-        date: payload.date,
-        data: mergedRows,
-        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-        submittedById: req.user?._id || null,
-        company: updatedRecordData.company,
-        explicitRecord: savedDoc,
-        rawBody: { ...payload, rows: mergedRows, data: updatedRecordData },
-        saveEventId,
-        isTestMode,
-      });
-
-      lastEmailResult = await emailPromise;
-    } catch (err) {
-      console.warn(`[AutoPlantEmail] Instant workflow note for TK 205 ${activeShiftKey}:`, err.message);
-      lastEmailResult = { success: false, emailSent: false, emailStatus: 'failed', error: err.message };
-    }
-
-    if (savedDoc?._id) {
-      await PlantAnalysisRecord.findByIdAndUpdate(savedDoc._id, { $set: { data: updatedRecordData } });
-    }
-
-    const emailSent = !!(lastEmailResult && (lastEmailResult.emailSent || lastEmailResult.emailStatus === 'sent'));
-    const finalEmailStatus = emailTimedOut
-      ? 'pending'
-      : lastEmailResult?.emailStatus || (emailSent ? 'sent' : 'failed');
-    const finalRecipient =
-      lastEmailResult?.recipient ||
-      lastEmailResult?.data?.emailRecipient ||
-      savedDoc?.emailRecipient ||
-      '';
-
-    if (savedDoc && savedDoc._id) {
-      updatedRecordData._id = savedDoc._id;
-      updatedRecordData.recordId = savedDoc._id;
-    }
-
     return res.status(200).json({
       success: true,
-      message: `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB ✓`,
-      data: updatedRecordData,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      recordId: savedDoc?._id || updatedRecordData.id,
-      saveEventId,
-      emailSent: false,
-      emailPending: false,
-      emailStatus: 'disabled',
-      emailRecipient: '',
-      newlySavedShifts,
+      message: transition.isCorrection
+        ? `Correction for ${targetUnit} saved successfully. Slot is now locked.`
+        : `Successfully saved ${targetUnit} in MongoDB ✓`,
+      targetUnit,
+      isCorrection: transition.isCorrection,
+      dotPathUpdates: transition.dotPathUpdates,
+      recordId: savedDoc?._id || existingDoc?._id || null,
     });
   } catch (error) {
     console.error('[TK205Analysis API] Error saving data:', error);

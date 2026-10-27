@@ -582,6 +582,325 @@ const recordFieldEdits = ({
   return { editedFields, editAuditHistory, hasChanges };
 };
 
+/**
+ * Checks whether a scalar value is considered empty.
+ * "", null, undefined, or whitespace-only string are empty.
+ * 0 and "0" are valid non-empty values.
+ */
+const isValueEmpty = (v) => {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'number') return isNaN(v);
+  if (typeof v === 'string') return v.trim() === '';
+  return false;
+};
+
+/**
+ * Checks whether all fields in a unit object are empty.
+ */
+const isUnitEmpty = (unitObj) => {
+  if (!unitObj || typeof unitObj !== 'object') return true;
+  const values = Object.values(unitObj);
+  if (values.length === 0) return true;
+  return values.every((v) => isValueEmpty(v));
+};
+
+/**
+ * Compares two unit objects for analytical differences across all fields.
+ */
+const areUnitsDifferent = (unitA = {}, unitB = {}) => {
+  const allKeys = new Set([...Object.keys(unitA || {}), ...Object.keys(unitB || {})]);
+  for (const k of allKeys) {
+    if (isValueDifferent(unitA?.[k], unitB?.[k])) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Pure transition engine for sequential slot-level locking per FINAL SPEC (1-9).
+ *
+ * Rules:
+ * - Fresh date: only first unit enabled.
+ * - First save of unit k enables k+1.
+ * - While k+1 is unsaved, unit k can be edited exactly ONCE (one correction).
+ * - When k+1 is first saved, k is permanently locked; once correction is used, k locks immediately.
+ * - Last unit: entry, one correction, lock.
+ * - Identical re-save = ok: true, noChange: true (no state change, correction NOT consumed).
+ * - Only one unit may change per request (else 400).
+ * - Edit of locked unit = 400.
+ * - Empty unit save = 400 (0 is valid value; "", null, undefined, whitespace are empty).
+ * - Correction cannot clear all values in unit (else 400).
+ * - Skip-ahead save = 400.
+ * - Derive isOpen from state, do NOT store it.
+ *
+ * @param {Object} params
+ * @param {string[]} params.unitsOrder - Ordered list of unit keys (e.g. ['t07', 't09', ...])
+ * @param {Object} [params.lockedSlots] - Current data.lockedSlots state
+ * @param {Object} [params.storedRows] - Current stored data.rows
+ * @param {Object} [params.incomingRows] - Incoming payload rows
+ * @param {boolean} [params.isTestMode] - Test mode flag
+ * @returns {{ ok: boolean, status: number, noChange: boolean, message: string, targetUnit: string|null, isCorrection: boolean, dotPathUpdates: Object }}
+ */
+const computeSlotTransition = ({
+  unitsOrder = [],
+  lockedSlots = {},
+  storedRows = {},
+  incomingRows = {},
+  isTestMode = false,
+  now = new Date(),
+}) => {
+  if (!Array.isArray(unitsOrder) || unitsOrder.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      noChange: false,
+      message: 'Invalid or missing unitsOrder.',
+      targetUnit: null,
+      isCorrection: false,
+      dotPathUpdates: {},
+    };
+  }
+
+  // 1. Detect which units have changed values
+  const changedUnits = [];
+  for (const uKey of unitsOrder) {
+    const oldUnit = storedRows?.[uKey] || {};
+    const newUnit = incomingRows?.[uKey] || {};
+    if (areUnitsDifferent(oldUnit, newUnit)) {
+      changedUnits.push(uKey);
+    }
+  }
+
+  // 2. Identical re-save: no changes detected across all units
+  if (changedUnits.length === 0) {
+    return {
+      ok: true,
+      status: 200,
+      noChange: true,
+      message: 'No new or modified data found to save.',
+      targetUnit: null,
+      isCorrection: false,
+      dotPathUpdates: {},
+    };
+  }
+
+  // 3. Multi-unit change rejection: only one unit may change per save
+  if (changedUnits.length > 1) {
+    return {
+      ok: false,
+      status: 400,
+      noChange: false,
+      message: `Only one unit slot may be entered or edited per save. Detected changes in: ${changedUnits.join(', ')}`,
+      targetUnit: null,
+      isCorrection: false,
+      dotPathUpdates: {},
+    };
+  }
+
+  const targetUnit = changedUnits[0];
+  const targetIndex = unitsOrder.indexOf(targetUnit);
+
+  if (targetIndex === -1) {
+    return {
+      ok: false,
+      status: 400,
+      noChange: false,
+      message: `Unknown target unit slot: ${targetUnit}`,
+      targetUnit,
+      isCorrection: false,
+      dotPathUpdates: {},
+    };
+  }
+
+  const currentSlotState = lockedSlots?.[targetUnit] || {
+    isSaved: false,
+    correctionUsed: false,
+    editsCount: 0,
+    isLocked: false,
+  };
+
+  // 4. Reject edits to permanently locked units
+  if (currentSlotState.isLocked || currentSlotState.correctionUsed) {
+    return {
+      ok: false,
+      status: 400,
+      noChange: false,
+      message: `Cannot edit ${targetUnit} because it is permanently locked.`,
+      targetUnit,
+      isCorrection: false,
+      dotPathUpdates: {},
+    };
+  }
+
+  // 5. Predecessor Sequence Check: Preceding units must be completed and saved
+  if (targetIndex > 0) {
+    for (let p = 0; p < targetIndex; p++) {
+      const pKey = unitsOrder[p];
+      const pSlot = lockedSlots?.[pKey];
+      if (!pSlot || !pSlot.isSaved) {
+        return {
+          ok: false,
+          status: 400,
+          noChange: false,
+          message: `Sequential restriction: ${pKey} must be completed and saved before proceeding to ${targetUnit}.`,
+          targetUnit,
+          isCorrection: false,
+          dotPathUpdates: {},
+        };
+      }
+    }
+  }
+
+  // 6. Successor Check: If any subsequent unit was already saved, this unit is permanently locked
+  for (let j = targetIndex + 1; j < unitsOrder.length; j++) {
+    const nextKey = unitsOrder[j];
+    const nextSlot = lockedSlots?.[nextKey];
+    if (nextSlot && nextSlot.isSaved) {
+      return {
+        ok: false,
+        status: 400,
+        noChange: false,
+        message: `${targetUnit} is permanently locked because ${nextKey} has already been saved.`,
+        targetUnit,
+        isCorrection: false,
+        dotPathUpdates: {},
+      };
+    }
+  }
+
+  // 7. Non-empty Validation
+  const targetIncoming = incomingRows?.[targetUnit];
+  const isEmpty = isUnitEmpty(targetIncoming);
+
+  if (!currentSlotState.isSaved) {
+    // First-time save of this unit: must not be completely empty
+    if (isEmpty) {
+      return {
+        ok: false,
+        status: 400,
+        noChange: false,
+        message: `Cannot save empty slot ${targetUnit}. At least one non-empty value is required.`,
+        targetUnit,
+        isCorrection: false,
+        dotPathUpdates: {},
+      };
+    }
+  } else {
+    // Correction save of this unit: cannot clear all values
+    if (isEmpty) {
+      return {
+        ok: false,
+        status: 400,
+        noChange: false,
+        message: `A correction cannot clear all values in ${targetUnit}. At least one non-empty value is required.`,
+        targetUnit,
+        isCorrection: true,
+        dotPathUpdates: {},
+      };
+    }
+  }
+
+  // 8. Build Atomic Mongo dotPathUpdates
+  const nowIso = typeof now === 'string' ? now : (now instanceof Date ? now.toISOString() : new Date().toISOString());
+  const dotPathUpdates = {};
+  dotPathUpdates[`data.rows.${targetUnit}`] = targetIncoming;
+
+  if (!currentSlotState.isSaved) {
+    // First save of unit k
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.isSaved`] = true;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.correctionUsed`] = false;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.editsCount`] = 0;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.isLocked`] = false;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.savedAt`] = nowIso;
+
+    // Lock all predecessors when unit k is saved
+    for (let p = 0; p < targetIndex; p++) {
+      const pKey = unitsOrder[p];
+      dotPathUpdates[`data.lockedSlots.${pKey}.isLocked`] = true;
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      noChange: false,
+      message: `Slot ${targetUnit} saved successfully.`,
+      targetUnit,
+      isCorrection: false,
+      dotPathUpdates,
+    };
+  } else {
+    // Single correction save of unit k -> Locks immediately!
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.correctionUsed`] = true;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.editsCount`] = (currentSlotState.editsCount || 0) + 1;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.isLocked`] = true;
+    dotPathUpdates[`data.lockedSlots.${targetUnit}.correctedAt`] = nowIso;
+
+    return {
+      ok: true,
+      status: 200,
+      noChange: false,
+      message: `Correction for slot ${targetUnit} saved successfully. Slot is now locked.`,
+      targetUnit,
+      isCorrection: true,
+      dotPathUpdates,
+    };
+  }
+};
+
+/**
+ * Given duplicate documents for the same plant, analysis, and date,
+ * returns the canonical document:
+ * 1. Document with the highest count of non-empty slot values.
+ * 2. Tie-breaker: most recent updatedAt (or createdAt) timestamp.
+ *
+ * @param {Object[]} docs
+ * @returns {Object|null} Canonical document
+ */
+const pickCanonicalDoc = (docs) => {
+  if (!Array.isArray(docs) || docs.length === 0) return null;
+  if (docs.length === 1) return docs[0];
+
+  const countNonEmptyValues = (doc) => {
+    let count = 0;
+    const rows = doc?.data?.rows || doc?.data?.shiftRows || doc?.data?.shifts || doc?.data || {};
+    if (typeof rows !== 'object') return 0;
+    for (const slotKey of Object.keys(rows)) {
+      const slot = rows[slotKey];
+      if (slot && typeof slot === 'object') {
+        for (const val of Object.values(slot)) {
+          if (!isValueEmpty(val)) count++;
+        }
+      }
+    }
+    return count;
+  };
+
+  let bestDoc = docs[0];
+  let bestCount = countNonEmptyValues(bestDoc);
+  let bestUpdatedAt = new Date(bestDoc?.updatedAt || bestDoc?.createdAt || 0).getTime();
+
+  for (let i = 1; i < docs.length; i++) {
+    const doc = docs[i];
+    const count = countNonEmptyValues(doc);
+    const updatedAt = new Date(doc?.updatedAt || doc?.createdAt || 0).getTime();
+
+    if (count > bestCount) {
+      bestDoc = doc;
+      bestCount = count;
+      bestUpdatedAt = updatedAt;
+    } else if (count === bestCount) {
+      if (updatedAt > bestUpdatedAt) {
+        bestDoc = doc;
+        bestCount = count;
+        bestUpdatedAt = updatedAt;
+      }
+    }
+  }
+
+  return bestDoc;
+};
+
 module.exports = {
   DEFAULT_SHIFTS_3,
   DEFAULT_SHIFTS_2,
@@ -594,4 +913,8 @@ module.exports = {
   validateSequentialSave,
   applySequentialSaveTransition,
   recordFieldEdits,
+  isValueEmpty,
+  isUnitEmpty,
+  computeSlotTransition,
+  pickCanonicalDoc,
 };
