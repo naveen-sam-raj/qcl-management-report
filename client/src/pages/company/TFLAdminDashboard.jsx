@@ -1,16 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  PieChart,
+  Pie,
   Cell,
-  LabelList,
-  ReferenceLine,
-  ReferenceArea,
+  Tooltip,
 } from 'recharts';
 import {
   Factory,
@@ -24,12 +18,11 @@ import {
   Info,
   Clock,
   HelpCircle,
-  TrendingUp,
 } from 'lucide-react';
 import api from '../../services/api';
 import { useToast } from '../../components/common/Toast';
 
-// Plant metadata and icons
+// Plant metadata and branding
 const PLANT_CONFIG = {
   ACL: { name: 'ACL Plant', icon: Factory, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
   SA: { name: 'SA Plant', icon: Flame, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
@@ -39,6 +32,34 @@ const PLANT_CONFIG = {
 
 const PLANT_ORDER = ['ACL', 'SA', 'OFFSITE', 'CO2'];
 
+// Curated 16 distinct categorical colors for Inner Ring (Analyses)
+// Excludes pure alert red (#ef4444) and pure emerald green (#10b981) to avoid status confusion
+const ANALYSIS_PALETTE = [
+  '#3b82f6', // Blue
+  '#8b5cf6', // Purple
+  '#f59e0b', // Amber
+  '#06b6d4', // Cyan
+  '#ec4899', // Pink
+  '#14b8a6', // Teal
+  '#6366f1', // Indigo
+  '#f97316', // Orange
+  '#a855f7', // Violet
+  '#0284c7', // Sky
+  '#d946ef', // Fuchsia
+  '#84cc16', // Lime
+  '#64748b', // Slate
+  '#0ea5e9', // Light Blue
+  '#eab308', // Yellow
+  '#4f46e5', // Deep Indigo
+];
+
+// Status colors strictly standardized for Outer Ring
+const STATUS_COLORS = {
+  outOfLimit: '#ef4444', // Red
+  inLimit: '#10b981',    // Emerald Green
+  noRange: '#94a3b8',    // Slate Grey
+};
+
 /**
  * Returns today's date in IST format: YYYY-MM-DD
  */
@@ -47,65 +68,259 @@ function getTodayIST() {
 }
 
 /**
- * Custom Tooltip for Bar Charts
+ * Computes donut chart data and complete analysis breakdown for a plant
  */
-const CustomBarTooltip = ({ active, payload, plantName, paramLabel, unit, range }) => {
+function computePlantDonutData(plantData, sortBy = 'count') {
+  if (!plantData || !plantData.hasData || !plantData.analyses) {
+    return {
+      analysesList: [],
+      innerRingData: [],
+      outerRingData: [],
+      totalEntered: 0,
+      totalInLimit: 0,
+      totalOutOfLimit: 0,
+      totalNoRange: 0,
+      totalNoData: 0,
+      plantOutPercent: 0,
+    };
+  }
+
+  const rawAnalyses = plantData.analyses || {};
+  const processedList = [];
+
+  let plantInLimit = 0;
+  let plantOutOfLimit = 0;
+  let plantNoRange = 0;
+  let plantNoData = 0;
+
+  for (const [analysisType, aObj] of Object.entries(rawAnalyses)) {
+    let aInLimit = 0;
+    let aOutOfLimit = 0;
+    let aNoRange = 0;
+    let aNoData = 0;
+
+    const params = aObj.parameters || {};
+    for (const p of Object.values(params)) {
+      for (const pt of p.points || []) {
+        if (pt.status === 'IN_LIMIT') aInLimit++;
+        else if (pt.status === 'OUT_OF_LIMIT') aOutOfLimit++;
+        else if (pt.status === 'NO_RANGE') aNoRange++;
+        else if (pt.status === 'NO_DATA') aNoData++;
+      }
+    }
+
+    const aTotalEntered = aInLimit + aOutOfLimit + aNoRange;
+    const aOutPercent = aTotalEntered > 0 ? parseFloat(((aOutOfLimit / aTotalEntered) * 100).toFixed(1)) : 0;
+    const isPureNoRange = aTotalEntered > 0 && aOutOfLimit === 0 && aInLimit === 0 && aNoRange > 0;
+
+    plantInLimit += aInLimit;
+    plantOutOfLimit += aOutOfLimit;
+    plantNoRange += aNoRange;
+    plantNoData += aNoData;
+
+    processedList.push({
+      analysisType,
+      title: aObj.title || analysisType,
+      totalEntered: aTotalEntered,
+      inLimit: aInLimit,
+      outOfLimit: aOutOfLimit,
+      noRange: aNoRange,
+      noData: aNoData,
+      outPercent: aOutPercent,
+      isPureNoRange,
+    });
+  }
+
+  const plantTotalEntered = plantInLimit + plantOutOfLimit + plantNoRange;
+  const plantOutPercent = plantTotalEntered > 0 ? parseFloat(((plantOutOfLimit / plantTotalEntered) * 100).toFixed(1)) : 0;
+
+  // Sorting
+  processedList.sort((a, b) => {
+    // Zero-value analyses always sink to the bottom
+    if (a.totalEntered === 0 && b.totalEntered > 0) return 1;
+    if (b.totalEntered === 0 && a.totalEntered > 0) return -1;
+    if (a.totalEntered === 0 && b.totalEntered === 0) return a.title.localeCompare(b.title);
+
+    if (sortBy === 'outPercent') {
+      if (b.outPercent !== a.outPercent) return b.outPercent - a.outPercent;
+      if (b.outOfLimit !== a.outOfLimit) return b.outOfLimit - a.outOfLimit;
+      return b.totalEntered - a.totalEntered;
+    }
+    // Default: 'count' descending
+    if (b.totalEntered !== a.totalEntered) return b.totalEntered - a.totalEntered;
+    return b.outPercent - a.outPercent;
+  });
+
+  // Assign distinct categorical colors
+  processedList.forEach((item, idx) => {
+    item.color = item.totalEntered > 0 ? ANALYSIS_PALETTE[idx % ANALYSIS_PALETTE.length] : '#cbd5e1';
+    item.percentageOfPlant = plantTotalEntered > 0 ? parseFloat(((item.totalEntered / plantTotalEntered) * 100).toFixed(1)) : 0;
+  });
+
+  // Build Inner Ring Data (Analyses)
+  const innerRingData = [];
+  // Build Outer Ring Data (Status Breakdown per Analysis)
+  const outerRingData = [];
+
+  processedList.forEach((item) => {
+    if (item.totalEntered <= 0) return;
+
+    innerRingData.push({
+      name: item.title,
+      value: item.totalEntered,
+      color: item.color,
+      analysis: item,
+      isInner: true,
+    });
+
+    // Outer segments for this analysis (Out of limit, Normal, No range)
+    if (item.outOfLimit > 0) {
+      outerRingData.push({
+        name: `${item.title} (Out of Limit)`,
+        statusLabel: 'Out of Limit',
+        value: item.outOfLimit,
+        color: STATUS_COLORS.outOfLimit,
+        analysis: item,
+        isOuter: true,
+      });
+    }
+    if (item.inLimit > 0) {
+      outerRingData.push({
+        name: `${item.title} (Normal)`,
+        statusLabel: 'Normal (In Limit)',
+        value: item.inLimit,
+        color: STATUS_COLORS.inLimit,
+        analysis: item,
+        isOuter: true,
+      });
+    }
+    if (item.noRange > 0) {
+      outerRingData.push({
+        name: `${item.title} (No Range)`,
+        statusLabel: 'No Range',
+        value: item.noRange,
+        color: STATUS_COLORS.noRange,
+        analysis: item,
+        isOuter: true,
+      });
+    }
+  });
+
+  return {
+    analysesList: processedList,
+    innerRingData,
+    outerRingData,
+    totalEntered: plantTotalEntered,
+    totalInLimit: plantInLimit,
+    totalOutOfLimit: plantOutOfLimit,
+    totalNoRange: plantNoRange,
+    totalNoData: plantNoData,
+    plantOutPercent,
+  };
+}
+
+/**
+ * Custom Tooltip for Donut Charts
+ */
+const CustomDonutTooltip = ({ active, payload, plantName }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
-    const isNoData = data.value === null || data.status === 'NO_DATA';
+    const a = data.analysis;
+    if (!a) return null;
 
     return (
-      <div className="bg-slate-900 text-white p-3 rounded-lg shadow-xl border border-slate-700 text-xs min-w-[200px] z-50">
+      <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs min-w-[230px] max-w-[300px] z-50">
         <div className="font-bold text-slate-300 border-b border-slate-700 pb-1.5 mb-2 flex items-center justify-between">
-          <span>{plantName}</span>
-          <span className="text-[10px] font-mono text-slate-400">{data.date}</span>
+          <span className="truncate">{plantName}</span>
+          <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-2">
+            {a.percentageOfPlant}% of Plant
+          </span>
         </div>
-        <div className="space-y-1">
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-400">Parameter:</span>
-            <span className="font-semibold text-white">{paramLabel}</span>
+        <div className="mb-2">
+          <p className="font-extrabold text-sm text-white tracking-tight leading-snug">
+            {a.title}
+          </p>
+          {data.isOuter && (
+            <p className="text-[11px] font-semibold text-slate-300 mt-1 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: data.color }} />
+              <span>Segment: {data.statusLabel} ({data.value} values)</span>
+            </p>
+          )}
+        </div>
+        <div className="space-y-1.5 pt-1.5 border-t border-slate-800 text-[11px]">
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-400">Total Entered:</span>
+            <span className="font-bold font-mono text-white">{a.totalEntered}</span>
           </div>
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-400">Shift / Slot:</span>
-            <span className="font-semibold text-slate-200">{data.slot}</span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-400">Standard Range:</span>
-            <span className="font-mono text-slate-300">{range ? `${range} ${unit}` : 'No Standard Range'}</span>
-          </div>
-          <div className="flex justify-between gap-2 pt-1 border-t border-slate-800">
-            <span className="text-slate-400">Measured Value:</span>
-            <span className="font-bold text-base text-white">
-              {isNoData ? '— (No Data)' : `${data.value} ${unit}`}
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-red-400 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> Out of Limit:
             </span>
+            <span className="font-bold font-mono text-red-400">{a.outOfLimit} ({a.outPercent}%)</span>
           </div>
-          <div className="pt-1 flex items-center gap-1.5 font-bold text-[11px]">
-            {data.status === 'IN_LIMIT' && (
-              <span className="text-emerald-400 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> IN LIMIT
-              </span>
-            )}
-            {data.status === 'OUT_OF_LIMIT' && (
-              <span className="text-red-400 flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" /> OUT OF LIMIT
-              </span>
-            )}
-            {data.status === 'NO_RANGE' && (
-              <span className="text-blue-400 flex items-center gap-1">
-                <Info className="w-3.5 h-3.5" /> NO RANGE
-              </span>
-            )}
-            {isNoData && (
-              <span className="text-slate-400 flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5" /> NO DATA
-              </span>
-            )}
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Normal (In Limit):
+            </span>
+            <span className="font-bold font-mono text-emerald-400">{a.inLimit}</span>
           </div>
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-300 flex items-center gap-1">
+              <Info className="w-3 h-3" /> No Range:
+            </span>
+            <span className="font-bold font-mono text-slate-300">{a.noRange}</span>
+          </div>
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-400 flex items-center gap-1">
+              <HelpCircle className="w-3 h-3" /> No Data:
+            </span>
+            <span className="font-mono text-slate-400">{a.noData}</span>
+          </div>
+        </div>
+        <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between">
+          <span className="text-[10px] text-slate-400 font-medium">Compliance:</span>
+          {a.totalEntered === 0 ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+              No Data
+            </span>
+          ) : a.isPureNoRange ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+              No Standard Range
+            </span>
+          ) : (
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${a.outPercent > 0 ? 'bg-red-950/80 text-red-300 border border-red-800/60' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'}`}>
+              {a.outPercent}% Out of Limit
+            </span>
+          )}
         </div>
       </div>
     );
   }
   return null;
+};
+
+/**
+ * Small percentage labels on large slices of the inner ring (>= 8% share)
+ */
+const renderInnerSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+  if (percent < 0.08) return null;
+  const RADIAN = Math.PI / 180;
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#ffffff"
+      textAnchor="middle"
+      dominantBaseline="central"
+      className="text-[10px] font-extrabold pointer-events-none drop-shadow-xs"
+    >
+      {`${(percent * 100).toFixed(0)}%`}
+    </text>
+  );
 };
 
 const TFLAdminDashboard = () => {
@@ -123,8 +338,13 @@ const TFLAdminDashboard = () => {
   // Dashboard API response data
   const [dashboardData, setDashboardData] = useState(null);
 
-  // Per-plant user selection: { [plantCode]: { analysis: '...', parameter: '...' } }
-  const [userSelections, setUserSelections] = useState({});
+  // Per-plant sorting mode: { [plantCode]: 'count' | 'outPercent' }
+  const [sortModes, setSortModes] = useState({
+    ACL: 'count',
+    SA: 'count',
+    OFFSITE: 'count',
+    CO2: 'count',
+  });
 
   const timerRef = useRef(null);
 
@@ -146,37 +366,6 @@ const TFLAdminDashboard = () => {
       if (res.data?.success) {
         setDashboardData(res.data);
         setLastUpdated(res.data.asOfIST || new Date().toLocaleTimeString());
-
-        // Update / initialize user selections for each plant
-        setUserSelections((prev) => {
-          const updated = { ...prev };
-          const plants = res.data.plants || {};
-
-          for (const p of PLANT_ORDER) {
-            const pData = plants[p];
-            if (!pData || !pData.hasData) continue;
-
-            // If user hasn't selected an analysis for this plant yet or current selection is invalid
-            const currentSel = updated[p];
-            const hasValidAnalysis = currentSel?.analysis && pData.analyses?.[currentSel.analysis];
-            const hasValidParam = hasValidAnalysis && pData.analyses[currentSel.analysis]?.parameters?.[currentSel.parameter];
-
-            if (!hasValidAnalysis || !hasValidParam) {
-              // Default to first analysis and parameter with data
-              if (pData.defaultSelection) {
-                updated[p] = {
-                  analysis: pData.defaultSelection.analysis,
-                  parameter: pData.defaultSelection.parameter,
-                };
-              } else if (pData.availableAnalyses?.length > 0) {
-                const firstA = pData.availableAnalyses[0];
-                const firstP = firstA.parameters?.[0]?.key || '';
-                updated[p] = { analysis: firstA.analysisType, parameter: firstP };
-              }
-            }
-          }
-          return updated;
-        });
       } else {
         setApiError(res.data?.message || 'Failed to fetch live analytics.');
       }
@@ -252,30 +441,6 @@ const TFLAdminDashboard = () => {
     }
     setFromDate(fromDate);
     setToDate(val);
-  };
-
-  const handleAnalysisChange = (plantCode, analysisType) => {
-    const pData = dashboardData?.plants?.[plantCode];
-    const aObj = pData?.analyses?.[analysisType];
-    const firstParamKey = aObj ? Object.keys(aObj.parameters || {})[0] || '' : '';
-
-    setUserSelections((prev) => ({
-      ...prev,
-      [plantCode]: {
-        analysis: analysisType,
-        parameter: firstParamKey,
-      },
-    }));
-  };
-
-  const handleParamChange = (plantCode, paramKey) => {
-    setUserSelections((prev) => ({
-      ...prev,
-      [plantCode]: {
-        ...prev[plantCode],
-        parameter: paramKey,
-      },
-    }));
   };
 
   return (
@@ -395,7 +560,7 @@ const TFLAdminDashboard = () => {
         </div>
       )}
 
-      {/* ── 2. Grid of 4 Plant Bar Chart Panels ── */}
+      {/* ── 2. Grid of 4 Plant Donut Chart Panels ── */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         {PLANT_ORDER.map((plantCode) => {
           const cfg = PLANT_CONFIG[plantCode];
@@ -403,36 +568,11 @@ const TFLAdminDashboard = () => {
           const pData = dashboardData?.plants?.[plantCode];
           const isAccessible = pData?.accessible !== false;
 
-          const sel = userSelections[plantCode] || {};
-          const selectedAnalysis = sel.analysis;
-          const selectedParamKey = sel.parameter;
+          const currentSort = sortModes[plantCode] || 'count';
+          const computed = computePlantDonutData(pData, currentSort);
 
-          const currentAnalysis = pData?.analyses?.[selectedAnalysis];
-          const currentParam = currentAnalysis?.parameters?.[selectedParamKey];
-          const points = currentParam?.points || [];
-          const limit = currentParam?.limit;
-
-          // Status summary counts
+          // Status summary counts directly from plant payload
           const statusSummary = pData?.statusSummary || { inLimit: 0, outOfLimit: 0, noRange: 0, noData: 0 };
-
-          // Y-axis domain calculation
-          const nonNullValues = points.filter((pt) => pt.value !== null).map((pt) => pt.value);
-          let yMin = 'auto';
-          let yMax = 'auto';
-          if (nonNullValues.length > 0) {
-            const minVal = Math.min(...nonNullValues);
-            const maxVal = Math.max(...nonNullValues);
-            const refMin = limit?.min !== undefined ? limit.min : minVal;
-            const refMax = limit?.max !== undefined ? limit.max : maxVal;
-            const overallMin = Math.min(minVal, refMin);
-            const overallMax = Math.max(maxVal, refMax);
-            const padding = (overallMax - overallMin) * 0.15 || 1;
-            yMin = Math.max(0, Math.floor((overallMin - padding) * 10) / 10);
-            yMax = Math.ceil((overallMax + padding) * 10) / 10;
-          }
-
-          // Dynamic minWidth for horizontal scrolling on multi-day/dense ranges
-          const scrollWidth = points.length > 8 ? `${Math.max(500, points.length * 45)}px` : '100%';
 
           return (
             <div
@@ -453,7 +593,7 @@ const TFLAdminDashboard = () => {
                   </div>
                 </div>
 
-                {/* Status Summary Strip */}
+                {/* Status Summary Strip (Plant Badge Totals) */}
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
                   <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
@@ -473,62 +613,41 @@ const TFLAdminDashboard = () => {
                 </div>
               </div>
 
-              {/* Selectors Bar: Analysis & Parameter Dropdowns */}
-              <div className="bg-slate-50/70 px-4 py-2.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2 flex-1">
-                  {/* Analysis Selector */}
-                  <div className="flex items-center gap-1 text-xs">
-                    <span className="text-[11px] font-semibold text-slate-500">Analysis:</span>
-                    <select
-                      value={selectedAnalysis || ''}
-                      onChange={(e) => handleAnalysisChange(plantCode, e.target.value)}
-                      disabled={!isAccessible || !pData?.availableAnalyses?.length}
-                      className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-hidden focus:border-blue-500 cursor-pointer max-w-[200px] truncate"
-                    >
-                      {pData?.availableAnalyses?.map((a) => (
-                        <option key={a.analysisType} value={a.analysisType}>
-                          {a.title} {a.hasData ? '' : '(No Data)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+              {/* Sub-header Controls Bar: Section title + Sort Toggle */}
+              <div className="bg-slate-50/70 px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                  Analysis Distribution & Compliance
+                </span>
 
-                  {/* Parameter Selector */}
-                  <div className="flex items-center gap-1 text-xs">
-                    <span className="text-[11px] font-semibold text-slate-500">Parameter:</span>
-                    <select
-                      value={selectedParamKey || ''}
-                      onChange={(e) => handleParamChange(plantCode, e.target.value)}
-                      disabled={!isAccessible || !currentAnalysis?.parameters}
-                      className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-hidden focus:border-blue-500 cursor-pointer max-w-[160px] truncate"
+                {/* Sort Toggle: By Count vs By Out % */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-[11px] font-semibold text-slate-500">Sort:</span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px] font-semibold">
+                    <button
+                      onClick={() => setSortModes((prev) => ({ ...prev, [plantCode]: 'count' }))}
+                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
+                        currentSort === 'count'
+                          ? 'bg-white text-blue-700 shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
                     >
-                      {currentAnalysis?.parameters &&
-                        Object.values(currentAnalysis.parameters).map((param) => (
-                          <option key={param.key} value={param.key}>
-                            {param.label} {param.unit ? `(${param.unit})` : ''}
-                          </option>
-                        ))}
-                    </select>
+                      By Count
+                    </button>
+                    <button
+                      onClick={() => setSortModes((prev) => ({ ...prev, [plantCode]: 'outPercent' }))}
+                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
+                        currentSort === 'outPercent'
+                          ? 'bg-white text-blue-700 shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      By Out %
+                    </button>
                   </div>
                 </div>
-
-                {/* Parameter Range Badge */}
-                {currentParam && (
-                  <div className="text-[11px] font-mono shrink-0">
-                    {currentParam.range ? (
-                      <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-bold">
-                        Range: {currentParam.range} {currentParam.unit}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                        No Standard Range
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
 
-              {/* Chart Content Body */}
+              {/* Card Content Body */}
               <div className="p-4 flex-1 flex flex-col justify-center min-h-[340px]">
                 {loading ? (
                   <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-2">
@@ -540,106 +659,171 @@ const TFLAdminDashboard = () => {
                     <p className="text-xs font-bold">Access Restricted</p>
                     <p className="text-[11px]">You are not authorized to view {cfg.name} analytics.</p>
                   </div>
-                ) : !pData?.hasData || points.length === 0 ? (
+                ) : !pData?.hasData || computed.totalEntered === 0 ? (
                   <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-1.5">
                     <Info className="w-8 h-8 text-slate-300 stroke-1" />
-                    <p className="text-xs font-bold text-slate-600">No data for {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}</p>
-                    <p className="text-[11px] text-slate-400">No analysis readings recorded for this operational unit.</p>
+                    <p className="text-xs font-bold text-slate-600">
+                      No data for {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      No analysis readings recorded for this operational unit.
+                    </p>
                   </div>
                 ) : (
-                  <div className="w-full overflow-x-auto">
-                    <div style={{ minWidth: scrollWidth, width: '100%', height: 320 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={points}
-                          margin={{ top: 25, right: 25, left: 0, bottom: points.length > 7 ? 25 : 10 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }}
-                            interval={0}
-                            angle={points.length > 7 ? -30 : 0}
-                            textAnchor={points.length > 7 ? 'end' : 'middle'}
-                            height={points.length > 7 ? 40 : 25}
-                          />
-                          <YAxis
-                            domain={[yMin, yMax]}
-                            tick={{ fontSize: 11, fill: '#64748b' }}
-                            width={42}
-                          />
-                          <Tooltip
-                            content={
-                              <CustomBarTooltip
-                                plantName={cfg.name}
-                                paramLabel={currentParam?.label || selectedParamKey}
-                                unit={currentParam?.unit || ''}
-                                range={currentParam?.range || null}
-                              />
-                            }
-                          />
-
-                          {/* Min / Max ReferenceLines & Light Corridor Area */}
-                          {limit?.min !== undefined && limit?.max !== undefined && (
-                            <>
-                              <ReferenceArea
-                                y1={limit.min}
-                                y2={limit.max}
-                                fill="#10b981"
-                                fillOpacity={0.08}
-                                ifOverflow="extendDomain"
-                              />
-                              <ReferenceLine
-                                y={limit.min}
-                                stroke="#ef4444"
-                                strokeDasharray="4 4"
-                                strokeWidth={1.5}
-                                label={{
-                                  value: `Min: ${limit.min}`,
-                                  fill: '#dc2626',
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  position: 'insideBottomLeft',
-                                }}
-                              />
-                              <ReferenceLine
-                                y={limit.max}
-                                stroke="#ef4444"
-                                strokeDasharray="4 4"
-                                strokeWidth={1.5}
-                                label={{
-                                  value: `Max: ${limit.max}`,
-                                  fill: '#dc2626',
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  position: 'insideTopLeft',
-                                }}
-                              />
-                            </>
-                          )}
-
-                          {/* Colored Bars strictly by status */}
-                          <Bar
-                            dataKey="value"
-                            radius={[4, 4, 0, 0]}
-                            maxBarSize={45}
-                            animationDuration={400}
-                          >
-                            <LabelList
+                  <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 w-full">
+                    {/* ── Left: Dual-Ring Concentric Donut Chart + Center Summary ── */}
+                    <div className="shrink-0 flex flex-col items-center justify-center self-center lg:self-start pt-2">
+                      <div className="relative flex items-center justify-center" style={{ width: 280, height: 280 }}>
+                        <ResponsiveContainer width={280} height={280}>
+                          <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                            {/* Outer Ring: Compliance status breakdown (Thick 24px) */}
+                            <Pie
+                              data={computed.outerRingData}
                               dataKey="value"
-                              position="top"
-                              style={{ fontSize: 10, fontWeight: 700, fill: '#1e293b' }}
-                            />
-                            {points.map((pt, idx) => {
-                              let barColor = '#94a3b8'; // grey default
-                              if (pt.status === 'IN_LIMIT') barColor = '#10b981'; // green
-                              else if (pt.status === 'OUT_OF_LIMIT') barColor = '#ef4444'; // red
-                              else if (pt.status === 'NO_RANGE') barColor = '#3b82f6'; // blue
-                              return <Cell key={`cell-${idx}`} fill={barColor} />;
-                            })}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={90}
+                              outerRadius={114}
+                              paddingAngle={1}
+                              stroke="#ffffff"
+                              strokeWidth={1.5}
+                              animationDuration={400}
+                            >
+                              {computed.outerRingData.map((entry, index) => (
+                                <Cell key={`outer-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+
+                            {/* Inner Ring: Analysis distribution (Distinct colors) */}
+                            <Pie
+                              data={computed.innerRingData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={84}
+                              paddingAngle={1}
+                              stroke="#ffffff"
+                              strokeWidth={1.5}
+                              label={renderInnerSliceLabel}
+                              labelLine={false}
+                              animationDuration={400}
+                            >
+                              {computed.innerRingData.map((entry, index) => (
+                                <Cell key={`inner-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+
+                            <Tooltip content={<CustomDonutTooltip plantName={cfg.name} />} />
+                          </PieChart>
+                        </ResponsiveContainer>
+
+                        {/* Center Ring Summary */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                          <span className="text-3xl font-black text-slate-900 tracking-tight leading-none">
+                            {computed.totalEntered.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                            values entered
+                          </span>
+                          <span
+                            className={`mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                              computed.totalEntered === 0
+                                ? 'bg-slate-100 text-slate-500 border-slate-200'
+                                : computed.plantOutPercent > 0
+                                ? 'bg-red-50 text-red-700 border-red-200 shadow-2xs'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-2xs'
+                            }`}
+                          >
+                            {computed.plantOutPercent}% Out of Limit
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Small visual guide underneath donut */}
+                      <div className="mt-3 flex items-center justify-center gap-3 text-[10px] font-semibold text-slate-500">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-red-500" /> Out of Limit
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" /> Normal
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-slate-400" /> No Range
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ── Right: Comprehensive Interactive Legend (No inner scroll, card grows) ── */}
+                    <div className="w-full flex-1">
+                      <div className="space-y-1.5">
+                        {computed.analysesList.map((a) => (
+                          <div
+                            key={a.analysisType}
+                            className={`p-2 rounded-lg border transition flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                              a.totalEntered === 0
+                                ? 'bg-slate-50/60 border-dashed border-slate-200 opacity-60'
+                                : 'bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-2xs'
+                            }`}
+                          >
+                            {/* Left: Color dot + Analysis Name + Count (%) */}
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: a.color }}
+                              />
+                              <div className="truncate">
+                                <span className="font-bold text-slate-800 text-[12px] truncate block">
+                                  {a.title}
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-mono">
+                                  {a.totalEntered} {a.totalEntered === 1 ? 'value' : 'values'} ({a.percentageOfPlant}%)
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Right: Out | Normal | No Range + Out % Badge */}
+                            <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                              <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                                <span className="text-red-600 font-semibold">
+                                  Out <strong className="font-bold">{a.outOfLimit}</strong>
+                                </span>
+                                <span className="text-slate-300">|</span>
+                                <span className="text-emerald-600 font-semibold">
+                                  Normal <strong className="font-bold">{a.inLimit}</strong>
+                                </span>
+                                <span className="text-slate-300">|</span>
+                                <span className="text-slate-500">
+                                  No range <strong className="font-semibold text-slate-700">{a.noRange}</strong>
+                                </span>
+                              </div>
+
+                              {/* Out % Badge */}
+                              <div className="shrink-0 min-w-[72px] text-right">
+                                {a.totalEntered === 0 ? (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200">
+                                    No data
+                                  </span>
+                                ) : a.isPureNoRange ? (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                    No range
+                                  </span>
+                                ) : a.outPercent > 0 ? (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-red-50 text-red-700 border border-red-200">
+                                    {a.outPercent}% Out
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    0% Out
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
