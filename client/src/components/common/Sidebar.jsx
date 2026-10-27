@@ -49,8 +49,9 @@ const Sidebar = ({ isOpen, onClose }) => {
     if (user?.role === 'company_admin') {
       // Company admins only see their own company dashboard
       const companySlug = user.company?.code?.toLowerCase() || 'tfl';
+      const isTFL = companySlug === 'tfl';
       return [
-        { label: 'Dashboard', to: `/admin/${companySlug}`, icon: LayoutDashboard, exact: true },
+        { label: isTFL ? 'Plant Dashboard' : 'Dashboard', to: `/admin/${companySlug}`, icon: LayoutDashboard, exact: true },
         { label: 'Plants', to: `/admin/${companySlug}/plants`, icon: Factory },
         { label: 'Users', to: `/admin/${companySlug}/users`, icon: Users2 },
         { label: 'Reports', to: `/admin/${companySlug}/reports`, icon: FileSpreadsheet },

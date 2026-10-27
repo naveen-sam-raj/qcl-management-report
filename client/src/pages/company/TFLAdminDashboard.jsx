@@ -280,6 +280,20 @@ const TFLAdminDashboard = () => {
 
   return (
     <div className="space-y-4 animate-fadeIn pb-8">
+      {/* Heading Block */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-1.5">
+          <Factory className="w-3.5 h-3.5 text-blue-600" />
+          <span>TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED</span>
+        </div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          Plant Dashboard
+        </h1>
+        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+          Live operational parameter status and analytics across all 4 plant units
+        </p>
+      </div>
+
       {/* ── 1. Top Controls Bar: Date Filter + Live Status + Refresh ── */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         {/* Date Filter Controls */}
