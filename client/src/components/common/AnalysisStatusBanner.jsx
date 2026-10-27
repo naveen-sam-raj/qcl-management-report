@@ -34,8 +34,9 @@ export const StatusSaveButton = ({
   defaultLabel = 'Save / Submit',
   successLabel,
   recipientEmail,
+  alwaysShowSaveText = false,
 }) => {
-  let label = defaultLabel;
+  let label = alwaysShowSaveText ? 'Save' : defaultLabel;
   let icon = <Save className="w-3.5 h-3.5" />;
   let btnClasses = 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20';
 
@@ -52,6 +53,12 @@ export const StatusSaveButton = ({
     label = 'Saving...';
     icon = <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />;
     btnClasses = 'bg-blue-600 text-white opacity-80 cursor-wait';
+  } else if (alwaysShowSaveText) {
+    label = 'Save';
+    icon = <Save className="w-3.5 h-3.5" />;
+    btnClasses = isLocked || disabled
+      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20';
   } else if (isLocked) {
     label = 'Locked';
     icon = <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />;

@@ -10,7 +10,6 @@ import {
 import {
   ArrowLeft,
   Calendar,
-  Save,
   RotateCcw,
   CheckCircle2,
   AlertCircle,
@@ -22,7 +21,7 @@ import {
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
 // ─── TK 205 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
-// Frequency: SHIFT TWICE
+// Frequency: SHIFT TWICE (12 slots per operating day: 06:00 to 06:00 IST)
 // Unit: strictly Kgm/m³
 //
 // Parameters and official limits:
@@ -97,6 +96,8 @@ const PARAMETERS = [
   { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', colClass: 'min-w-[130px]' },
 ];
 
+const UNITS_ORDER = ['t07', 't09', 't11', 't13', 't15', 't17', 't19', 't21', 't23', 't01', 't03', 't05'];
+
 const TIME_SLOTS = [
   { key: 't07', time: '07:00', shift: 'I Shift',   shiftId: 'shift1' },
   { key: 't09', time: '09:00', shift: 'I Shift',   shiftId: 'shift1' },
@@ -112,29 +113,46 @@ const TIME_SLOTS = [
   { key: 't05', time: '05:00', shift: 'III Shift', shiftId: 'shift3' },
 ];
 
-const SHIFT_MAPPING = [
-  { key: 'shift1', name: 'I SHIFT',   slotKeys: ['t07', 't09', 't11', 't13'] },
-  { key: 'shift2', name: 'II SHIFT',  slotKeys: ['t15', 't17', 't19', 't21'] },
-  { key: 'shift3', name: 'III SHIFT', slotKeys: ['t23', 't01', 't03', 't05'] },
-];
-
 const buildEmptyData = () =>
   Object.fromEntries(
     TIME_SLOTS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
 
-// Helper for exact date in Asia/Kolkata timezone (YYYY-MM-DD)
-const getTodayAsiaKolkata = () => {
+/**
+ * Exact operating date in Asia/Kolkata timezone with 06:00-06:00 IST cycle (hourCycle h23)
+ * A timestamp between 00:00:00 and 05:59:59 IST belongs to the previous calendar day.
+ */
+export const getOperatingDateIST = (now = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+
+  const y = parseInt(parts.find((p) => p.type === 'year')?.value, 10);
+  const m = parseInt(parts.find((p) => p.type === 'month')?.value, 10);
+  const d = parseInt(parts.find((p) => p.type === 'day')?.value, 10);
+  const hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
+
+  let targetYear = y;
+  let targetMonth = m;
+  let targetDay = d;
+
+  if (hour < 6) {
+    const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
+    targetYear = prevDay.getUTCFullYear();
+    targetMonth = prevDay.getUTCMonth() + 1;
+    targetDay = prevDay.getUTCDate();
+  }
+
+  const mm = String(targetMonth).padStart(2, '0');
+  const dd = String(targetDay).padStart(2, '0');
+  return `${targetYear}-${mm}-${dd}`;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -189,47 +207,75 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── State (Date strictly restricted to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── State (Date strictly restricted to current Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle');
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
-  const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lockedSlots, setLockedSlots]               = useState({});
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
+  const [editAuditHistory, setEditAuditHistory]     = useState([]);
 
-  // Confirmation modal state
+  // Confirmation modal state for correction save
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
   const [confirmData, setConfirmData]               = useState(null);
 
-  // Sequential Shift Workflow:
-  // - On initial load: I SHIFT is editable; II SHIFT & III SHIFT are waiting/disabled.
-  // - After I SHIFT save: I SHIFT remains editable until II SHIFT is saved; II SHIFT becomes available.
-  // - After II SHIFT save: I SHIFT is permanently locked; II SHIFT remains editable until III SHIFT is saved; III SHIFT becomes available.
-  // - After III SHIFT initial save: II SHIFT is permanently locked; exactly 1 final edit allowed for III SHIFT.
-  // - After III SHIFT final edit: all 3 shifts permanently locked for that date.
-  const isShiftDisabled = useCallback((shiftKey) => {
+  /**
+   * Slot-level lock state derivation:
+   * Returns: 'locked' | 'open' | 'waiting'
+   * - Does NOT store isOpen; strictly derived from data.lockedSlots
+   * - Fresh date (no saved slots): only t07 is 'open'; t09..t05 are 'waiting'
+   * - A slot is 'locked' if slot.isLocked/correctionUsed is true OR any successor slot isSaved
+   * - A slot is 'open' if it's not locked AND its predecessor is saved (or index === 0)
+   * - Otherwise, it is 'waiting'
+   */
+  const getSlotStatus = useCallback((slotKey) => {
+    const index = UNITS_ORDER.indexOf(slotKey);
+    if (index === -1) return 'locked';
+
+    const slot = lockedSlots[slotKey] || {};
+
+    // 1. Direct permanent lock on this slot
+    if (slot.isLocked || slot.correctionUsed) {
+      return 'locked';
+    }
+
+    // 2. Any successor slot saved permanently locks all predecessor slots
+    for (let i = index + 1; i < UNITS_ORDER.length; i++) {
+      const nextKey = UNITS_ORDER[i];
+      if (lockedSlots[nextKey]?.isSaved) {
+        return 'locked';
+      }
+    }
+
+    // 3. First slot (t07) is open if not locked
+    if (index === 0) {
+      return 'open';
+    }
+
+    // 4. Preceding slot must be saved for this slot to open
+    const prevKey = UNITS_ORDER[index - 1];
+    const isPrevSaved = Boolean(lockedSlots[prevKey]?.isSaved);
+    if (isPrevSaved) {
+      return 'open';
+    }
+
+    // 5. Otherwise waiting for predecessor
+    return 'waiting';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
     if (isViewOnly) return true;
-    if (shiftKey === 'shift1') {
-      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
-    }
-    if (shiftKey === 'shift2') {
-      if (!lockedShifts.shift1Saved) return true;
-      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
-    }
-    if (shiftKey === 'shift3') {
-      if (!lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift3) return true;
-      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-      return false;
-    }
-    return true;
-  }, [isViewOnly, lockedShifts]);
+    return getSlotStatus(slotKey) !== 'open';
+  }, [isViewOnly, getSlotStatus]);
+
+  const allSlotsLocked = UNITS_ORDER.every((k) => getSlotStatus(k) === 'locked');
 
   // Fetch existing data for current date
   useEffect(() => {
@@ -238,65 +284,65 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
 
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/tk-205-analysis?date=${date}`);
+        const response = await api.get(`/api/tk-205-analysis?date=${date}`);
         if (!active) return;
 
         if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
           setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
         }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
 
-        if (response.data && response.data.success && response.data.data) {
+        if (response.data && response.data.success) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
           }
 
-          if (record) {
-            const fetchedRows = record.rows || record.shifts || record.readings || record.data?.rows || record.data;
-            if (fetchedRows && typeof fetchedRows === 'object') {
-              const populated = buildEmptyData();
-              TIME_SLOTS.forEach((slot) => {
-                if (fetchedRows[slot.key]) {
-                  PARAMETERS.forEach((p) => {
-                    const val = fetchedRows[slot.key][p.key];
-                    populated[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
-                  });
-                }
-              });
-              setData(populated);
-              setOriginalData(JSON.parse(JSON.stringify(populated)));
-            } else {
-              setData(buildEmptyData());
-              setOriginalData(null);
-            }
-
-            setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
-            setEditedFields(record.editedFields || record.data?.editedFields || {});
+          const fetchedRows = record?.rows || record?.data?.rows || record?.readings;
+          if (fetchedRows && typeof fetchedRows === 'object') {
+            const populated = buildEmptyData();
+            TIME_SLOTS.forEach((slot) => {
+              if (fetchedRows[slot.key]) {
+                PARAMETERS.forEach((p) => {
+                  const val = fetchedRows[slot.key][p.key];
+                  populated[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+                });
+              }
+            });
+            setData(populated);
+            setOriginalData(JSON.parse(JSON.stringify(populated)));
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
-            setLockedShifts({});
-            setEditedFields({});
           }
+
+          // Hydrate lock state and audit
+          const resLockedSlots = response.data.lockedSlots || record?.lockedSlots || record?.data?.lockedSlots || {};
+          const resLockedShifts = response.data.lockedShifts || record?.lockedShifts || record?.data?.lockedShifts || {};
+          const resEditedFields = response.data.editedFields || record?.editedFields || record?.data?.editedFields || {};
+          const resAudit = response.data.editAuditHistory || record?.editAuditHistory || record?.data?.editAuditHistory || [];
+
+          setLockedSlots(resLockedSlots);
+          setLockedShifts(resLockedShifts);
+          setEditedFields(resEditedFields);
+          setEditAuditHistory(resAudit);
         } else {
           setData(buildEmptyData());
           setOriginalData(null);
+          setLockedSlots({});
           setLockedShifts({});
           setEditedFields({});
+          setEditAuditHistory([]);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
         setOriginalData(null);
+        setLockedSlots({});
         setLockedShifts({});
         setEditedFields({});
+        setEditAuditHistory([]);
       }
     };
     fetchExistingData();
@@ -311,11 +357,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
   // ── Real-time input change ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
-
-    // Find shift of this row
-    const slotObj = TIME_SLOTS.find((s) => s.key === rowKey);
-    const shiftId = slotObj ? slotObj.shiftId : null;
-    if (shiftId && isShiftDisabled(shiftId)) return;
+    if (isSlotDisabled(rowKey)) return;
 
     setData((prev) => ({
       ...prev,
@@ -331,7 +373,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
 
     setSaveSuccess(false);
     setSavePhase('idle');
-  }, [isShiftDisabled]);
+  }, [isSlotDisabled]);
 
   const handleReset = () => {
     if (originalData) {
@@ -345,7 +387,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
     showToast('TK 205 analysis form reset.', 'info');
   };
 
-  // Full dataset validation before opening confirmation modal
+  // Full dataset validation before save
   const validate = () => {
     let hasError = false;
     const newErrors = {};
@@ -364,18 +406,19 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
     return !hasError;
   };
 
-  // Check if a row differs from originalData
-  const isRowDiff = (oldRow, newRow) => {
-    if (!oldRow && newRow) return true;
-    if (oldRow && !newRow) return false;
+  // Check if a slot differs from originalData
+  const isSlotModified = (slotKey) => {
+    const oldRow = originalData ? originalData[slotKey] : null;
+    const newRow = data[slotKey];
     return PARAMETERS.some((p) => {
       let oldVal = oldRow?.[p.key] ?? null;
       let newVal = newRow?.[p.key] ?? null;
       if (newVal === '') newVal = null;
+      if (oldVal === '') oldVal = null;
       if (oldVal !== null && newVal !== null && !isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
         return Number(oldVal) !== Number(newVal);
       }
-      return String(oldVal) !== String(newVal);
+      return String(oldVal ?? '') !== String(newVal ?? '');
     });
   };
 
@@ -386,72 +429,58 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
       return;
     }
 
-    const shiftsToSave = [];
-    let isFinalEdit = false;
-
-    SHIFT_MAPPING.forEach((shift) => {
-      if (isShiftDisabled(shift.key)) return;
-
-      const hasAnyData = shift.slotKeys.some((sKey) => {
-        const row = data[sKey];
-        return row && Object.values(row).some((val) => val !== null && val !== '');
-      });
-
-      const hasDiff = shift.slotKeys.some((sKey) => {
-        const oldRow = originalData ? originalData[sKey] : null;
-        const newRow = data[sKey];
-        return isRowDiff(oldRow, newRow);
-      });
-
-      if (hasAnyData && hasDiff) {
-        shiftsToSave.push({
-          key: shift.key,
-          name: shift.name,
-          slotKeys: shift.slotKeys,
-        });
-
-        if (shift.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
-          isFinalEdit = true;
-        }
+    // Detect which slots have modified values
+    const changedSlots = [];
+    TIME_SLOTS.forEach((slot) => {
+      if (isSlotDisabled(slot.key)) return;
+      if (isSlotModified(slot.key)) {
+        changedSlots.push(slot.key);
       }
     });
 
-    if (shiftsToSave.length === 0) {
-      showToast('No new or modified shift data found to save.', 'info');
+    if (changedSlots.length === 0) {
+      showToast('No changes', 'info');
       return;
     }
 
-    if (shiftsToSave.length > 1) {
-      showToast('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+    if (changedSlots.length > 1) {
+      showToast(`Only one slot may be entered or edited per save. Detected changes in: ${changedSlots.join(', ')}`, 'warning');
       return;
     }
 
-    setConfirmData({
-      date,
-      shift: shiftsToSave[0],
-      isFinalEdit,
-    });
-    setShowConfirmModal(true);
+    const targetSlotKey = changedSlots[0];
+    const targetSlotObj = TIME_SLOTS.find((s) => s.key === targetSlotKey);
+    const isCorrection = Boolean(lockedSlots[targetSlotKey]?.isSaved && !lockedSlots[targetSlotKey]?.isLocked);
+
+    // If slot is already saved and not locked, this is a correction save -> show confirm modal
+    if (isCorrection) {
+      setConfirmData({
+        date,
+        slotKey: targetSlotKey,
+        slotObj: targetSlotObj,
+        isCorrection: true,
+      });
+      setShowConfirmModal(true);
+      return;
+    }
+
+    // First save for this slot: save directly
+    executeSave(targetSlotKey);
   };
 
-  const handleConfirmSave = async () => {
+  const executeSave = async (targetSlotKey) => {
     if (saving) return;
     setSaving(true);
     setSavePhase('saving');
     setSaveSuccess(false);
-
-    // Close confirmation modal immediately to prevent modal freeze
     setShowConfirmModal(false);
 
-    const shiftBeingSaved = confirmData?.shift;
     const payload = {
       date,
       plant: plantId ? plantId.toUpperCase() : 'ACL',
       analysisType: 'TK 205 Analysis',
       tank: 'TK 205',
-      shift: shiftBeingSaved ? shiftBeingSaved.name : 'I SHIFT',
       submittedBy: user?.name || 'Plant Operator',
-      submittedAt: new Date().toISOString(),
       rows: Object.fromEntries(
         TIME_SLOTS.map((r) => [
           r.key,
@@ -468,29 +497,48 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
     try {
       const response = await api.post('/api/tk-205-analysis', payload);
 
-      if (!response?.data?.success) {
-        showToast(response?.data?.message || 'Unable to save TK 205 data. Please try again.', 'error');
+      // 200 noChange -> toast "No changes"
+      if (response.data?.noChange) {
+        showToast('No changes', 'info');
         setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
+      if (!response.data?.success) {
+        showToast(response.data?.message || 'Unable to save TK 205 data. Please try again.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
         return;
       }
 
       setSaveSuccess(true);
-      const savedDoc = response.data?.data;
-      if (savedDoc && (savedDoc._id || savedDoc.id)) {
-        setRecordId(savedDoc._id || savedDoc.id);
+      setSavePhase('completed');
+      showToast(response.data?.message || `Successfully saved ${targetSlotKey} ✓`, 'success');
+
+      // Hydrate state from save response data
+      const responseData = response.data?.data || {};
+      if (response.data?.recordId || response.data?.data?._id) {
+        setRecordId(response.data.recordId || response.data.data?._id);
       }
-      if (savedDoc?.lockedShifts) {
-        setLockedShifts(savedDoc.lockedShifts);
+      if (responseData.lockedSlots) {
+        setLockedSlots(responseData.lockedSlots);
       }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
+      if (responseData.lockedShifts) {
+        setLockedShifts(responseData.lockedShifts);
       }
-      if (savedDoc?.rows) {
+      if (responseData.editedFields) {
+        setEditedFields(responseData.editedFields);
+      }
+      if (responseData.editAuditHistory) {
+        setEditAuditHistory(responseData.editAuditHistory);
+      }
+      if (responseData.rows) {
         const synced = buildEmptyData();
         TIME_SLOTS.forEach((slot) => {
-          if (savedDoc.rows[slot.key]) {
+          if (responseData.rows[slot.key]) {
             PARAMETERS.forEach((p) => {
-              const val = savedDoc.rows[slot.key][p.key];
+              const val = responseData.rows[slot.key][p.key];
               synced[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
             });
           }
@@ -498,116 +546,22 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
         setData(synced);
         setOriginalData(JSON.parse(JSON.stringify(synced)));
       }
-
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
-      }
-
-      const emailRes = response.data?.emailNotification;
-      const emailSent = response.data?.emailSent;
-      const emailPending = response.data?.emailPending;
-      const statusFromApi = response.data?.emailStatus;
-
-      if (emailSent || statusFromApi === 'sent') {
-        setSavePhase('completed');
-        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
-        showToast('Saved — Email Sent ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
-        showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
-      }
     } catch (err) {
       setSavePhase('save_failed');
       setSaveSuccess(false);
       console.error('[TK205Analysis] Save failed:', err);
-      const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
+      // 400 / 409 -> show exact server message
+      const serverMessage = err.response?.data?.message || err.message || 'Error saving TK 205 analysis';
+      showToast(serverMessage, 'error');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleRetryEmail = async () => {
-    if (!recordId) {
-      showToast('Cannot retry email: Record ID is not available.', 'error');
-      return;
-    }
-    setSaving(true);
-    try {
-      const response = await api.post(`/api/tk-205-analysis/${recordId}/retry-email`);
-      if (response.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail('Email sent successfully on retry.');
-        showToast('Email resent successfully!', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed on retry.');
-        showToast('Email retry failed: ' + (response.data?.emailError || 'Rejected by server'), 'error');
-      }
-    } catch (err) {
-      const msg = err.response?.data?.emailError || err.response?.data?.message || err.message;
-      setSavePhase('email_failed');
-      setEmailStatusDetail(msg);
-      showToast('Retry Email Error: ' + msg, 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Helper for Shift Status Badges
-  const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
-
-    if (lockedShifts[shiftId]) {
-      status = 'Locked';
-      bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 'shift1') {
-        if (lockedShifts.shift2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift2') {
-        if (!lockedShifts.shift1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift3') {
-        if (!lockedShifts.shift2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      }
-    }
-
-    return (
-      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
-        {status}
-      </span>
-    );
   };
 
   return (
     <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb Header with Restricted Today Date ────────────────────── */}
+      {/* ── Breadcrumb Header with Operating Date ────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
@@ -623,7 +577,6 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
             </button>
 
             <div className="min-w-0">
-              {/* Breadcrumb */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
                 <Factory className="w-3.5 h-3.5 text-slate-400" />
                 <span>ACL Plant</span>
@@ -644,10 +597,10 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Strictly Restricted to Today (Asia/Kolkata) */}
+            {/* Operating Date (06:00-06:00 IST) */}
             <div
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 shadow-2xs select-none"
-              title="Date selection restricted strictly to current date (Asia/Kolkata)"
+              title="Operating Date (06:00-06:00 IST)"
             >
               <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
               <div className="flex items-center gap-1.5">
@@ -656,12 +609,12 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                   {formatDateDisplay(date)}
                 </span>
                 <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
-                  Today
+                  Operating Day
                 </span>
               </div>
             </div>
 
-            {/* Actions for Admin */}
+            {/* Actions for Admin: Main button text always "Save" via alwaysShowSaveText */}
             {!isViewOnly ? (
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
@@ -681,7 +634,9 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  title="Save permitted shift data and notify registered user"
+                  alwaysShowSaveText={true}
+                  disabled={allSlotsLocked}
+                  title={allSlotsLocked ? 'All slots are locked for this date' : 'Save TK 205 slot data'}
                 />
               </div>
             ) : (
@@ -694,7 +649,7 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       </div>
 
-      {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
+      {/* ── Status Banner (Success or Save Failed) ─────────────────────────── */}
       <SaveStatusBanner
         id="tk205-success-banner"
         saveSuccess={saveSuccess}
@@ -702,8 +657,6 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
         date={date}
         analysisName="TK 205 Analysis"
         recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => {
           setSaveSuccess(false);
           setSavePhase('idle');
@@ -713,14 +666,12 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
 
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
-            {/* Column headers */}
             <thead>
               <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-36 sm:w-44 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
-                  Time / Shift
+                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-40 sm:w-48 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
+                  Time / Shift / Status
                 </th>
                 {PARAMETERS.map((p, idx) => (
                   <th
@@ -735,20 +686,23 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
               </tr>
             </thead>
 
-            {/* Data rows */}
             <tbody className="divide-y divide-slate-200">
               {visibleRows.map((row) => {
                 const styles = getRowStyles(row.shiftId);
-                const isDisabled = isShiftDisabled(row.shiftId);
+                const status = getSlotStatus(row.key);
+                const isDisabled = isSlotDisabled(row.key);
+                const slotSaved = Boolean(lockedSlots[row.key]?.isSaved);
 
                 return (
                   <tr
                     key={row.key}
-                    className={`transition-colors duration-100 ${styles.row}`}
+                    className={`transition-colors duration-100 ${
+                      status === 'locked' ? 'bg-slate-50/80 opacity-90' : styles.row
+                    }`}
                   >
-                    {/* Time slot & shift label */}
+                    {/* Time slot & Shift & Slot Lock Status Badge */}
                     <td className="px-5 py-2.5 align-top">
-                      <div className="flex flex-col gap-1 mt-1">
+                      <div className="flex flex-col gap-1.5 mt-0.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                             {row.time}
@@ -757,15 +711,32 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                             {row.shift}
                           </span>
                         </div>
-                        {['t07', 't15', 't23'].includes(row.key) && (
-                          <div className="mt-0.5">
-                            {getShiftBadge(row.shiftId)}
-                          </div>
-                        )}
+                        {/* Slot-level lock state indicator */}
+                        <div className="flex items-center gap-1">
+                          {status === 'locked' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-200 text-slate-700 inline-flex items-center gap-1 shadow-2xs">
+                              <Lock className="w-2.5 h-2.5 text-slate-500" /> LOCKED
+                            </span>
+                          )}
+                          {status === 'open' && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${
+                              slotSaved
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            }`}>
+                              {slotSaved ? 'EDITABLE' : 'OPEN'}
+                            </span>
+                          )}
+                          {status === 'waiting' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-100 text-slate-500 border border-slate-200 shadow-2xs">
+                              WAITING
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
 
-                    {/* Parameter input cells (Tolerance / Limit Validation) */}
+                    {/* Parameter input cells */}
                     {PARAMETERS.map((param) => {
                       const fieldKey = `${row.key}_${param.key}`;
                       const cellVal = data[row.key]?.[param.key] ?? '';
@@ -828,14 +799,14 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                               )}
                             </div>
 
-                            {/* Tiny Compact EDITED badge beside / below modified field */}
+                            {/* "Edited" under changed values */}
                             {isEdited && (
                               <div
                                 id={`tk205-edited-badge-${row.key}-${param.key}`}
                                 className="mt-1 inline-flex items-center px-1.5 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
                                 title="This parameter was modified and saved"
                               >
-                                EDITED
+                                Edited
                               </div>
                             )}
 
@@ -896,14 +867,17 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
       </div>
 
-      {/* ── Confirmation Modal ── */}
+      {/* ── Confirmation Modal for Correction Save ── */}
       {showConfirmModal && confirmData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-slideUp">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-800">
-                Confirm Save — {confirmData.shift.name} (TK 205)
-              </h3>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-slideUp">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/50">
+              <div className="flex items-center gap-2 text-amber-900 font-bold">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                <h3 className="text-base font-bold text-slate-800">
+                  Confirm Slot Correction
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowConfirmModal(false)}
@@ -912,63 +886,50 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
                 &times;
               </button>
             </div>
-            <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
-              <p className="text-sm text-slate-600 mb-3">
-                You are about to save <strong>{confirmData.shift.name}</strong> data for <strong>{formatDateDisplay(confirmData.date)}</strong>.
-              </p>
-              {confirmData.isFinalEdit && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-xs font-medium flex items-start gap-2 shadow-2xs">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Warning:</strong> You are about to save the final correction for III SHIFT. After this save succeeds, all shifts for today will be permanently locked.
-                  </span>
+            <div className="p-6">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 text-sm font-semibold mb-4 shadow-2xs flex items-start gap-3">
+                <Lock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-extrabold text-amber-900 text-sm">
+                    This is your only correction for this slot.
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    Once saved, slot <strong>{confirmData.slotObj?.time} ({confirmData.slotObj?.shift})</strong> will be permanently locked and cannot be modified again.
+                  </p>
                 </div>
-              )}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                <div className="text-xs font-bold text-slate-700 mb-1">
-                  Time Slots & Parameters to Persist:
-                </div>
-                {confirmData.shift.slotKeys.map((sKey) => {
-                  const slotObj = TIME_SLOTS.find((s) => s.key === sKey);
-                  const row = data[sKey] || {};
-                  const nonEmpties = PARAMETERS.filter((p) => row[p.key] !== '' && row[p.key] !== null && row[p.key] !== undefined);
-                  return (
-                    <div key={sKey} className="text-xs border-b border-slate-200/60 pb-1.5 last:border-0">
-                      <span className="font-bold text-blue-900">{slotObj?.time} ({slotObj?.shift}):</span>{' '}
-                      {nonEmpties.length > 0 ? (
-                        <span className="text-slate-700">
-                          {nonEmpties.map((p) => `${p.label}: ${row[p.key]}`).join(' | ')}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 italic">No values entered</span>
-                      )}
-                    </div>
-                  );
-                })}
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-xs text-slate-700">
+                <div className="font-bold text-slate-900 mb-1">Proposed Values for {confirmData.slotObj?.time}:</div>
+                {PARAMETERS.map((p) => (
+                  <div key={p.key} className="flex justify-between border-b border-slate-200/50 pb-1 last:border-0">
+                    <span className="font-medium text-slate-600">{p.label}:</span>
+                    <span className="font-mono font-bold text-slate-900">{data[confirmData.slotKey]?.[p.key] || '—'} {p.unit}</span>
+                  </div>
+                ))}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-2xs"
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-2xs"
                 disabled={saving}
               >
-                Review / Cancel
+                Cancel
               </button>
               <button
                 type="button"
-                onClick={handleConfirmSave}
+                onClick={() => executeSave(confirmData.slotKey)}
                 disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-75 cursor-pointer shadow-2xs"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-75 cursor-pointer shadow-2xs"
               >
                 {saving ? (
                   <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
                     Saving...
                   </>
                 ) : (
-                  <>Confirm Save</>
+                  <>Confirm & Save Correction</>
                 )}
               </button>
             </div>
