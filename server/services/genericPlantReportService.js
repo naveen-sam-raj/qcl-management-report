@@ -990,6 +990,8 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
   const candidateKeys = [
     `${rStr}_${cStr}`,
     `${rStr.toLowerCase()}_${cStr.toLowerCase()}`,
+    `${rStr}.${cStr}`,
+    `${rStr.toLowerCase()}.${cStr.toLowerCase()}`,
     `${cStr}`,
     `${cStr.toLowerCase()}`,
   ];
@@ -997,14 +999,22 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
     if (dataObj.time) {
       candidateKeys.push(`${dataObj.time}_${cStr}`);
       candidateKeys.push(`${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`${dataObj.time}.${cStr}`);
+      candidateKeys.push(`${dataObj.time.toLowerCase()}.${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.time}_${cStr}`);
       candidateKeys.push(`hourly.${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${dataObj.time}.${cStr}`);
+      candidateKeys.push(`hourly.${dataObj.time.toLowerCase()}.${cStr.toLowerCase()}`);
     }
     if (dataObj.id) {
       candidateKeys.push(`${dataObj.id}_${cStr}`);
       candidateKeys.push(`${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`${dataObj.id}.${cStr}`);
+      candidateKeys.push(`${dataObj.id.toLowerCase()}.${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.id}_${cStr}`);
       candidateKeys.push(`hourly.${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${dataObj.id}.${cStr}`);
+      candidateKeys.push(`hourly.${dataObj.id.toLowerCase()}.${cStr.toLowerCase()}`);
     }
     if (dataObj.unitKey) {
       const uStr = String(dataObj.unitKey).trim();
@@ -2681,16 +2691,78 @@ async function generateAllPlantsReportWorkbook({ date, user = null }) {
 // ─── Multi-Day OVERALL Master Report (Manager Shift Sheet) ────────────────────
 
 /**
+ * Robust time parser accepting:
+ * - Standard 24h: "09:00", "14:30"
+ * - Dot notation: "9.00", "14.30"
+ * - 12h AM/PM: "9:00 AM", "02:30 PM", "9.00 am"
+ * - Slot keys: "t09" -> 09:00, "t0630" -> 06:30, "t23" -> 23:00, "t01" -> 01:00
+ *
+ * Returns: { isValid: boolean, minutes: number|null, formattedTime: string, shiftKey: 'shift1'|'shift2'|'shift3' }
+ */
+function parseAnalysisTime(rawTime) {
+  if (rawTime === null || rawTime === undefined) {
+    return { isValid: false, minutes: null, formattedTime: '', shiftKey: 'shift1' };
+  }
+  const str = String(rawTime).trim();
+  if (!str) {
+    return { isValid: false, minutes: null, formattedTime: '', shiftKey: 'shift1' };
+  }
+
+  // 1. Slot format: /^t(\d{2})(\d{2})?$/i (e.g. "t09", "t0630", "t23", "t01")
+  const slotMatch = str.match(/^t(\d{2})(\d{2})?$/i);
+  if (slotMatch) {
+    const hh = parseInt(slotMatch[1], 10);
+    const mm = slotMatch[2] ? parseInt(slotMatch[2], 10) : 0;
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      const minutes = hh * 60 + mm;
+      const formattedTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      const shiftKey = getShiftFromMinutes(minutes);
+      return { isValid: true, minutes, formattedTime, shiftKey };
+    }
+  }
+
+  // 2. 12-hour AM/PM format: /^(\d{1,2})[:.](\d{2})\s*(AM|PM)$/i
+  const ampmMatch = str.match(/^(\d{1,2})[:.](\d{2})\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    let hh = parseInt(ampmMatch[1], 10);
+    const mm = parseInt(ampmMatch[2], 10);
+    const meridiem = ampmMatch[3].toUpperCase();
+    if (hh >= 1 && hh <= 12 && mm >= 0 && mm <= 59) {
+      if (meridiem === 'AM') {
+        if (hh === 12) hh = 0;
+      } else {
+        if (hh !== 12) hh += 12;
+      }
+      const minutes = hh * 60 + mm;
+      const formattedTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      const shiftKey = getShiftFromMinutes(minutes);
+      return { isValid: true, minutes, formattedTime, shiftKey };
+    }
+  }
+
+  // 3. 24-hour format with colon or dot: /^(\d{1,2})[:.](\d{2})$/
+  const timeMatch = str.match(/^(\d{1,2})[:.](\d{2})$/);
+  if (timeMatch) {
+    const hh = parseInt(timeMatch[1], 10);
+    const mm = parseInt(timeMatch[2], 10);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      const minutes = hh * 60 + mm;
+      const formattedTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      const shiftKey = getShiftFromMinutes(minutes);
+      return { isValid: true, minutes, formattedTime, shiftKey };
+    }
+  }
+
+  // Unparseable / Untimed
+  return { isValid: false, minutes: null, formattedTime: str, shiftKey: 'shift1' };
+}
+
+/**
  * Normalizes time string 'HH:mm' to total minutes from 00:00
  */
 function parseTimeToMinutes(timeStr) {
-  if (!timeStr) return -1;
-  const match = String(timeStr).match(/(\d{1,2}):(\d{2})/);
-  if (!match) return -1;
-  const h = parseInt(match[1], 10);
-  const m = parseInt(match[2], 10);
-  if (isNaN(h) || isNaN(m)) return -1;
-  return h * 60 + m;
+  const res = parseAnalysisTime(timeStr);
+  return res.isValid ? res.minutes : -1;
 }
 
 /**
@@ -2700,20 +2772,102 @@ function parseTimeToMinutes(timeStr) {
  * - Shift III: 22:00 to 05:59 (1320..1439 and 0..359)
  */
 function getShiftFromMinutes(minutes) {
-  if (minutes < 0) return null;
+  if (minutes < 0 || minutes === null || minutes === undefined) return null;
   if (minutes >= 360 && minutes < 840) return 'shift1';
   if (minutes >= 840 && minutes < 1320) return 'shift2';
   return 'shift3';
 }
 
 /**
- * Returns chronological weight within Shift III (22:00=22h..05:00=29h)
- * ensuring post-midnight readings 00:00-05:59 are recognized as later than 22:00-23:59.
+ * Returns chronological weight within Shift III (22:00=22h..05:59=29h59m)
+ * ensuring post-midnight readings 00:00-05:59 are recognized as strictly later than 22:00-23:59.
  */
 function getShift3SortWeight(minutes) {
-  if (minutes < 0) return 0;
+  if (minutes < 0 || minutes === null || minutes === undefined) return 0;
   // If minutes is 00:00 to 05:59, add 24 hours (1440 min)
   return minutes < 360 ? minutes + 1440 : minutes;
+}
+
+/**
+ * Detects whether an analysis is one of the 10 timed-readings analyses
+ */
+function isTimedAnalysis(analysisType, unit = null) {
+  const normAt = String(analysisType || '').toLowerCase().trim();
+  if (normAt.includes('cacl2')) return true;
+  if (normAt.includes('bicarbonate') || normAt.includes('bi carbonate')) return true;
+  if (normAt.includes('500#')) return true;
+  if (normAt.includes('lsa bagging')) return true;
+  if (normAt.includes('boiler feed') || normAt.includes('bfw')) return true;
+  if (normAt.includes('distiller waste')) return true;
+  if (normAt.includes('sewer water')) return true;
+  if (normAt.includes('cooling water')) return true;
+  return false;
+}
+
+/**
+ * Detects whether an analysis is one of the 2-hourly/4-hourly slot-keyed analyses
+ */
+function isSlotKeyedAnalysis(analysisType) {
+  const normAt = String(analysisType || '').toLowerCase().trim();
+  return (
+    normAt.includes('tk 203') ||
+    normAt.includes('tk 205') ||
+    normAt.includes('tk 207') ||
+    normAt.includes('cr 202') ||
+    normAt.includes('cr 203')
+  );
+}
+
+/**
+ * Extracts raw readings array from record payload
+ */
+function getRawReadingsList(rec) {
+  if (!rec || !rec.data) return [];
+  const d = rec.data;
+  if (Array.isArray(d.readings) && d.readings.length > 0) return d.readings;
+  if (Array.isArray(d.hourlyReadings) && d.hourlyReadings.length > 0) return d.hourlyReadings;
+  if (Array.isArray(d.hourly) && d.hourly.length > 0) return d.hourly;
+  if (Array.isArray(d.rows) && d.rows.length > 0) return d.rows;
+  return [];
+}
+
+/**
+ * Groups and chronologically sorts readings into Shift I/II/III and Untimed
+ */
+function extractShiftAndUntimedReadings(readingsList) {
+  const shiftReadings = { shift1: [], shift2: [], shift3: [] };
+  const untimedReadings = [];
+
+  if (!Array.isArray(readingsList)) {
+    return { shiftReadings, untimedReadings };
+  }
+
+  readingsList.forEach((item, idx) => {
+    if (!item || typeof item !== 'object') return;
+    const rawT = item.time || item.id || `idx_${idx}`;
+    const parsed = parseAnalysisTime(rawT);
+
+    if (parsed.isValid) {
+      shiftReadings[parsed.shiftKey].push({
+        ...item,
+        _formattedTime: parsed.formattedTime,
+        _minutes: parsed.minutes,
+      });
+    } else {
+      untimedReadings.push({
+        ...item,
+        _formattedTime: parsed.formattedTime || 'UNTIMED',
+        _minutes: null,
+      });
+    }
+  });
+
+  // Chronological sort within each shift
+  shiftReadings.shift1.sort((a, b) => a._minutes - b._minutes);
+  shiftReadings.shift2.sort((a, b) => a._minutes - b._minutes);
+  shiftReadings.shift3.sort((a, b) => getShift3SortWeight(a._minutes) - getShift3SortWeight(b._minutes));
+
+  return { shiftReadings, untimedReadings };
 }
 
 /**
@@ -2733,6 +2887,189 @@ const SLOT_SHIFT_ORDER = {
     shift3: ['t03', 't23'],
   },
 };
+
+/**
+ * Merges duplicate documents for OVERALL report while preserving duplicate conflicts.
+ * If two documents have a reading at the same date + time with conflicting values:
+ * - Emits an extra row with SOURCE = "Doc 2 (<id>)"
+ * - Keeps TIME clean HH:MM
+ * - Logs console.warn
+ * - Tracks conflict in duplicateConflictLog
+ */
+function mergeRecordsForOverallReport(docGroup, plant, analysisType, duplicateConflictLog) {
+  if (!docGroup || docGroup.length === 0) return null;
+  if (docGroup.length === 1) {
+    const single = { ...docGroup[0] };
+    single.mergedCount = 1;
+    // Tag source on readings
+    const rList = getRawReadingsList(single);
+    const docId = String(single._id || single.id || 'doc1');
+    rList.forEach((r) => {
+      if (r && typeof r === 'object' && !r._source) {
+        r._source = `Doc 1 (${docId})`;
+      }
+    });
+    return single;
+  }
+
+  // Sort chronologically oldest to newest
+  const sorted = [...docGroup].sort((a, b) => {
+    const tA = getRecordTimestamp(a);
+    const tB = getRecordTimestamp(b);
+    if (tA !== tB) return tA - tB;
+    const idA = String(a._id || a.id || '');
+    const idB = String(b._id || b.id || '');
+    return idA.localeCompare(idB);
+  });
+
+  const newestDoc = sorted[sorted.length - 1];
+  const atName = newestDoc.analysisType || analysisType || 'Unknown Analysis';
+  const recDate = newestDoc.date || '';
+
+  // If this is a timed analysis, merge readings preserving conflicts
+  if (isTimedAnalysis(atName, newestDoc.unit)) {
+    const primary = { ...newestDoc };
+    primary.mergedCount = sorted.length;
+    const mergedData = { ...(sorted[0].data || {}) };
+
+    const firstDocId = String(sorted[0]._id || sorted[0].id || 'doc1');
+    const olderReadings = (getRawReadingsList(sorted[0]) || []).map((r) => ({
+      ...r,
+      _source: r._source || `Doc 1 (${firstDocId})`,
+    }));
+
+    let accumulatedReadings = [...olderReadings];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const nextDoc = sorted[i];
+      const nextDocId = String(nextDoc._id || nextDoc.id || `doc${i + 1}`);
+
+      // Merge editedFields and editAuditHistory
+      if (nextDoc.data?.editedFields) {
+        mergedData.editedFields = {
+          ...(mergedData.editedFields || {}),
+          ...nextDoc.data.editedFields,
+        };
+      }
+      if (Array.isArray(nextDoc.data?.editAuditHistory)) {
+        mergedData.editAuditHistory = [
+          ...(mergedData.editAuditHistory || []),
+          ...nextDoc.data.editAuditHistory,
+        ];
+      }
+
+      const nextReadings = getRawReadingsList(nextDoc) || [];
+
+      nextReadings.forEach((nItem, nIdx) => {
+        if (!nItem || typeof nItem !== 'object') return;
+        const key = getReadingItemKey(nItem, nIdx);
+
+        // Find existing item with the same time key
+        const matchIdx = accumulatedReadings.findIndex((o) => getReadingItemKey(o, -1) === key);
+
+        if (matchIdx === -1) {
+          // No match: add reading directly
+          accumulatedReadings.push({
+            ...nItem,
+            _source: `Doc ${i + 1} (${nextDocId})`,
+          });
+        } else {
+          const oItem = accumulatedReadings[matchIdx];
+          // Check for conflicts across non-metadata fields
+          let hasConflict = false;
+          let conflictingParam = '';
+          let oValConf = null;
+          let nValConf = null;
+
+          // Check top-level or compound properties
+          for (const [k, nVal] of Object.entries(nItem)) {
+            if (METADATA_KEYS.has(k) || k.startsWith('_') || k === 'time' || k === 'id') continue;
+            const oVal = oItem[k];
+
+            if (isNonEmptyValue(nVal) && isNonEmptyValue(oVal)) {
+              if (typeof nVal === 'object' && typeof oVal === 'object' && !Array.isArray(nVal) && !Array.isArray(oVal)) {
+                for (const [subK, subNVal] of Object.entries(nVal)) {
+                  if (METADATA_KEYS.has(subK) || subK.startsWith('_')) continue;
+                  const subOVal = oVal[subK];
+                  if (isNonEmptyValue(subNVal) && isNonEmptyValue(subOVal)) {
+                    const isDiff = !isNaN(Number(subOVal)) && !isNaN(Number(subNVal))
+                      ? Math.abs(Number(subOVal) - Number(subNVal)) > EPSILON
+                      : String(subOVal).trim() !== String(subNVal).trim();
+                    if (isDiff) {
+                      hasConflict = true;
+                      conflictingParam = `${k}.${subK}`;
+                      oValConf = subOVal;
+                      nValConf = subNVal;
+                      break;
+                    }
+                  }
+                }
+              } else {
+                const isDiff = !isNaN(Number(oVal)) && !isNaN(Number(nVal))
+                  ? Math.abs(Number(oVal) - Number(nVal)) > EPSILON
+                  : String(oVal).trim() !== String(nVal).trim();
+                if (isDiff) {
+                  hasConflict = true;
+                  conflictingParam = k;
+                  oValConf = oVal;
+                  nValConf = nVal;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (hasConflict) {
+            const timeStr = nItem.time || nItem.id || key;
+            console.warn(
+              `[Duplicate Conflict] ${atName} (${recDate}): Duplicate conflict at ${timeStr} for ${conflictingParam} (Doc 1: "${oValConf}" vs Doc ${i + 1}: "${nValConf}"). Retaining both as separate rows.`
+            );
+            duplicateConflictLog.push({
+              plant,
+              analysisType: atName,
+              date: recDate,
+              time: timeStr,
+              param: conflictingParam,
+              olderVal: oValConf,
+              newerVal: nValConf,
+              olderId: oItem._source || `Doc 1 (${firstDocId})`,
+              newerId: `Doc ${i + 1} (${nextDocId})`,
+            });
+
+            // Extra row: do not overwrite! Add new reading as separate row with clean TIME
+            accumulatedReadings.push({
+              ...nItem,
+              _source: `Doc ${i + 1} (${nextDocId})`,
+            });
+          } else {
+            // Clean merge without conflict (infill missing fields)
+            const context = { warningCount: 0 };
+            const mergedItem = mergeRowObject(oItem, nItem, atName, recDate, key, firstDocId, nextDocId, context);
+            mergedItem._source = oItem._source || `Doc 1 (${firstDocId})`;
+            accumulatedReadings[matchIdx] = mergedItem;
+          }
+        }
+      });
+    }
+
+    // Assign accumulated readings back to primary record data
+    if (mergedData.hourlyReadings || primary.data?.hourlyReadings) {
+      mergedData.hourlyReadings = accumulatedReadings;
+    } else if (mergedData.hourly || primary.data?.hourly) {
+      mergedData.hourly = accumulatedReadings;
+    } else if (mergedData.rows || primary.data?.rows) {
+      mergedData.rows = accumulatedReadings;
+    } else {
+      mergedData.readings = accumulatedReadings;
+    }
+
+    primary.data = mergedData;
+    return primary;
+  }
+
+  // Fallback to standard mergeRecordsForAnalysis for non-timed analyses
+  return mergeRecordsForAnalysis(docGroup);
+}
 
 /**
  * Generates the multi-day "OVERALL" report workbook (manager shift sheet) for a date range
@@ -2761,6 +3098,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
   const plantDocCounts = {};
   const plantDupMergedCounts = {};
   const skippedAnalyses = [];
+  const duplicateConflictLog = [];
   let grandTotalRecordCount = 0;
 
   for (const p of ALL_PLANTS_ORDER) {
@@ -2830,8 +3168,8 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
       plantDocCounts[p] = records.length;
       grandTotalRecordCount += records.length;
 
-      // Group records by (date, analysisGroupKey)
-      const groupedByDateAndType = {};
+      // Group records by groupKey -> recDate -> docGroup[] (avoids string composite-key splitting)
+      const groupedByGroupKeyAndDate = {};
       for (const r of records) {
         const at = (r.analysisType || 'Unknown Analysis').trim();
         const recDate = r.date || '';
@@ -2845,24 +3183,27 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
           r.unit = normUnit;
         }
 
-        const dateGroupKey = `${recDate}::${groupKey}`;
-        if (!groupedByDateAndType[dateGroupKey]) {
-          groupedByDateAndType[dateGroupKey] = [];
+        if (!groupedByGroupKeyAndDate[groupKey]) {
+          groupedByGroupKeyAndDate[groupKey] = {};
         }
-        groupedByDateAndType[dateGroupKey].push(r);
+        if (!groupedByGroupKeyAndDate[groupKey][recDate]) {
+          groupedByGroupKeyAndDate[groupKey][recDate] = [];
+        }
+        groupedByGroupKeyAndDate[groupKey][recDate].push(r);
       }
 
-      // Merge duplicate documents for each (date, analysisGroupKey)
-      for (const [dateGroupKey, docGroup] of Object.entries(groupedByDateAndType)) {
-        if (docGroup.length > 1) {
-          plantDupMergedCounts[p] += docGroup.length - 1;
-        }
-        const merged = mergeRecordsForAnalysis(docGroup);
-        const [recDate, groupKey] = dateGroupKey.split('::');
+      // Merge duplicate documents for each (groupKey, recDate) with conflict preservation
+      for (const [groupKey, dateMap] of Object.entries(groupedByGroupKeyAndDate)) {
         if (!allPlantsData[p][groupKey]) {
           allPlantsData[p][groupKey] = {};
         }
-        allPlantsData[p][groupKey][recDate] = merged;
+        for (const [recDate, docGroup] of Object.entries(dateMap)) {
+          if (docGroup.length > 1) {
+            plantDupMergedCounts[p] += docGroup.length - 1;
+          }
+          const merged = mergeRecordsForOverallReport(docGroup, p, groupKey, duplicateConflictLog);
+          allPlantsData[p][groupKey][recDate] = merged;
+        }
       }
     } catch (plantErr) {
       console.warn(`[Overall Report] Error querying plant ${p}:`, plantErr.message);
@@ -2892,11 +3233,11 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
   }
 
   // 3. Build Column Metadata for OVERALL Sheet
-  // Structure of overallColumns:
-  // Array of: { plant, groupKey, analysisType, unit, displayTitle, key, label, unitRangeStr, range, extractor: (rec, shiftKey) => { val, isEdited, editNote } }
   const overallColumns = [];
-  const plantHeaderBands = []; // { plant, startCol, endCol }
-  const analysisHeaderBands = []; // { title, startCol, endCol }
+  const plantHeaderBands = [];
+  const analysisHeaderBands = [];
+  const timedAnalysisMMap = {};
+  const untimedAnalysisCounts = {};
 
   let currentColIdx = 3; // Col 1 = DATE, Col 2 = SHIFT, Col 3+ = Data
 
@@ -2916,540 +3257,650 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
         const unit = sampleRec.unit || null;
         const labelConfig = getAnalysisConfig(at, unit);
         const displayTitle = (labelConfig?.title || at).toUpperCase();
-
-        // Sample data payload to inspect structure
         const sampleData = sampleRec.data || {};
 
-        // Discover columns for this analysis:
         const analysisCols = [];
+        const isTimed = isTimedAnalysis(at, unit);
 
-        // ── Case A: Nested Units / Towers (T 401) ──
-        if (sampleData.units || sampleData.towers) {
-          const containerKey = sampleData.units ? 'units' : 'towers';
-          // Find all unit keys across all dates
-          const unitKeysSet = new Set();
-          for (const rec of Object.values(dateRecordsMap)) {
-            const cont = rec.data?.[containerKey] || {};
-            Object.keys(cont).forEach((uk) => {
-              if (!METADATA_KEYS.has(uk)) unitKeysSet.add(uk);
+        // ═══════════════════════════════════════════════════════════════════════
+        // ── CASE 1: Timed-Readings Analyses ──
+        // ═══════════════════════════════════════════════════════════════════════
+        if (isTimed) {
+          // Discover maximum readings in any single shift (M) and untimed readings (U) across date range
+          let maxReadingsInShift = 0;
+          let maxUntimed = 0;
+          const dateShiftReadingsMap = {};
+          const dateUntimedMap = {};
+
+          for (const [dStr, rec] of Object.entries(dateRecordsMap)) {
+            const rawList = getRawReadingsList(rec);
+            const { shiftReadings, untimedReadings } = extractShiftAndUntimedReadings(rawList);
+            dateShiftReadingsMap[dStr] = shiftReadings;
+            dateUntimedMap[dStr] = untimedReadings;
+
+            ['shift1', 'shift2', 'shift3'].forEach((sk) => {
+              const count = shiftReadings[sk].length;
+              if (count > maxReadingsInShift) maxReadingsInShift = count;
             });
+            if (untimedReadings.length > maxUntimed) maxUntimed = untimedReadings.length;
           }
-          const sortedUnitKeys = Array.from(unitKeysSet).sort();
 
-          for (const uk of sortedUnitKeys) {
-            // Find parameter keys for this unit
-            const pKeysSet = new Set();
+          timedAnalysisMMap[`${p}::${gk}`] = maxReadingsInShift;
+          if (maxUntimed > 0) untimedAnalysisCounts[`${p}::${gk}`] = maxUntimed;
+
+          // ── Case 1A: Sewer Water Nested Compound Groups ──
+          if (at.toLowerCase().includes('sewer water')) {
+            const groupParamsMap = new Map();
+            const orderedGroups = [];
+
             for (const rec of Object.values(dateRecordsMap)) {
-              const uObj = rec.data?.[containerKey]?.[uk] || {};
-              ['s1', 's2', 's3', 'shift1', 'shift2', 'shift3'].forEach((sk) => {
-                const sObj = uObj[sk];
+              const rArr = getRawReadingsList(rec);
+              rArr.forEach((item) => {
+                if (!item || typeof item !== 'object') return;
+                Object.entries(item).forEach(([k, v]) => {
+                  if (METADATA_KEYS.has(k) || k.startsWith('_') || k === 'time' || k === 'id') return;
+                  if (v && typeof v === 'object' && !Array.isArray(v)) {
+                    if (!groupParamsMap.has(k)) {
+                      orderedGroups.push(k);
+                      groupParamsMap.set(k, new Set());
+                    }
+                    const pSet = groupParamsMap.get(k);
+                    Object.keys(v).forEach((pk) => {
+                      if (!METADATA_KEYS.has(pk) && !pk.startsWith('_')) pSet.add(pk);
+                    });
+                  }
+                });
+              });
+            }
+
+            const compoundParamDefs = [];
+            orderedGroups.forEach((grp) => {
+              const pSet = groupParamsMap.get(grp);
+              pSet.forEach((pk) => {
+                const compoundKey = `${grp}__${pk}`;
+                compoundParamDefs.push({
+                  rawKey: compoundKey,
+                  grp,
+                  pk,
+                  label: formatCompoundLabel(compoundKey),
+                  range: null,
+                  unitRangeStr: '',
+                });
+              });
+            });
+
+            // Timed Reading Groups (1..M)
+            for (let n = 1; n <= maxReadingsInShift; n++) {
+              analysisCols.push({
+                rawKey: `time_${n}`,
+                label: `TIME ${n}`,
+                range: null,
+                unitRangeStr: 'HH:MM',
+                extractor: (rec, shiftKey) => {
+                  const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                  return { val: item?._formattedTime || null };
+                },
+              });
+
+              for (const cp of compoundParamDefs) {
+                analysisCols.push({
+                  rawKey: `${cp.rawKey}_${n}`,
+                  label: `${cp.label} ${n}`,
+                  range: cp.range,
+                  unitRangeStr: cp.unitRangeStr,
+                  extractor: (rec, shiftKey) => {
+                    const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                    const grpObj = item?.[cp.grp] || {};
+                    const val = grpObj[cp.pk];
+                    const editInfo = getCellEditInfo(rec?.data, item?.time || item?.id, cp.rawKey, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+
+            // Untimed Reading Groups (placed on Shift I only)
+            for (let u = 1; u <= maxUntimed; u++) {
+              const suffix = maxUntimed > 1 ? ` ${u}` : '';
+              analysisCols.push({
+                rawKey: `time_untimed_${u}`,
+                label: `TIME UNTIMED${suffix}`,
+                range: null,
+                unitRangeStr: 'HH:MM',
+                extractor: (rec, shiftKey) => {
+                  if (shiftKey !== 'shift1') return { val: null };
+                  const item = dateUntimedMap[rec?.date]?.[u - 1];
+                  return { val: item?._formattedTime || item?.time || 'UNTIMED' };
+                },
+              });
+
+              for (const cp of compoundParamDefs) {
+                analysisCols.push({
+                  rawKey: `${cp.rawKey}_untimed_${u}`,
+                  label: `${cp.label} UNTIMED${suffix}`,
+                  range: cp.range,
+                  unitRangeStr: cp.unitRangeStr,
+                  extractor: (rec, shiftKey) => {
+                    if (shiftKey !== 'shift1') return { val: null };
+                    const item = dateUntimedMap[rec?.date]?.[u - 1];
+                    const grpObj = item?.[cp.grp] || {};
+                    const val = grpObj[cp.pk];
+                    const editInfo = getCellEditInfo(rec?.data, 'untimed', cp.rawKey, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+          }
+          // ── Case 1B: LSA Bagging Dual Block (Shift Analysis + Hourly Readings) ──
+          else if (at.toLowerCase().includes('lsa bagging') && !at.toLowerCase().includes('sieve')) {
+            // Block 1: Shift Analysis Columns
+            const shiftParamKeys = new Set();
+            for (const rec of Object.values(dateRecordsMap)) {
+              const sa = rec.data?.shiftAnalysis || {};
+              Object.values(sa).forEach((sObj) => {
                 if (sObj && typeof sObj === 'object') {
-                  Object.keys(sObj).forEach((pk) => {
-                    if (!METADATA_KEYS.has(pk)) pKeysSet.add(pk);
+                  Object.keys(sObj).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_')) shiftParamKeys.add(k);
                   });
                 }
               });
             }
-            const resolvedUnitCols = resolveColumns(Array.from(pKeysSet), labelConfig);
-            for (const col of resolvedUnitCols) {
-              const uLabel = uk.length === 1 ? `UNIT ${uk.toUpperCase()}` : uk.toUpperCase();
+            const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
+            for (const col of resolvedShiftCols) {
               analysisCols.push({
                 rawKey: col.key,
-                unitKey: uk,
-                label: `${uLabel} ${col.label}`,
+                label: `SHIFT ${col.label}`,
                 range: col.range,
                 unitRangeStr: formatUnitRange(col.unit, col.range),
                 extractor: (rec, shiftKey) => {
-                  if (!rec?.data) return { val: null };
-                  const cont = rec.data[containerKey] || {};
-                  const uObj = cont[uk] || {};
-                  const skMap = { shift1: 's1', shift2: 's2', shift3: 's3' };
-                  const targetSk = uObj[skMap[shiftKey]] ? skMap[shiftKey] : shiftKey;
-                  const shiftObj = uObj[targetSk] || {};
+                  if (!rec?.data?.shiftAnalysis) return { val: null };
+                  const shiftObj = rec.data.shiftAnalysis[shiftKey] || {};
                   const val = shiftObj[col.key];
-                  const editInfo = getCellEditInfo(rec.data, `${uk}.${targetSk}`, col.key, shiftObj);
+                  const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, shiftObj);
                   return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
                 },
               });
             }
-          }
-        }
-        // ── Case B: Dual Block Shift + Hourly (LSA Bagging) ──
-        else if (sampleData.shiftAnalysis && (sampleData.hourlyReadings || sampleData.hourly)) {
-          // Block 1: Shift Analysis
-          const shiftParamKeys = new Set();
-          for (const rec of Object.values(dateRecordsMap)) {
-            const sa = rec.data?.shiftAnalysis || {};
-            Object.values(sa).forEach((sObj) => {
-              if (sObj && typeof sObj === 'object') {
-                Object.keys(sObj).forEach((k) => {
-                  if (!METADATA_KEYS.has(k)) shiftParamKeys.add(k);
-                });
-              }
-            });
-          }
-          const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
-          for (const col of resolvedShiftCols) {
-            analysisCols.push({
-              rawKey: col.key,
-              label: `SHIFT ${col.label}`,
-              range: col.range,
-              unitRangeStr: formatUnitRange(col.unit, col.range),
-              extractor: (rec, shiftKey) => {
-                if (!rec?.data?.shiftAnalysis) return { val: null };
-                const shiftObj = rec.data.shiftAnalysis[shiftKey] || {};
-                const val = shiftObj[col.key];
-                const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, shiftObj);
-                return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-              },
-            });
-          }
 
-          // Block 2: Hourly Readings
-          const hourlyParamKeys = new Set();
-          for (const rec of Object.values(dateRecordsMap)) {
-            const hArr = rec.data?.hourlyReadings || rec.data?.hourly || [];
-            if (Array.isArray(hArr)) {
+            // Block 2: Hourly Readings Columns
+            const hourlyParamKeys = new Set();
+            for (const rec of Object.values(dateRecordsMap)) {
+              const hArr = getRawReadingsList(rec);
               hArr.forEach((item) => {
                 if (item && typeof item === 'object') {
                   Object.keys(item).forEach((k) => {
-                    if (!METADATA_KEYS.has(k)) hourlyParamKeys.add(k);
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id') {
+                      hourlyParamKeys.add(k);
+                    }
                   });
                 }
               });
             }
-          }
-          const resolvedHourlyCols = resolveColumns(Array.from(hourlyParamKeys), labelConfig);
-          for (const col of resolvedHourlyCols) {
-            analysisCols.push({
-              rawKey: col.key,
-              label: `HOURLY ${col.label}`,
-              range: col.range,
-              unitRangeStr: formatUnitRange(col.unit, col.range),
-              extractor: (rec, shiftKey) => {
-                if (!rec?.data) return { val: null };
-                const hArr = rec.data.hourlyReadings || rec.data.hourly || [];
-                if (!Array.isArray(hArr) || hArr.length === 0) return { val: null };
+            const resolvedHourlyCols = resolveColumns(Array.from(hourlyParamKeys), labelConfig);
 
-                // Filter by shift time window and sort chronologically (with Shift III post-midnight weighting)
-                const matching = hArr
-                  .filter((item) => {
-                    if (!item) return false;
-                    const mins = parseTimeToMinutes(item.time || item.id);
-                    return getShiftFromMinutes(mins) === shiftKey;
-                  })
-                  .sort((a, b) => {
-                    const minA = parseTimeToMinutes(a.time || a.id);
-                    const minB = parseTimeToMinutes(b.time || b.id);
-                    if (shiftKey === 'shift3') {
-                      return getShift3SortWeight(minA) - getShift3SortWeight(minB);
-                    }
-                    return minA - minB;
-                  });
-
-                // Pick last reading that has a non-empty value for col.key
-                for (let i = matching.length - 1; i >= 0; i--) {
-                  const item = matching[i];
-                  if (isNonEmptyValue(item[col.key])) {
-                    const editInfo = getCellEditInfo(rec.data, item.time || item.id, col.key, item);
-                    return { val: item[col.key], isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  }
-                }
-                return { val: null };
-              },
-            });
-          }
-        }
-        // ── Case C: Readings Array with Compound Nested Groups (Sewer Water) ──
-        else if (Array.isArray(sampleData.readings) && sampleData.readings.some((r) => r && Object.values(r).some((v) => v && typeof v === 'object' && !Array.isArray(v)))) {
-          const groupParamsMap = new Map();
-          const orderedGroups = [];
-
-          for (const rec of Object.values(dateRecordsMap)) {
-            const rArr = rec.data?.readings || [];
-            rArr.forEach((item) => {
-              if (!item || typeof item !== 'object') return;
-              Object.entries(item).forEach(([k, v]) => {
-                if (METADATA_KEYS.has(k)) return;
-                if (v && typeof v === 'object' && !Array.isArray(v)) {
-                  if (!groupParamsMap.has(k)) {
-                    orderedGroups.push(k);
-                    groupParamsMap.set(k, new Set());
-                  }
-                  const pSet = groupParamsMap.get(k);
-                  Object.keys(v).forEach((pk) => {
-                    if (!METADATA_KEYS.has(pk)) pSet.add(pk);
-                  });
-                }
-              });
-            });
-          }
-
-          orderedGroups.forEach((grp) => {
-            const pSet = groupParamsMap.get(grp);
-            pSet.forEach((pk) => {
-              const compoundKey = `${grp}__${pk}`;
+            for (let n = 1; n <= maxReadingsInShift; n++) {
               analysisCols.push({
-                rawKey: compoundKey,
-                label: formatCompoundLabel(compoundKey),
+                rawKey: `time_hourly_${n}`,
+                label: `TIME ${n}`,
                 range: null,
-                unitRangeStr: '',
+                unitRangeStr: 'HH:MM',
                 extractor: (rec, shiftKey) => {
-                  if (!rec?.data?.readings || !Array.isArray(rec.data.readings)) return { val: null };
-                  const matching = rec.data.readings
-                    .filter((item) => {
-                      if (!item) return false;
-                      const mins = parseTimeToMinutes(item.time || item.id);
-                      return getShiftFromMinutes(mins) === shiftKey;
-                    })
-                    .sort((a, b) => {
-                      const minA = parseTimeToMinutes(a.time || a.id);
-                      const minB = parseTimeToMinutes(b.time || b.id);
-                      if (shiftKey === 'shift3') {
-                        return getShift3SortWeight(minA) - getShift3SortWeight(minB);
-                      }
-                      return minA - minB;
-                    });
-
-                  for (let i = matching.length - 1; i >= 0; i--) {
-                    const item = matching[i];
-                    const grpObj = item[grp] || {};
-                    if (isNonEmptyValue(grpObj[pk])) {
-                      const editInfo = getCellEditInfo(rec.data, item.time || item.id, compoundKey, item);
-                      return { val: grpObj[pk], isEdited: editInfo.isEdited, editNote: editInfo.note };
-                    }
-                  }
-                  return { val: null };
+                  const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                  return { val: item?._formattedTime || null };
                 },
               });
-            });
-          });
-        }
-        // ── Case D: Flat Readings Array (BFW, DM Water, Cooling Water, Distiller Waste, etc.) ──
-        else if (Array.isArray(sampleData.readings)) {
-          const allKeys = new Set();
-          for (const rec of Object.values(dateRecordsMap)) {
-            const rArr = rec.data?.readings || [];
-            rArr.forEach((item) => {
-              if (item && typeof item === 'object') {
-                Object.keys(item).forEach((k) => {
-                  if (!METADATA_KEYS.has(k)) allKeys.add(k);
+
+              for (const col of resolvedHourlyCols) {
+                analysisCols.push({
+                  rawKey: `${col.key}_${n}`,
+                  label: `HOURLY ${col.label} ${n}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                    const val = item?.[col.key];
+                    const editInfo = getCellEditInfo(rec?.data, item?.time || item?.id, col.key, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
                 });
               }
-            });
-          }
-          const resolvedReadingCols = resolveColumns(Array.from(allKeys), labelConfig);
-          for (const col of resolvedReadingCols) {
-            analysisCols.push({
-              rawKey: col.key,
-              label: col.label,
-              range: col.range,
-              unitRangeStr: formatUnitRange(col.unit, col.range),
-              extractor: (rec, shiftKey) => {
-                if (!rec?.data?.readings || !Array.isArray(rec.data.readings)) return { val: null };
-                const matching = rec.data.readings
-                  .filter((item) => {
-                    if (!item) return false;
-                    const mins = parseTimeToMinutes(item.time || item.id);
-                    return getShiftFromMinutes(mins) === shiftKey;
-                  })
-                  .sort((a, b) => {
-                    const minA = parseTimeToMinutes(a.time || a.id);
-                    const minB = parseTimeToMinutes(b.time || b.id);
-                    if (shiftKey === 'shift3') {
-                      return getShift3SortWeight(minA) - getShift3SortWeight(minB);
-                    }
-                    return minA - minB;
-                  });
-
-                for (let i = matching.length - 1; i >= 0; i--) {
-                  const item = matching[i];
-                  if (isNonEmptyValue(item[col.key])) {
-                    const editInfo = getCellEditInfo(rec.data, item.time || item.id, col.key, item);
-                    return { val: item[col.key], isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  }
-                }
-                return { val: null };
-              },
-            });
-          }
-        }
-        // ── Case E: Keyed Row Containers (rows, shifts, shiftRows, timeRows, Lean, Brine) ──
-        else {
-          const rowContainer = findRowContainer(sampleData);
-          if (rowContainer && typeof rowContainer === 'object' && Object.keys(rowContainer).length > 0) {
-            const allRowKeys = new Set();
-            for (const rec of Object.values(dateRecordsMap)) {
-              const cont = findRowContainer(rec.data) || {};
-              Object.keys(cont).forEach((rk) => allRowKeys.add(rk.toLowerCase()));
             }
 
-            const hasDay = allRowKeys.has('day');
-            const hasShiftKeys = ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].some((k) => allRowKeys.has(k));
-            const isSlotBased = Array.from(allRowKeys).some((k) => /^t\d{2}$/.test(k));
-            const isBrineMultiRow = ['tk109', 'tk110'].some((k) => allRowKeys.has(k));
+            for (let u = 1; u <= maxUntimed; u++) {
+              const suffix = maxUntimed > 1 ? ` ${u}` : '';
+              analysisCols.push({
+                rawKey: `time_hourly_untimed_${u}`,
+                label: `TIME UNTIMED${suffix}`,
+                range: null,
+                unitRangeStr: 'HH:MM',
+                extractor: (rec, shiftKey) => {
+                  if (shiftKey !== 'shift1') return { val: null };
+                  const item = dateUntimedMap[rec?.date]?.[u - 1];
+                  return { val: item?._formattedTime || item?.time || 'UNTIMED' };
+                },
+              });
 
-            // E1. Multi-Row Daily (Brine tk109, tk110)
-            if (isBrineMultiRow) {
-              const brineRows = ['tk109', 'tk110'].filter((k) => allRowKeys.has(k));
-              for (const brk of brineRows) {
-                const paramKeysSet = new Set();
-                for (const rec of Object.values(dateRecordsMap)) {
-                  const cont = findRowContainer(rec.data) || {};
-                  const rObj = cont[brk] || cont[brk.toUpperCase()] || {};
-                  Object.keys(rObj).forEach((k) => {
-                    if (!METADATA_KEYS.has(k)) paramKeysSet.add(k);
+              for (const col of resolvedHourlyCols) {
+                analysisCols.push({
+                  rawKey: `${col.key}_untimed_${u}`,
+                  label: `HOURLY ${col.label} UNTIMED${suffix}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    if (shiftKey !== 'shift1') return { val: null };
+                    const item = dateUntimedMap[rec?.date]?.[u - 1];
+                    const val = item?.[col.key];
+                    const editInfo = getCellEditInfo(rec?.data, 'untimed', col.key, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+          }
+          // ── Case 1C: Standard Flat Timed Analyses (CaCl2, Bicarbonate, BFW, Distiller Waste, Cooling Water, LSA 500#, Sieve) ──
+          else {
+            const allKeys = new Set();
+            for (const rec of Object.values(dateRecordsMap)) {
+              const rArr = getRawReadingsList(rec);
+              rArr.forEach((item) => {
+                if (item && typeof item === 'object') {
+                  Object.keys(item).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift') {
+                      allKeys.add(k);
+                    }
                   });
                 }
-                const resolvedBrineCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
-                for (const col of resolvedBrineCols) {
+              });
+            }
+            const resolvedCols = resolveColumns(Array.from(allKeys), labelConfig);
+
+            for (let n = 1; n <= maxReadingsInShift; n++) {
+              analysisCols.push({
+                rawKey: `time_${n}`,
+                label: `TIME ${n}`,
+                range: null,
+                unitRangeStr: 'HH:MM',
+                extractor: (rec, shiftKey) => {
+                  const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                  return { val: item?._formattedTime || null };
+                },
+              });
+
+              for (const col of resolvedCols) {
+                analysisCols.push({
+                  rawKey: `${col.key}_${n}`,
+                  label: `${col.label} ${n}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    const item = dateShiftReadingsMap[rec?.date]?.[shiftKey]?.[n - 1];
+                    const val = item?.[col.key];
+                    const editInfo = getCellEditInfo(rec?.data, item?.time || item?.id, col.key, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+
+            for (let u = 1; u <= maxUntimed; u++) {
+              const suffix = maxUntimed > 1 ? ` ${u}` : '';
+              analysisCols.push({
+                rawKey: `time_untimed_${u}`,
+                label: `TIME UNTIMED${suffix}`,
+                range: null,
+                unitRangeStr: 'HH:MM',
+                extractor: (rec, shiftKey) => {
+                  if (shiftKey !== 'shift1') return { val: null };
+                  const item = dateUntimedMap[rec?.date]?.[u - 1];
+                  return { val: item?._formattedTime || item?.time || 'UNTIMED' };
+                },
+              });
+
+              for (const col of resolvedCols) {
+                analysisCols.push({
+                  rawKey: `${col.key}_untimed_${u}`,
+                  label: `${col.label} UNTIMED${suffix}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    if (shiftKey !== 'shift1') return { val: null };
+                    const item = dateUntimedMap[rec?.date]?.[u - 1];
+                    const val = item?.[col.key];
+                    const editInfo = getCellEditInfo(rec?.data, 'untimed', col.key, item);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+          }
+        }
+        // ═══════════════════════════════════════════════════════════════════════
+        // ── CASE 2: Non-Timed Analyses (Slot-based, Keyed rows, Flat Daily) ──
+        // ═══════════════════════════════════════════════════════════════════════
+        else {
+          // Nested Units / Towers (T 401)
+          if (sampleData.units || sampleData.towers) {
+            const containerKey = sampleData.units ? 'units' : 'towers';
+            const unitKeysSet = new Set();
+            for (const rec of Object.values(dateRecordsMap)) {
+              const cont = rec.data?.[containerKey] || {};
+              Object.keys(cont).forEach((uk) => {
+                if (!METADATA_KEYS.has(uk) && !uk.startsWith('_')) unitKeysSet.add(uk);
+              });
+            }
+            const sortedUnitKeys = Array.from(unitKeysSet).sort();
+
+            for (const uk of sortedUnitKeys) {
+              const pKeysSet = new Set();
+              for (const rec of Object.values(dateRecordsMap)) {
+                const uObj = rec.data?.[containerKey]?.[uk] || {};
+                ['s1', 's2', 's3', 'shift1', 'shift2', 'shift3'].forEach((sk) => {
+                  const sObj = uObj[sk];
+                  if (sObj && typeof sObj === 'object') {
+                    Object.keys(sObj).forEach((pk) => {
+                      if (!METADATA_KEYS.has(pk) && !pk.startsWith('_')) pKeysSet.add(pk);
+                    });
+                  }
+                });
+              }
+              const resolvedUnitCols = resolveColumns(Array.from(pKeysSet), labelConfig);
+              for (const col of resolvedUnitCols) {
+                const uLabel = uk.length === 1 ? `UNIT ${uk.toUpperCase()}` : uk.toUpperCase();
+                analysisCols.push({
+                  rawKey: col.key,
+                  unitKey: uk,
+                  label: `${uLabel} ${col.label}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    if (!rec?.data) return { val: null };
+                    const cont = rec.data[containerKey] || {};
+                    const uObj = cont[uk] || {};
+                    const skMap = { shift1: 's1', shift2: 's2', shift3: 's3' };
+                    const targetSk = uObj[skMap[shiftKey]] ? skMap[shiftKey] : shiftKey;
+                    const shiftObj = uObj[targetSk] || {};
+                    const val = shiftObj[col.key];
+                    const editInfo = getCellEditInfo(rec.data, `${uk}.${targetSk}`, col.key, shiftObj);
+                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                  },
+                });
+              }
+            }
+          }
+          // Keyed Row Containers (rows, shifts, shiftRows, timeRows, Lean, Brine)
+          else {
+            const rowContainer = findRowContainer(sampleData);
+            if (rowContainer && typeof rowContainer === 'object' && Object.keys(rowContainer).length > 0) {
+              const allRowKeys = new Set();
+              for (const rec of Object.values(dateRecordsMap)) {
+                const cont = findRowContainer(rec.data) || {};
+                Object.keys(cont).forEach((rk) => allRowKeys.add(rk.toLowerCase()));
+              }
+
+              const hasDay = allRowKeys.has('day');
+              const hasShiftKeys = ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].some((k) => allRowKeys.has(k));
+              const isSlotBased = isSlotKeyedAnalysis(at) || Array.from(allRowKeys).some((k) => /^t\d{2}$/.test(k));
+              const isBrineMultiRow = ['tk109', 'tk110'].some((k) => allRowKeys.has(k));
+
+              // Brine tk109, tk110
+              if (isBrineMultiRow) {
+                const brineRows = ['tk109', 'tk110'].filter((k) => allRowKeys.has(k));
+                for (const brk of brineRows) {
+                  const paramKeysSet = new Set();
+                  for (const rec of Object.values(dateRecordsMap)) {
+                    const cont = findRowContainer(rec.data) || {};
+                    const rObj = cont[brk] || cont[brk.toUpperCase()] || {};
+                    Object.keys(rObj).forEach((k) => {
+                      if (!METADATA_KEYS.has(k) && !k.startsWith('_')) paramKeysSet.add(k);
+                    });
+                  }
+                  const resolvedBrineCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
+                  for (const col of resolvedBrineCols) {
+                    analysisCols.push({
+                      rawKey: col.key,
+                      label: `${brk.toUpperCase()} ${col.label}`,
+                      range: col.range,
+                      unitRangeStr: formatUnitRange(col.unit, col.range),
+                      extractor: (rec, shiftKey) => {
+                        if (shiftKey !== 'shift1') return { val: null };
+                        const cont = findRowContainer(rec.data) || {};
+                        const rObj = cont[brk] || cont[brk.toUpperCase()] || {};
+                        const val = rObj[col.key];
+                        const editInfo = getCellEditInfo(rec.data, brk, col.key, rObj);
+                        return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                      },
+                    });
+                  }
+                }
+              }
+              // Dual Block Lean Analysis (shift1..3 + day)
+              else if (hasDay && hasShiftKeys) {
+                const shiftParamKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = findRowContainer(rec.data) || {};
+                  ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].forEach((sk) => {
+                    const sObj = cont[sk];
+                    if (sObj && typeof sObj === 'object') {
+                      Object.keys(sObj).forEach((k) => {
+                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) shiftParamKeys.add(k);
+                      });
+                    }
+                  });
+                }
+                const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
+                for (const col of resolvedShiftCols) {
                   analysisCols.push({
                     rawKey: col.key,
-                    label: `${brk.toUpperCase()} ${col.label}`,
+                    label: col.label,
                     range: col.range,
                     unitRangeStr: formatUnitRange(col.unit, col.range),
                     extractor: (rec, shiftKey) => {
-                      if (shiftKey !== 'shift1') return { val: null }; // Shift I row only
                       const cont = findRowContainer(rec.data) || {};
-                      const rObj = cont[brk] || cont[brk.toUpperCase()] || {};
-                      const val = rObj[col.key];
-                      const editInfo = getCellEditInfo(rec.data, brk, col.key, rObj);
+                      const sObj = cont[shiftKey] || cont[shiftKey.replace('shift', 's')] || {};
+                      const val = sObj[col.key];
+                      const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, sObj);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
+
+                const dayParamKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = findRowContainer(rec.data) || {};
+                  const dObj = cont.day || cont.DAY || {};
+                  Object.keys(dObj).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_')) dayParamKeys.add(k);
+                  });
+                }
+                const resolvedDayCols = resolveColumns(Array.from(dayParamKeys), labelConfig);
+                for (const col of resolvedDayCols) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: `DAY ${col.label}`,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      if (shiftKey !== 'shift1') return { val: null };
+                      const cont = findRowContainer(rec.data) || {};
+                      const dObj = cont.day || cont.DAY || {};
+                      const val = dObj[col.key];
+                      const editInfo = getCellEditInfo(rec.data, 'day', col.key, dObj);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
+              }
+              // Slot-Based (TK 203, TK 205, TK 207, CR 202, CR 203): OVERALL keeps last reading per shift
+              else if (isSlotBased) {
+                const allSlotKeys = Array.from(allRowKeys);
+                const isFourHourly = allSlotKeys.length <= 6 && allSlotKeys.some((k) => ['t11', 't19', 't03'].includes(k));
+                const slotOrderRule = isFourHourly ? SLOT_SHIFT_ORDER.fourHourly : SLOT_SHIFT_ORDER.twoHourly;
+
+                const slotParamKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = findRowContainer(rec.data) || {};
+                  Object.values(cont).forEach((slotObj) => {
+                    if (slotObj && typeof slotObj === 'object') {
+                      Object.keys(slotObj).forEach((k) => {
+                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) slotParamKeys.add(k);
+                      });
+                    }
+                  });
+                }
+                const resolvedSlotCols = resolveColumns(Array.from(slotParamKeys), labelConfig);
+                for (const col of resolvedSlotCols) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: col.label,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      const cont = findRowContainer(rec.data) || {};
+                      const slotsToCheck = slotOrderRule[shiftKey] || [];
+                      for (const sKey of slotsToCheck) {
+                        const sObj = cont[sKey] || cont[sKey.toUpperCase()] || cont[sKey.toLowerCase()];
+                        if (sObj && isNonEmptyValue(sObj[col.key])) {
+                          const editInfo = getCellEditInfo(rec.data, sKey, col.key, sObj);
+                          return { val: sObj[col.key], isEdited: editInfo.isEdited, editNote: editInfo.note };
+                        }
+                      }
+                      return { val: null };
+                    },
+                  });
+                }
+              }
+              // Standard Shift-Keyed Rows (TK 204, PCL/TCL, TK 401, etc.)
+              else if (hasShiftKeys) {
+                const shiftParamKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = findRowContainer(rec.data) || {};
+                  Object.values(cont).forEach((sObj) => {
+                    if (sObj && typeof sObj === 'object') {
+                      Object.keys(sObj).forEach((k) => {
+                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) shiftParamKeys.add(k);
+                      });
+                    }
+                  });
+                }
+                const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
+                for (const col of resolvedShiftCols) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: col.label,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      const cont = findRowContainer(rec.data) || {};
+                      const sObj = cont[shiftKey] || cont[shiftKey.replace('shift', 's')] || cont[shiftKey.replace('shift', 'i')] || {};
+                      const val = sObj[col.key];
+                      const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, sObj);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
+              }
+              // Single-row Daily Container (rows.day or rows.week)
+              else {
+                const paramKeysSet = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = findRowContainer(rec.data) || {};
+                  Object.values(cont).forEach((rObj) => {
+                    if (rObj && typeof rObj === 'object') {
+                      Object.keys(rObj).forEach((k) => {
+                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) paramKeysSet.add(k);
+                      });
+                    }
+                  });
+                }
+                const resolvedCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
+                for (const col of resolvedCols) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: col.label,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      if (shiftKey !== 'shift1') return { val: null };
+                      const cont = findRowContainer(rec.data) || {};
+                      const firstRow = Object.values(cont)[0] || {};
+                      const val = firstRow[col.key];
+                      const editInfo = getCellEditInfo(rec.data, Object.keys(cont)[0] || 'daily', col.key, firstRow);
                       return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
                     },
                   });
                 }
               }
             }
-            // E2. Dual Block Lean Analysis (shift1..3 + day)
-            else if (hasDay && hasShiftKeys) {
-              // Shift columns
-              const shiftParamKeys = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
-                ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].forEach((sk) => {
-                  const sObj = cont[sk];
-                  if (sObj && typeof sObj === 'object') {
-                    Object.keys(sObj).forEach((k) => {
-                      if (!METADATA_KEYS.has(k)) shiftParamKeys.add(k);
-                    });
-                  }
-                });
-              }
-              const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
-              for (const col of resolvedShiftCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: col.label,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    const cont = findRowContainer(rec.data) || {};
-                    const sObj = cont[shiftKey] || cont[shiftKey.replace('shift', 's')] || {};
-                    const val = sObj[col.key];
-                    const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, sObj);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-
-              // Day Routine columns
-              const dayParamKeys = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
-                const dObj = cont.day || cont.DAY || {};
-                Object.keys(dObj).forEach((k) => {
-                  if (!METADATA_KEYS.has(k)) dayParamKeys.add(k);
-                });
-              }
-              const resolvedDayCols = resolveColumns(Array.from(dayParamKeys), labelConfig);
-              for (const col of resolvedDayCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: `DAY ${col.label}`,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    if (shiftKey !== 'shift1') return { val: null };
-                    const cont = findRowContainer(rec.data) || {};
-                    const dObj = cont.day || cont.DAY || {};
-                    const val = dObj[col.key];
-                    const editInfo = getCellEditInfo(rec.data, 'day', col.key, dObj);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-            }
-            // E3. 2-hourly / 4-hourly Slot-Based (TK 203, TK 205, TK 207, CR 202, CR 203, TK 419)
-            else if (isSlotBased) {
-              const allSlotKeys = Array.from(allRowKeys);
-              const isFourHourly = allSlotKeys.length <= 6 && allSlotKeys.some((k) => ['t11', 't19', 't03'].includes(k));
-              const slotOrderRule = isFourHourly ? SLOT_SHIFT_ORDER.fourHourly : SLOT_SHIFT_ORDER.twoHourly;
-
-              const slotParamKeys = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
-                Object.values(cont).forEach((slotObj) => {
-                  if (slotObj && typeof slotObj === 'object') {
-                    Object.keys(slotObj).forEach((k) => {
-                      if (!METADATA_KEYS.has(k)) slotParamKeys.add(k);
-                    });
-                  }
-                });
-              }
-              const resolvedSlotCols = resolveColumns(Array.from(slotParamKeys), labelConfig);
-              for (const col of resolvedSlotCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: col.label,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    const cont = findRowContainer(rec.data) || {};
-                    const slotsToCheck = slotOrderRule[shiftKey] || [];
-                    // Check latest slot first
-                    for (const sKey of slotsToCheck) {
-                      const sObj = cont[sKey] || cont[sKey.toUpperCase()] || cont[sKey.toLowerCase()];
-                      if (sObj && isNonEmptyValue(sObj[col.key])) {
-                        const editInfo = getCellEditInfo(rec.data, sKey, col.key, sObj);
-                        return { val: sObj[col.key], isEdited: editInfo.isEdited, editNote: editInfo.note };
-                      }
-                    }
-                    return { val: null };
-                  },
-                });
-              }
-            }
-            // E4. Standard Shift-Keyed Rows (TK 204, PCL/TCL, CaCl2, etc.)
-            else if (hasShiftKeys) {
-              const shiftParamKeys = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
-                Object.values(cont).forEach((sObj) => {
-                  if (sObj && typeof sObj === 'object') {
-                    Object.keys(sObj).forEach((k) => {
-                      if (!METADATA_KEYS.has(k)) shiftParamKeys.add(k);
-                    });
-                  }
-                });
-              }
-              const resolvedShiftCols = resolveColumns(Array.from(shiftParamKeys), labelConfig);
-              for (const col of resolvedShiftCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: col.label,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    const cont = findRowContainer(rec.data) || {};
-                    const sObj = cont[shiftKey] || cont[shiftKey.replace('shift', 's')] || cont[shiftKey.replace('shift', 'i')] || {};
-                    const val = sObj[col.key];
-                    const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, sObj);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-            }
-            // E5. Single-row Daily Container (rows.day or rows.week)
+            // Flat Parameters / Chemical & BSS (Raw Salt, ACL Product)
             else {
-              const paramKeysSet = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
-                Object.values(cont).forEach((rObj) => {
-                  if (rObj && typeof rObj === 'object') {
-                    Object.keys(rObj).forEach((k) => {
-                      if (!METADATA_KEYS.has(k)) paramKeysSet.add(k);
-                    });
-                  }
-                });
-              }
-              const resolvedCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
-              for (const col of resolvedCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: col.label,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    if (shiftKey !== 'shift1') return { val: null };
-                    const cont = findRowContainer(rec.data) || {};
-                    const firstRow = Object.values(cont)[0] || {};
-                    const val = firstRow[col.key];
-                    const editInfo = getCellEditInfo(rec.data, Object.keys(cont)[0] || 'daily', col.key, firstRow);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-            }
-          }
-          // ── Case F: Flat Parameters / Chemical & BSS (Raw Salt, ACL Product) ──
-          else {
-            if (sampleData.chemical || sampleData.bss) {
-              const chemKeys = new Set();
-              const bssKeys = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const ch = rec.data?.chemical || {};
-                const bs = rec.data?.bss || {};
-                Object.keys(ch).forEach((k) => !METADATA_KEYS.has(k) && chemKeys.add(k));
-                Object.keys(bs).forEach((k) => !METADATA_KEYS.has(k) && bssKeys.add(k));
-              }
-              const resChem = resolveColumns(Array.from(chemKeys), labelConfig);
-              const resBss = resolveColumns(Array.from(bssKeys), labelConfig);
-              for (const col of resChem) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: `CHEM ${col.label}`,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    if (shiftKey !== 'shift1') return { val: null };
-                    const ch = rec.data?.chemical || {};
-                    const val = ch[col.key];
-                    const editInfo = getCellEditInfo(rec.data, 'chemical', col.key, ch);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-              for (const col of resBss) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: `BSS ${col.label}`,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    if (shiftKey !== 'shift1') return { val: null };
-                    const bs = rec.data?.bss || {};
-                    const val = bs[col.key];
-                    const editInfo = getCellEditInfo(rec.data, 'bss', col.key, bs);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
-              }
-            } else {
-              // Flat primitive dictionary (Raw Salt parameters, etc.)
-              const paramKeysSet = new Set();
-              for (const rec of Object.values(dateRecordsMap)) {
-                const pObj = rec.data?.parameters || rec.data || {};
-                Object.keys(pObj).forEach((k) => {
-                  if (!METADATA_KEYS.has(k) && typeof pObj[k] !== 'object') {
-                    paramKeysSet.add(k);
-                  }
-                });
-              }
-              const resolvedCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
-              for (const col of resolvedCols) {
-                analysisCols.push({
-                  rawKey: col.key,
-                  label: col.label,
-                  range: col.range,
-                  unitRangeStr: formatUnitRange(col.unit, col.range),
-                  extractor: (rec, shiftKey) => {
-                    if (shiftKey !== 'shift1') return { val: null };
-                    const pObj = rec.data?.parameters || rec.data || {};
-                    const val = pObj[col.key];
-                    const editInfo = getCellEditInfo(rec.data, 'parameters', col.key, pObj);
-                    return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
-                  },
-                });
+              if (sampleData.chemical || sampleData.bss) {
+                const chemKeys = new Set();
+                const bssKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const ch = rec.data?.chemical || {};
+                  const bs = rec.data?.bss || {};
+                  Object.keys(ch).forEach((k) => !METADATA_KEYS.has(k) && !k.startsWith('_') && chemKeys.add(k));
+                  Object.keys(bs).forEach((k) => !METADATA_KEYS.has(k) && !k.startsWith('_') && bssKeys.add(k));
+                }
+                const resChem = resolveColumns(Array.from(chemKeys), labelConfig);
+                const resBss = resolveColumns(Array.from(bssKeys), labelConfig);
+                for (const col of resChem) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: `CHEM ${col.label}`,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      if (shiftKey !== 'shift1') return { val: null };
+                      const ch = rec.data?.chemical || {};
+                      const val = ch[col.key];
+                      const editInfo = getCellEditInfo(rec.data, 'chemical', col.key, ch);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
+                for (const col of resBss) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: `BSS ${col.label}`,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      if (shiftKey !== 'shift1') return { val: null };
+                      const bs = rec.data?.bss || {};
+                      const val = bs[col.key];
+                      const editInfo = getCellEditInfo(rec.data, 'bss', col.key, bs);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
+              } else {
+                const paramKeysSet = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const pObj = rec.data?.parameters || rec.data || {};
+                  Object.keys(pObj).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && typeof pObj[k] !== 'object') {
+                      paramKeysSet.add(k);
+                    }
+                  });
+                }
+                const resolvedCols = resolveColumns(Array.from(paramKeysSet), labelConfig);
+                for (const col of resolvedCols) {
+                  analysisCols.push({
+                    rawKey: col.key,
+                    label: col.label,
+                    range: col.range,
+                    unitRangeStr: formatUnitRange(col.unit, col.range),
+                    extractor: (rec, shiftKey) => {
+                      if (shiftKey !== 'shift1') return { val: null };
+                      const pObj = rec.data?.parameters || rec.data || {};
+                      const val = pObj[col.key];
+                      const editInfo = getCellEditInfo(rec.data, 'parameters', col.key, pObj);
+                      return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                    },
+                  });
+                }
               }
             }
           }
@@ -3512,7 +3963,6 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
   });
   overallSheet.pageSetup = { orientation: 'landscape' };
 
-  // Set row heights for headers
   overallSheet.getRow(1).height = 26;
   overallSheet.getRow(2).height = 28;
   overallSheet.getRow(3).height = 28;
@@ -3561,19 +4011,19 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
     const r3Cell = overallSheet.getRow(3).getCell(col.colIndex);
     r3Cell.value = col.label;
     r3Cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
-    r3Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC4D79B' } }; // Sage green
+    r3Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC4D79B' } };
     r3Cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     r3Cell.border = THIN_BLACK_BORDER;
 
     const r4Cell = overallSheet.getRow(4).getCell(col.colIndex);
     r4Cell.value = col.unitRangeStr || '';
     r4Cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF000000' } };
-    r4Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } }; // Yellow
+    r4Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
     r4Cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     r4Cell.border = THIN_BLACK_BORDER;
   });
 
-  // 5. Populate Data Rows (3 rows per date, starting at row 5)
+  // 5. Populate Data Rows in OVERALL (3 rows per date, starting at row 5)
   let currentRowIdx = 5;
 
   for (const dateStr of distinctDates) {
@@ -3590,7 +4040,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
       const row = overallSheet.getRow(currentRowIdx);
       row.height = 20;
 
-      // Col A: Date (real Excel date on ALL 3 rows)
+      // Col A: Date (real Excel date on ALL rows)
       const dateCell = row.getCell(1);
       dateCell.value = dateObj;
       dateCell.numFmt = 'dd-mmm-yy';
@@ -3649,21 +4099,600 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
 
   autoFitColumns(overallSheet, totalCols);
 
-  // 6. Render NOTES Sheet
+  // 6. Render Detail Sheets (Order: ACL, SA, OFFSITE; omit sheets with no data)
+  const detailSheetsMap = {};
+  const usedSheetNames = new Set(['overall', 'notes']);
+
+  for (const p of ['ACL', 'SA', 'OFFSITE']) {
+    const plantGroupKeys = Object.keys(allPlantsData[p]).sort((a, b) => a.localeCompare(b));
+    for (const gk of plantGroupKeys) {
+      const dateRecordsMap = allPlantsData[p][gk];
+      const sampleRec = Object.values(dateRecordsMap)[0];
+      if (!sampleRec) continue;
+
+      const at = sampleRec.analysisType || gk;
+      const unit = sampleRec.unit || null;
+      const labelConfig = getAnalysisConfig(at, unit);
+      const displayTitle = (labelConfig?.title || at).toUpperCase();
+      const isTimed = isTimedAnalysis(at, unit);
+      const isSlot = isSlotKeyedAnalysis(at);
+
+      if (!isTimed && !isSlot) {
+        continue; // Only timed-readings and slot-keyed analyses have detail sheets
+      }
+
+      const sheetName = sanitizeSheetName(getShortAnalysisName(p, at, unit), usedSheetNames);
+
+      // Check if there is at least one non-empty reading across all dates
+      let totalNonEmptyReadings = 0;
+      if (isTimed) {
+        for (const rec of Object.values(dateRecordsMap)) {
+          const rList = getRawReadingsList(rec);
+          if (rList.length > 0) totalNonEmptyReadings += rList.length;
+        }
+      } else if (isSlot) {
+        for (const rec of Object.values(dateRecordsMap)) {
+          const cont = findRowContainer(rec.data) || {};
+          Object.values(cont).forEach((slotObj) => {
+            if (slotObj && typeof slotObj === 'object') {
+              if (Object.values(slotObj).some((v) => isNonEmptyValue(v))) {
+                totalNonEmptyReadings++;
+              }
+            }
+          });
+        }
+      }
+
+      if (totalNonEmptyReadings === 0) {
+        continue; // Omit sheets with no data
+      }
+
+      // ── Create Detail Worksheet ──
+      const detailSheet = workbook.addWorksheet(sheetName, {
+        views: [{ showGridLines: true, state: 'frozen', xSplit: 3, ySplit: 3 }],
+      });
+      detailSheet.pageSetup = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0 };
+      detailSheetsMap[`${p}::${gk}`] = detailSheet;
+
+      const tabColor = PLANT_TAB_COLORS[p] || 'FF455A64';
+      detailSheet.properties.tabColor = { argb: tabColor };
+
+      // Detail Sheet Columns Definition: DATE (1), TIME (2), SHIFT (3), Parameters (4..K), SOURCE (K+1)
+      const detailParamCols = [];
+
+      if (at.toLowerCase().includes('sewer water')) {
+        const groupParamsMap = new Map();
+        const orderedGroups = [];
+        for (const rec of Object.values(dateRecordsMap)) {
+          const rArr = getRawReadingsList(rec);
+          rArr.forEach((item) => {
+            if (!item || typeof item !== 'object') return;
+            Object.entries(item).forEach(([k, v]) => {
+              if (METADATA_KEYS.has(k) || k.startsWith('_') || k === 'time' || k === 'id') return;
+              if (v && typeof v === 'object' && !Array.isArray(v)) {
+                if (!groupParamsMap.has(k)) {
+                  orderedGroups.push(k);
+                  groupParamsMap.set(k, new Set());
+                }
+                const pSet = groupParamsMap.get(k);
+                Object.keys(v).forEach((pk) => {
+                  if (!METADATA_KEYS.has(pk) && !pk.startsWith('_')) pSet.add(pk);
+                });
+              }
+            });
+          });
+        }
+        orderedGroups.forEach((grp) => {
+          const pSet = groupParamsMap.get(grp);
+          pSet.forEach((pk) => {
+            const compoundKey = `${grp}__${pk}`;
+            detailParamCols.push({
+              key: compoundKey,
+              grp,
+              pk,
+              label: formatCompoundLabel(compoundKey),
+              range: null,
+              unitRangeStr: '',
+            });
+          });
+        });
+      } else if (at.toLowerCase().includes('lsa bagging') && !at.toLowerCase().includes('sieve')) {
+        // Hourly parameters
+        const hourlyParamKeys = new Set();
+        for (const rec of Object.values(dateRecordsMap)) {
+          const hArr = getRawReadingsList(rec);
+          hArr.forEach((item) => {
+            if (item && typeof item === 'object') {
+              Object.keys(item).forEach((k) => {
+                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id') {
+                  hourlyParamKeys.add(k);
+                }
+              });
+            }
+          });
+        }
+        const resolved = resolveColumns(Array.from(hourlyParamKeys), labelConfig);
+        resolved.forEach((col) => {
+          detailParamCols.push({
+            key: col.key,
+            label: col.label,
+            range: col.range,
+            unitRangeStr: formatUnitRange(col.unit, col.range),
+          });
+        });
+      } else {
+        const allKeys = new Set();
+        for (const rec of Object.values(dateRecordsMap)) {
+          if (isTimed) {
+            const rArr = getRawReadingsList(rec);
+            rArr.forEach((item) => {
+              if (item && typeof item === 'object') {
+                Object.keys(item).forEach((k) => {
+                  if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift') {
+                    allKeys.add(k);
+                  }
+                });
+              }
+            });
+          } else if (isSlot) {
+            const cont = findRowContainer(rec.data) || {};
+            Object.values(cont).forEach((slotObj) => {
+              if (slotObj && typeof slotObj === 'object') {
+                Object.keys(slotObj).forEach((k) => {
+                  if (!METADATA_KEYS.has(k) && !k.startsWith('_')) allKeys.add(k);
+                });
+              }
+            });
+          }
+        }
+        const resolved = resolveColumns(Array.from(allKeys), labelConfig);
+        resolved.forEach((col) => {
+          detailParamCols.push({
+            key: col.key,
+            label: col.label,
+            range: col.range,
+            unitRangeStr: formatUnitRange(col.unit, col.range),
+          });
+        });
+      }
+
+      const totalDetailCols = 3 + detailParamCols.length + 1; // DATE, TIME, SHIFT + params + SOURCE
+
+      // Header Row 1: Title Banner
+      detailSheet.getRow(1).height = 28;
+      const titleCell = detailSheet.getRow(1).getCell(1);
+      titleCell.value = `${p} PLANT — ${displayTitle} (DETAIL SHEET)`;
+      applyTitleStyle(titleCell);
+      detailSheet.mergeCells(1, 1, 1, totalDetailCols);
+
+      // Header Row 2: Column Names
+      detailSheet.getRow(2).height = 24;
+      const h2 = detailSheet.getRow(2);
+      h2.getCell(1).value = 'DATE';
+      h2.getCell(2).value = 'TIME';
+      h2.getCell(3).value = 'SHIFT';
+      detailParamCols.forEach((col, idx) => {
+        h2.getCell(4 + idx).value = col.label;
+      });
+      h2.getCell(totalDetailCols).value = 'SOURCE';
+
+      for (let c = 1; c <= totalDetailCols; c++) {
+        const cell = h2.getCell(c);
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC4D79B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = THIN_BLACK_BORDER;
+      }
+
+      // Header Row 3: Units / Ranges
+      detailSheet.getRow(3).height = 20;
+      const h3 = detailSheet.getRow(3);
+      h3.getCell(1).value = 'UTC';
+      h3.getCell(2).value = 'HH:MM';
+      h3.getCell(3).value = 'I / II / III';
+      detailParamCols.forEach((col, idx) => {
+        h3.getCell(4 + idx).value = col.unitRangeStr || '';
+      });
+      h3.getCell(totalDetailCols).value = 'Doc / Slot ID';
+
+      for (let c = 1; c <= totalDetailCols; c++) {
+        const cell = h3.getCell(c);
+        cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF000000' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = THIN_BLACK_BORDER;
+      }
+
+      // Data Rows (Row 4+)
+      let dRowIdx = 4;
+
+      for (const dateStr of distinctDates) {
+        const rec = dateRecordsMap[dateStr];
+        if (!rec) continue;
+
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const dateObj = new Date(Date.UTC(y, m - 1, d));
+
+        // Case A: Timed Analysis Rows
+        if (isTimed) {
+          const rawList = getRawReadingsList(rec);
+          const { shiftReadings, untimedReadings } = extractShiftAndUntimedReadings(rawList);
+
+          const orderedReadings = [
+            ...shiftReadings.shift1.map((r) => ({ ...r, _shiftName: 'I' })),
+            ...shiftReadings.shift2.map((r) => ({ ...r, _shiftName: 'II' })),
+            ...shiftReadings.shift3.map((r) => ({ ...r, _shiftName: 'III' })),
+            ...untimedReadings.map((r) => ({ ...r, _shiftName: 'I' })),
+          ];
+
+          for (const item of orderedReadings) {
+            const row = detailSheet.getRow(dRowIdx);
+            row.height = 20;
+
+            // Col 1: DATE
+            const c1 = row.getCell(1);
+            c1.value = dateObj;
+            c1.numFmt = 'dd-mmm-yy';
+            c1.font = { name: 'Calibri', size: 10, bold: true };
+            c1.alignment = { vertical: 'middle', horizontal: 'center' };
+            c1.border = THIN_BLACK_BORDER;
+
+            // Col 2: TIME (Clean HH:MM)
+            const c2 = row.getCell(2);
+            c2.value = item._formattedTime || item.time || '*';
+            applyDataCellStyle(c2, true);
+
+            // Col 3: SHIFT
+            const c3 = row.getCell(3);
+            c3.value = item._shiftName || 'I';
+            applyDataCellStyle(c3, true);
+
+            // Parameter columns
+            detailParamCols.forEach((col, idx) => {
+              const cell = row.getCell(4 + idx);
+              let rawVal = null;
+              if (col.grp && col.pk) {
+                rawVal = item[col.grp]?.[col.pk];
+              } else {
+                rawVal = item[col.key];
+              }
+
+              if (!isNonEmptyValue(rawVal)) {
+                cell.value = '*';
+                applyDataCellStyle(cell, false, true, false, false);
+              } else {
+                const num = Number(rawVal);
+                const valToSet = !isNaN(num) && String(rawVal).trim() !== '' ? num : String(rawVal).trim();
+                cell.value = valToSet;
+
+                const limit = parseColumnRange(col.range);
+                const isOutOfLimit = checkOutOfLimit(valToSet, limit);
+                const editInfo = getCellEditInfo(rec.data, item.time || item.id, col.key, item);
+
+                applyDataCellStyle(cell, false, false, isOutOfLimit, editInfo.isEdited);
+                if (editInfo.isEdited && editInfo.note) {
+                  cell.note = editInfo.note;
+                }
+              }
+            });
+
+            // Col Last: SOURCE
+            const cSrc = row.getCell(totalDetailCols);
+            cSrc.value = item._source || String(rec._id || rec.id || 'Doc 1');
+            applyDataCellStyle(cSrc, false, true);
+
+            dRowIdx++;
+          }
+        }
+        // Case B: Slot-Keyed Rows (TK 203, 205, 207, CR 202, 203)
+        else if (isSlot) {
+          const cont = findRowContainer(rec.data) || {};
+          const allSlotKeys = Object.keys(SLOT_TIME_ORDER).sort((a, b) => SLOT_TIME_ORDER[a] - SLOT_TIME_ORDER[b]);
+
+          for (const sKey of allSlotKeys) {
+            const slotObj = cont[sKey] || cont[sKey.toUpperCase()] || cont[sKey.toLowerCase()];
+            if (!slotObj || typeof slotObj !== 'object') continue;
+
+            const hasNonEmpty = detailParamCols.some((col) => isNonEmptyValue(slotObj[col.key]));
+            if (!hasNonEmpty) continue; // Only show slots with at least one non-empty value
+
+            const row = detailSheet.getRow(dRowIdx);
+            row.height = 20;
+
+            const slotParsed = parseAnalysisTime(sKey);
+            const slotShiftName = slotParsed.shiftKey === 'shift1' ? 'I' : (slotParsed.shiftKey === 'shift2' ? 'II' : 'III');
+
+            // Col 1: DATE
+            const c1 = row.getCell(1);
+            c1.value = dateObj;
+            c1.numFmt = 'dd-mmm-yy';
+            c1.font = { name: 'Calibri', size: 10, bold: true };
+            c1.alignment = { vertical: 'middle', horizontal: 'center' };
+            c1.border = THIN_BLACK_BORDER;
+
+            // Col 2: TIME
+            const c2 = row.getCell(2);
+            c2.value = slotParsed.formattedTime || sKey;
+            applyDataCellStyle(c2, true);
+
+            // Col 3: SHIFT
+            const c3 = row.getCell(3);
+            c3.value = slotShiftName;
+            applyDataCellStyle(c3, true);
+
+            // Parameter columns
+            detailParamCols.forEach((col, idx) => {
+              const cell = row.getCell(4 + idx);
+              const rawVal = slotObj[col.key];
+
+              if (!isNonEmptyValue(rawVal)) {
+                cell.value = '*';
+                applyDataCellStyle(cell, false, true, false, false);
+              } else {
+                const num = Number(rawVal);
+                const valToSet = !isNaN(num) && String(rawVal).trim() !== '' ? num : String(rawVal).trim();
+                cell.value = valToSet;
+
+                const limit = parseColumnRange(col.range);
+                const isOutOfLimit = checkOutOfLimit(valToSet, limit);
+                const editInfo = getCellEditInfo(rec.data, sKey, col.key, slotObj);
+
+                applyDataCellStyle(cell, false, false, isOutOfLimit, editInfo.isEdited);
+                if (editInfo.isEdited && editInfo.note) {
+                  cell.note = editInfo.note;
+                }
+              }
+            });
+
+            // Col Last: SOURCE
+            const cSrc = row.getCell(totalDetailCols);
+            cSrc.value = slotObj._source || String(rec._id || rec.id || sKey);
+            applyDataCellStyle(cSrc, false, true);
+
+            dRowIdx++;
+          }
+        }
+      }
+
+      autoFitColumns(detailSheet, totalDetailCols);
+    }
+  }
+
+  // 7. Non-Circular Reconciliation & Render NOTES Sheet
+  const reconciliationRows = [];
+  let totalInputReadingsAll = 0;
+  let totalOutputReadingsAll = 0;
+
+  for (const p of ALL_PLANTS_ORDER) {
+    const plantGroupKeys = Object.keys(allPlantsData[p]).sort((a, b) => a.localeCompare(b));
+    for (const gk of plantGroupKeys) {
+      const dateRecordsMap = allPlantsData[p][gk];
+      const sampleRec = Object.values(dateRecordsMap)[0];
+      if (!sampleRec) continue;
+
+      const at = sampleRec.analysisType || gk;
+      const unit = sampleRec.unit || null;
+      const isTimed = isTimedAnalysis(at, unit);
+      const isSlot = isSlotKeyedAnalysis(at);
+      const hasDetailSheet = Boolean(detailSheetsMap[`${p}::${gk}`]);
+      const detailWs = detailSheetsMap[`${p}::${gk}`];
+
+      // ── Count Input Non-Empty Parameter Values Directly from Raw Records ──
+      let inputParamCount = 0;
+      let totalDocsCount = Object.keys(dateRecordsMap).length;
+
+      for (const rec of Object.values(dateRecordsMap)) {
+        if (rec.mergedCount && rec.mergedCount > 1) {
+          totalDocsCount += (rec.mergedCount - 1);
+        }
+
+        // Sewer Water
+        if (at.toLowerCase().includes('sewer water')) {
+          const rList = getRawReadingsList(rec);
+          rList.forEach((item) => {
+            if (!item || typeof item !== 'object') return;
+            Object.entries(item).forEach(([k, v]) => {
+              if (METADATA_KEYS.has(k) || k.startsWith('_') || k === 'time' || k === 'id') return;
+              if (v && typeof v === 'object' && !Array.isArray(v)) {
+                Object.entries(v).forEach(([pk, pVal]) => {
+                  if (!METADATA_KEYS.has(pk) && !pk.startsWith('_') && isNonEmptyValue(pVal)) {
+                    inputParamCount++;
+                  }
+                });
+              }
+            });
+          });
+        }
+        // LSA Bagging (ShiftAnalysis + Hourly)
+        else if (at.toLowerCase().includes('lsa bagging') && !at.toLowerCase().includes('sieve')) {
+          // Shift analysis values
+          const sa = rec.data?.shiftAnalysis || {};
+          ['shift1', 'shift2', 'shift3'].forEach((sk) => {
+            const sObj = sa[sk] || {};
+            Object.entries(sObj).forEach(([k, v]) => {
+              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
+                inputParamCount++;
+              }
+            });
+          });
+          // Hourly readings values
+          const hList = getRawReadingsList(rec);
+          hList.forEach((item) => {
+            if (!item || typeof item !== 'object') return;
+            Object.entries(item).forEach(([k, v]) => {
+              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && isNonEmptyValue(v)) {
+                inputParamCount++;
+              }
+            });
+          });
+        }
+        // Other Timed Analyses
+        else if (isTimed) {
+          const rList = getRawReadingsList(rec);
+          rList.forEach((item) => {
+            if (!item || typeof item !== 'object') return;
+            Object.entries(item).forEach(([k, v]) => {
+              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift' && isNonEmptyValue(v)) {
+                inputParamCount++;
+              }
+            });
+          });
+        }
+        // Slot-Keyed Analyses (TK 203, 205, 207, CR 202, 203)
+        else if (isSlot) {
+          const cont = findRowContainer(rec.data) || {};
+          Object.values(cont).forEach((slotObj) => {
+            if (slotObj && typeof slotObj === 'object') {
+              Object.entries(slotObj).forEach(([k, v]) => {
+                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
+                  inputParamCount++;
+                }
+              });
+            }
+          });
+        }
+        // Shift-Keyed or Daily Analyses (No Detail Sheet)
+        else {
+          if (rec.data?.units || rec.data?.towers) {
+            const containerKey = rec.data.units ? 'units' : 'towers';
+            const cont = rec.data[containerKey] || {};
+            Object.values(cont).forEach((uObj) => {
+              ['s1', 's2', 's3', 'shift1', 'shift2', 'shift3'].forEach((sk) => {
+                const sObj = uObj[sk];
+                if (sObj && typeof sObj === 'object') {
+                  Object.entries(sObj).forEach(([k, v]) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
+                      inputParamCount++;
+                    }
+                  });
+                }
+              });
+            });
+          } else {
+            const cont = findRowContainer(rec.data);
+            if (cont && typeof cont === 'object' && Object.keys(cont).length > 0) {
+              Object.values(cont).forEach((rObj) => {
+                if (rObj && typeof rObj === 'object') {
+                  Object.entries(rObj).forEach(([k, v]) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
+                      inputParamCount++;
+                    }
+                  });
+                }
+              });
+            } else if (rec.data?.chemical || rec.data?.bss) {
+              const ch = rec.data.chemical || {};
+              const bs = rec.data.bss || {};
+              Object.entries(ch).forEach(([k, v]) => !METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v) && inputParamCount++);
+              Object.entries(bs).forEach(([k, v]) => !METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v) && inputParamCount++);
+            } else {
+              const pObj = rec.data?.parameters || rec.data || {};
+              Object.entries(pObj).forEach(([k, v]) => {
+                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && typeof v !== 'object' && isNonEmptyValue(v)) {
+                  inputParamCount++;
+                }
+              });
+            }
+          }
+        }
+      }
+
+      // ── Count Output Non-Empty Parameter Values by Reading Generated Worksheet Cells ──
+      let outputParamCount = 0;
+
+      if (hasDetailSheet && detailWs) {
+        // Read directly from the Detail Sheet: Rows 4+ and Cols 4 to (totalDetailCols - 1)
+        const rowCount = detailWs.rowCount;
+        const totalDetailCols = detailWs.getRow(2).cellCount;
+        for (let r = 4; r <= rowCount; r++) {
+          const row = detailWs.getRow(r);
+          for (let c = 4; c < totalDetailCols; c++) {
+            const cellVal = row.getCell(c).value;
+            if (isNonEmptyValue(cellVal) && cellVal !== '*') {
+              outputParamCount++;
+            }
+          }
+        }
+
+        // For LSA Bagging: shiftAnalysis is rendered in OVERALL (not in hourly detail sheet)
+        if (at.toLowerCase().includes('lsa bagging') && !at.toLowerCase().includes('sieve')) {
+          const saCols = overallColumns.filter(
+            (c) => c.plant === p && c.groupKey === gk && c.label.startsWith('SHIFT ')
+          );
+          const overallRowCount = overallSheet.rowCount;
+          for (let r = 5; r <= overallRowCount; r++) {
+            const row = overallSheet.getRow(r);
+            for (const col of saCols) {
+              const cellVal = row.getCell(col.colIndex).value;
+              if (isNonEmptyValue(cellVal) && cellVal !== '*') {
+                outputParamCount++;
+              }
+            }
+          }
+        }
+      } else {
+        // Read from the OVERALL Sheet under this analysis's columns
+        const analysisCols = overallColumns.filter((c) => c.plant === p && c.groupKey === gk);
+        const overallRowCount = overallSheet.rowCount;
+        for (let r = 5; r <= overallRowCount; r++) {
+          const row = overallSheet.getRow(r);
+          for (const col of analysisCols) {
+            // Exclude TIME and labels
+            if (col.label.startsWith('TIME')) continue;
+            const cellVal = row.getCell(col.colIndex).value;
+            if (isNonEmptyValue(cellVal) && cellVal !== '*') {
+              outputParamCount++;
+            }
+          }
+        }
+      }
+
+      const missing = inputParamCount - outputParamCount;
+
+      const baseConfig = getAnalysisConfig(at);
+      let reconciliationRowLabel = at;
+      if (baseConfig?.splitByUnit === true && unit) {
+        reconciliationRowLabel = String(unit).toLowerCase().includes('200')
+          ? 'Cooling Water 200#'
+          : 'Cooling Water';
+      }
+
+      // Fail-fast assertion: Missing must be 0!
+      if (missing !== 0) {
+        throw new Error(
+          `Non-circular Reconciliation Failure: Plant ${p} - ${reconciliationRowLabel} has ${missing} missing values! (Input: ${inputParamCount}, Output: ${outputParamCount})`
+        );
+      }
+
+      reconciliationRows.push({
+        plant: p,
+        analysisType: reconciliationRowLabel,
+        docsCount: totalDocsCount,
+        inputCount: inputParamCount,
+        outputCount: outputParamCount,
+        missing: 0,
+      });
+
+      totalInputReadingsAll += inputParamCount;
+      totalOutputReadingsAll += outputParamCount;
+    }
+  }
+
+  // 8. Render NOTES Worksheet
   const notesSheet = workbook.addWorksheet('NOTES', {
     views: [{ showGridLines: true }],
   });
   notesSheet.properties.tabColor = { argb: 'FF455A64' };
 
-  // Title
+  // Title Banner
   const nTitleRow = notesSheet.getRow(1);
   nTitleRow.height = 30;
   const nTitleCell = nTitleRow.getCell(1);
-  nTitleCell.value = 'OVERALL REPORT NOTES & METADATA';
+  nTitleCell.value = 'OVERALL REPORT NOTES & RECONCILIATION AUDIT';
   applyTitleStyle(nTitleCell);
   notesSheet.mergeCells(1, 1, 1, 6);
 
-  // Date Range and Timestamp
+  // Metadata
   const nRow3 = notesSheet.getRow(3);
   nRow3.getCell(1).value = `Date Range: ${fromDate} to ${toDate} (${distinctDates.length} operating dates recorded)`;
   nRow3.getCell(1).font = { name: 'Calibri', size: 11, bold: true };
@@ -3674,39 +4703,98 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
 
   let notesRowIdx = 6;
 
-  // Plant Summary
-  const nSumHeader = notesSheet.getRow(notesRowIdx);
-  nSumHeader.getCell(1).value = 'Plant Record & Merge Summary:';
-  nSumHeader.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF660066' } };
+  // ── Section 1: Non-Circular Reconciliation Audit Table ──
+  const recHeaderRow = notesSheet.getRow(notesRowIdx);
+  recHeaderRow.getCell(1).value = 'Non-Circular Measurement Reconciliation Audit:';
+  recHeaderRow.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
   notesRowIdx++;
 
-  for (const p of ALL_PLANTS_ORDER) {
+  const recSubRow = notesSheet.getRow(notesRowIdx);
+  recSubRow.getCell(1).value = 'Parameter values counted directly from raw database records (after merge rules) vs rendered worksheet cells. Excludes DATE/TIME/SHIFT/SOURCE/labels.';
+  recSubRow.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } };
+  notesRowIdx += 2;
+
+  // Reconciliation Table Headers
+  const tHeadRow = notesSheet.getRow(notesRowIdx);
+  tHeadRow.height = 24;
+  const rHeaders = ['PLANT', 'ANALYSIS', 'DOCS QUERIED', 'INPUT READINGS', 'OUTPUT READINGS', 'MISSING'];
+  rHeaders.forEach((hText, idx) => {
+    const c = tHeadRow.getCell(idx + 1);
+    c.value = hText;
+    c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF455A64' } };
+    c.alignment = { vertical: 'middle', horizontal: 'center' };
+    c.border = THIN_BLACK_BORDER;
+  });
+  notesRowIdx++;
+
+  // Reconciliation Rows
+  reconciliationRows.forEach((r) => {
     const row = notesSheet.getRow(notesRowIdx);
-    const queried = plantDocCounts[p] || 0;
-    const merged = plantDupMergedCounts[p] || 0;
-    row.getCell(1).value = `• ${p} Plant: ${queried} document(s) queried; ${merged} duplicate document(s) merged into primary record.`;
-    row.getCell(1).font = { name: 'Calibri', size: 10 };
+    row.height = 20;
+
+    const c1 = row.getCell(1);
+    c1.value = r.plant;
+    applyDataCellStyle(c1, true);
+
+    const c2 = row.getCell(2);
+    c2.value = r.analysisType;
+    applyDataCellStyle(c2, false);
+
+    const c3 = row.getCell(3);
+    c3.value = r.docsCount;
+    applyDataCellStyle(c3, false);
+
+    const c4 = row.getCell(4);
+    c4.value = r.inputCount;
+    applyDataCellStyle(c4, false);
+
+    const c5 = row.getCell(5);
+    c5.value = r.outputCount;
+    applyDataCellStyle(c5, false);
+
+    const c6 = row.getCell(6);
+    c6.value = r.missing;
+    applyDataCellStyle(c6, false, false, false, false);
+    c6.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+
     notesRowIdx++;
+  });
+
+  // Reconciliation Total Row
+  const totalRecRow = notesSheet.getRow(notesRowIdx);
+  totalRecRow.height = 22;
+  totalRecRow.getCell(1).value = 'TOTAL';
+  totalRecRow.getCell(2).value = 'All Monitored Analyses';
+  totalRecRow.getCell(3).value = grandTotalRecordCount;
+  totalRecRow.getCell(4).value = totalInputReadingsAll;
+  totalRecRow.getCell(5).value = totalOutputReadingsAll;
+  totalRecRow.getCell(6).value = 0;
+
+  for (let c = 1; c <= 6; c++) {
+    const cell = totalRecRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+    cell.alignment = { vertical: 'middle', horizontal: c <= 2 ? 'left' : 'center' };
+    cell.border = THIN_BLACK_BORDER;
   }
+  notesRowIdx += 2;
 
-  notesRowIdx++;
-
-  // Shift & Slot Rules
+  // ── Section 2: Shift Boundaries & Measurement Resolution Rules ──
   const nRulesHeader = notesSheet.getRow(notesRowIdx);
-  nRulesHeader.getCell(1).value = 'Shift Boundaries & Measurement Resolution Rules:';
-  nRulesHeader.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF660066' } };
+  nRulesHeader.getCell(1).value = 'Shift Boundaries & Operational Rules:';
+  nRulesHeader.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
   notesRowIdx++;
 
   const rulesList = [
     '• Shift Boundaries: Shift I (06:00 to 13:59), Shift II (14:00 to 21:59), Shift III (22:00 to 05:59).',
-    '• Post-Midnight Shift III Readings: In this application, readings recorded between 00:00 and 05:59 are entered and stored in the same operating date document for Shift III.',
-    '• Shift III Ordering: Readings from 00:00 to 05:59 are chronologically ordered after 22:00 to 23:59 so that the true last reading of the shift is selected.',
-    '• 2-Hourly Slots (TK 203, TK 205, TK 207, etc.): Shift I (t07, t09, t11, t13), Shift II (t15, t17, t19, t21), Shift III (t23, t01, t03, t05). The last non-empty slot reading of the shift is selected.',
-    '• 4-Hourly Slots (CR 202, CR 203, etc.): Shift I (t07, t11), Shift II (t15, t19), Shift III (t23, t03). The last non-empty slot reading of the shift is selected.',
-    '• Readings Arrays with Time (Sewer Water, BFW, DM Water, Cooling Water, etc.): Filtered into Shift I, II, or III by timestamp; the last reading recorded within the shift window is selected.',
-    '• Daily & Weekly Measurements: Placed exclusively on the Shift I row for the date; Shift II and Shift III rows display "*".',
-    '• Multi-Row Daily Analyses (Brine TK 109 & TK 110): Expanded into distinct parameter columns on the Shift I row.',
-    '• Cell Highlighting: Red fill indicates Out-of-Limit values; Blue bold font + cell comment indicates an Edited value.',
+    '• Post-Midnight Shift III Readings: Readings recorded between 00:00 and 05:59 belong to Shift III of the operating date and are sorted chronologically after 23:59.',
+    '• SA Tank Shift Mapping Note: Soda Ash tank analyses (TK 401, TK 405, TK 414, TK 419, P413, T 401) use page-defined 07:00–15:00 / 15:00–23:00 / 23:00–07:00 shifts, but are placed onto rows I, II, and III respectively by shift key.',
+    '• Slot-Keyed Analyses (TK 203, TK 205, TK 207, CR 202, CR 203): The OVERALL sheet retains the latest non-empty reading per shift. Dedicated detail sheets display all non-empty recorded slots.',
+    '• Timed-Readings Analyses: Readings in each shift are dynamically expanded into sequential columns ("TIME n" and "<PARAM> n") up to the maximum readings found in any single shift.',
+    '• Untimed / Unparseable Readings: Placed on the Shift I row under extra "UNTIMED" columns. Shift II and Shift III rows display "*". Nothing is dropped.',
+    '• Duplicate Conflict Resolution: If duplicate records contain different values at the same date and time, the conflict is preserved as an extra row with SOURCE = "Doc 2 (<id>)" and logged to console.',
+    '• Cell Highlighting: Red fill indicates Out-of-Limit values; Blue bold font + cell comment note indicates an Edited value.',
   ];
 
   rulesList.forEach((rText) => {
@@ -3715,13 +4803,56 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
     row.getCell(1).font = { name: 'Calibri', size: 10 };
     notesRowIdx++;
   });
-
   notesRowIdx++;
 
-  // Skipped / Failed Analyses
+  // ── Section 3: Untimed Readings Audit ──
+  const nUntimedHeader = notesSheet.getRow(notesRowIdx);
+  nUntimedHeader.getCell(1).value = 'Untimed & Fallback Readings Audit:';
+  nUntimedHeader.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
+  notesRowIdx++;
+
+  const untimedKeys = Object.keys(untimedAnalysisCounts);
+  if (untimedKeys.length === 0) {
+    const row = notesSheet.getRow(notesRowIdx);
+    row.getCell(1).value = '• None: All recorded readings had valid, parseable timestamps.';
+    row.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FF2E7D32' } };
+    notesRowIdx++;
+  } else {
+    untimedKeys.forEach((uk) => {
+      const count = untimedAnalysisCounts[uk];
+      const row = notesSheet.getRow(notesRowIdx);
+      row.getCell(1).value = `• [${uk}]: ${count} reading(s) with unparseable timestamps placed onto Shift I row.`;
+      row.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FFD32F2F' } };
+      notesRowIdx++;
+    });
+  }
+  notesRowIdx++;
+
+  // ── Section 4: Duplicate Conflicts Log ──
+  const nDupHeader = notesSheet.getRow(notesRowIdx);
+  nDupHeader.getCell(1).value = 'Duplicate Document Conflicts Log:';
+  nDupHeader.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
+  notesRowIdx++;
+
+  if (duplicateConflictLog.length === 0) {
+    const row = notesSheet.getRow(notesRowIdx);
+    row.getCell(1).value = '• None: No conflicting cell values detected among duplicate documents in this date range.';
+    row.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FF2E7D32' } };
+    notesRowIdx++;
+  } else {
+    duplicateConflictLog.forEach((dc) => {
+      const row = notesSheet.getRow(notesRowIdx);
+      row.getCell(1).value = `• [${dc.plant}] ${dc.analysisType} on ${dc.date} @ ${dc.time}: ${dc.param} conflict ("${dc.olderVal}" in ${dc.olderId} vs "${dc.newerVal}" in ${dc.newerId}). Preserved as extra row.`;
+      row.getCell(1).font = { name: 'Calibri', size: 10, color: { argb: 'FFC2185B' } };
+      notesRowIdx++;
+    });
+  }
+  notesRowIdx++;
+
+  // ── Section 5: Skipped or Excluded Analyses ──
   const nSkipHeader = notesSheet.getRow(notesRowIdx);
   nSkipHeader.getCell(1).value = 'Skipped or Excluded Analyses:';
-  nSkipHeader.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF660066' } };
+  nSkipHeader.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF660066' } };
   notesRowIdx++;
 
   if (skippedAnalyses.length === 0) {
