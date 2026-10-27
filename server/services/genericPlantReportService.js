@@ -90,6 +90,11 @@ const METADATA_KEYS = new Set([
   'resolvedDate',
   'displayDate',
   'shiftKey',
+  'stream',
+  'parameter',
+  'section',
+  'crystallizer',
+  'reportFileName',
 ]);
 
 /**
@@ -3072,6 +3077,294 @@ function mergeRecordsForOverallReport(docGroup, plant, analysisType, duplicateCo
 }
 
 /**
+ * Comprehensive metadata keys to exclude from the reconciliation recursive input leaf counter.
+ * All keys stored in lowercase for fast, case-insensitive exclusion.
+ */
+const RECONCILIATION_METADATA_EXCLUSIONS = new Set([
+  '_id',
+  'id',
+  'date',
+  'time',
+  'stream',
+  'unit',
+  'parameter',
+  'section',
+  'crystallizer',
+  'frequency',
+  'reportfilename',
+  'lockedshifts',
+  'lockedslots',
+  'slots',
+  'allpermanentlylocked',
+  'isopen',
+  'islocked',
+  'initialsaved',
+  'issaved',
+  'correctionused',
+  'editscount',
+  'editcount',
+  'savecount',
+  'saveeventid',
+  'lastsaveeventid',
+  'savetype',
+  'targetshift',
+  'editedfields',
+  'editaudithistory',
+  'submittedby',
+  'submittedbyid',
+  'submittedat',
+  'company',
+  'plant',
+  'plantcode',
+  'plantname',
+  'plantid',
+  'userid',
+  'analysistype',
+  'status',
+  'emailrecipient',
+  'emailstatus',
+  'emailmessageid',
+  'displaydate',
+  'resolveddate',
+  'createdat',
+  'updatedat',
+  '__v',
+  'isdefault',
+  'accent',
+  'shift',
+  'tank',
+  'sample',
+  'reporttype',
+  'analysisname',
+  // shift state booleans on data or rows
+  'shift1saved',
+  'shift2saved',
+  'shift3saved',
+  's1saved',
+  's2saved',
+  's3saved',
+  'shift1edits',
+  'shift2edits',
+  'shift3edits',
+  's1edits',
+  's2edits',
+  's3edits',
+  'shift1locked',
+  'shift2locked',
+  'shift3locked',
+  's1locked',
+  's2locked',
+  's3locked',
+  'daysaved',
+  'dayedits',
+  'daylocked',
+  // summary calculations computed from readings
+  'averagenacl',
+  'averages',
+  'fnh3row',
+  'pclrow',
+  'plus18row',
+]);
+
+/**
+ * Recursively counts non-empty measurement leaf values from raw merged record data,
+ * independent of any extraction code path.
+ * Traverses objects and arrays, excluding documented metadata and duplicate aliases.
+ */
+function countNonEmptyRecordLeaves(data) {
+  let count = 0;
+
+  function walk(val, key = null, parentObj = null) {
+    if (val === null || val === undefined) return;
+
+    if (key !== null) {
+      if (String(key).startsWith('_')) return;
+      if (RECONCILIATION_METADATA_EXCLUSIONS.has(String(key).toLowerCase())) {
+        return;
+      }
+    }
+
+    if (parentObj && typeof parentObj === 'object' && !Array.isArray(parentObj)) {
+      if (key === 'chemicalData' && parentObj.chemical) return;
+      if (key === 'bssData' && parentObj.bss) return;
+      if (key === 'tAlk' && isNonEmptyValue(parentObj.alk)) return;
+      if ((key === 'rawsalt' || key === 'rawSalt') && parentObj.rawSalt && parentObj.rawsalt && key === 'rawsalt') return;
+      if ((key === 'composite' || key === 'composition') && parentObj.composition && parentObj.composite && key === 'composite') return;
+
+      const hasShiftContainer = Boolean(parentObj.shifts || parentObj.shiftRows || (parentObj.rows && !parentObj.rows.timeRows));
+      const hasTimeRows = Boolean(parentObj.timeRows);
+
+      // Skip redundant container aliases
+      if (key === 'rows' && (hasTimeRows || parentObj.shiftRows || parentObj.shifts)) return;
+      if (key === 'shiftRows' && parentObj.shifts) return;
+
+      // Skip direct shift keys if a shift container exists
+      const SHIFT_ROW_ALIASES = new Set([
+        'shift1', 'shift2', 'shift3', 's1', 's2', 's3',
+        'ishift', 'iishift', 'iiishift', 'i_shift', 'ii_shift', 'iii_shift',
+        'shift_1', 'shift_2', 'shift_3', 'shift 1', 'shift 2', 'shift 3',
+        'i shift', 'ii shift', 'iii shift', '1', '2', '3'
+      ]);
+      if (hasShiftContainer && SHIFT_ROW_ALIASES.has(String(key).toLowerCase())) return;
+
+      // Skip parameters if shifts/rows container exists
+      if (hasShiftContainer && key === 'parameters') return;
+
+      // Skip indexed reading duplicates only when readings is non-empty array
+      if (Array.isArray(parentObj.readings) && parentObj.readings.length > 0 && (key === '0' || key === '1' || key === '2')) return;
+
+      // Skip root-level duplicate parameters if parent has shifts or rows containing them
+      if (hasShiftContainer && typeof val !== 'object') {
+        const cont = parentObj.shifts || parentObj.shiftRows || parentObj.rows;
+        if (cont && typeof cont === 'object') {
+          for (const sObj of Object.values(cont)) {
+            if (sObj && typeof sObj === 'object' && key in sObj) return;
+          }
+        }
+      }
+
+      if (key !== 'timeRows' && key !== 'shiftRows' && parentObj.rows && typeof parentObj.rows === 'object' && !Array.isArray(parentObj.rows) && !parentObj.rows.timeRows && key in parentObj.rows) return;
+      if (key === 'parameters' && typeof val === 'object' && !Array.isArray(val)) {
+        const valKeys = Object.keys(val);
+        if (valKeys.length > 0 && valKeys.every((vk) => vk in parentObj)) return;
+      }
+    }
+
+    if (Array.isArray(val)) {
+      val.forEach((item) => walk(item, null, val));
+      return;
+    }
+
+    if (typeof val === 'object') {
+      Object.entries(val).forEach(([k, v]) => {
+        walk(v, k, val);
+      });
+      return;
+    }
+
+    // Skip boolean state flags
+    if (typeof val === 'boolean') return;
+
+    if (isNonEmptyValue(val)) {
+      count++;
+    }
+  }
+
+  walk(data);
+  return count;
+}
+
+/**
+ * Resolves row container for OVERALL report:
+ * - Prioritizes timeRows for slot-based analyses (avoids duplicate rows wrapper)
+ * - Maps readings array (Bottom Ash, Fly Ash, Vacuum Seal Water, DM Water Analysis, CBD on 2026-10-15) to shift1..3 by time/shift
+ * - Maps indexed row object (e.g. Fly Ash data = { "0": { ph: "12.5" } }) to shift1
+ * - Maps parameters object to shift1
+ * - Falls back to findRowContainer
+ */
+function getOverallRecordContainer(recData, isSlot = false) {
+  if (!recData || typeof recData !== 'object') return {};
+  if (isSlot && recData.timeRows && typeof recData.timeRows === 'object') {
+    return recData.timeRows;
+  }
+
+  // Check if recData has parameters object directly (e.g. Raw Water on 2026-10-14..21, only if no shift container exists)
+  if (!recData.rows && !recData.shifts && !recData.shiftRows && !recData.timeRows && recData.parameters && typeof recData.parameters === 'object' && !Array.isArray(recData.parameters)) {
+    return { shift1: recData.parameters };
+  }
+
+  // Check if recData has indexed row object (e.g. Fly Ash on 2026-10-11: data = { "0": { ph: "12.5" } })
+  if (recData['0'] && typeof recData['0'] === 'object' && !Array.isArray(recData['0'])) {
+    return { shift1: recData['0'] };
+  }
+
+  // Handle readings arrays for Vacuum Seal Water, Bottom Ash, Fly Ash, DM Water Analysis, CBD on 2026-10-15, etc.
+  let rList = null;
+  if (Array.isArray(recData.readings) && recData.readings.length > 0) {
+    rList = recData.readings;
+  } else if (Array.isArray(recData) && recData.length > 0) {
+    rList = recData;
+  } else if (Array.isArray(recData.rows) && recData.rows.length > 0) {
+    rList = recData.rows;
+  }
+
+  // Multi-unit Analysis For DM Water is handled separately by unit variant columns
+  const isMultiUnitDM = rList && rList.some((r) => r && r.unit && ['dm water', 'a.unit', 'c.unit', 'm.b.unit', 'raw water'].includes(String(r.unit).trim().toLowerCase()));
+
+  if (rList && !isMultiUnitDM) {
+    const shiftCont = {};
+    rList.forEach((r, idx) => {
+      if (!r || typeof r !== 'object') return;
+      let sk = null;
+      if (r.time) {
+        const p = parseAnalysisTime(r.time);
+        if (p.isValid && p.shiftKey) sk = p.shiftKey;
+      }
+      if (!sk && r.shift) {
+        const sStr = String(r.shift).toLowerCase();
+        if (sStr.includes('iii') || sStr.includes('3')) sk = 'shift3';
+        else if (sStr.includes('ii') || sStr.includes('2')) sk = 'shift2';
+        else if (sStr.includes('i') || sStr.includes('1')) sk = 'shift1';
+      }
+      if (!sk) {
+        sk = idx === 0 ? 'shift1' : (idx === 1 ? 'shift2' : 'shift3');
+      }
+
+      // Alias mapping: silica -> sio2, hardness -> th
+      const item = { ...r };
+      if (item.silica !== undefined && item.sio2 === undefined) item.sio2 = item.silica;
+      if (item.hardness !== undefined && item.th === undefined) item.th = item.hardness;
+
+      // Handle single-value items (e.g. Raw Water on 2026-10-15: { id: 'ph', parameter: 'pH', value: '7.8' })
+      if (item.value !== undefined && (item.parameter || item.id)) {
+        const pKey = String(item.id || item.parameter).toLowerCase().replace(/[^a-z0-9]/g, '');
+        item[pKey] = item.value;
+        delete item.value;
+      }
+
+      // Handle BFW old format (e.g. { parameter: 'pH at 25°C', bfwValue: '9.2', shsValue: '9.1' })
+      if (item.bfwValue !== undefined || item.shsValue !== undefined) {
+        if (item.parameter && String(item.parameter).toLowerCase().includes('ph')) {
+          item.ph = item.bfwValue || item.shsValue;
+        }
+      }
+
+      if (shiftCont[sk]) {
+        shiftCont[sk] = { ...shiftCont[sk], ...item };
+      } else {
+        shiftCont[sk] = item;
+      }
+    });
+    return shiftCont;
+  }
+
+  return findRowContainer(recData) || {};
+}
+
+/**
+ * Resolves the shift row object from a row container by standard shift key:
+ * Supports 'shift1', 's1', 'ishift', 'iShift', etc.
+ */
+function getShiftRowObject(cont, shiftKey) {
+  if (!cont || typeof cont !== 'object') return {};
+  const aliases = {
+    shift1: ['shift1', 's1', 'ishift', 'i_shift', 'shift_1', 'shift 1', 'i shift', '1'],
+    shift2: ['shift2', 's2', 'iishift', 'ii_shift', 'shift_2', 'shift 2', 'ii shift', '2'],
+    shift3: ['shift3', 's3', 'iiishift', 'iii_shift', 'shift_3', 'shift 3', 'iii shift', '3'],
+  };
+  const list = aliases[shiftKey] || [shiftKey];
+  for (const k of list) {
+    if (cont[k] && typeof cont[k] === 'object') return cont[k];
+    for (const ck of Object.keys(cont)) {
+      if (ck.toLowerCase() === k.toLowerCase() && cont[ck] && typeof cont[ck] === 'object') {
+        return cont[ck];
+      }
+    }
+  }
+  return {};
+}
+
+/**
  * Generates the multi-day "OVERALL" report workbook (manager shift sheet) for a date range
  *
  * @param {Object} options
@@ -3430,7 +3723,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
               hArr.forEach((item) => {
                 if (item && typeof item === 'object') {
                   Object.keys(item).forEach((k) => {
-                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id') {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k.toLowerCase() !== 'isdefault') {
                       hourlyParamKeys.add(k);
                     }
                   });
@@ -3628,18 +3921,144 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
               }
             }
           }
+          // ACL Product Analysis (data.chemical, data.bss, data.chemicalData, data.bssData)
+          else if (
+            at.toLowerCase().includes('acl product') ||
+            Boolean(sampleData.chemical || sampleData.bss || sampleData.chemicalData || sampleData.bssData)
+          ) {
+            const chemKeys = new Set();
+            const bssKeys = new Set();
+            for (const rec of Object.values(dateRecordsMap)) {
+              const ch = rec.data?.chemical || rec.data?.chemicalData || {};
+              const bs = rec.data?.bss || rec.data?.bssData || {};
+              Object.keys(ch).forEach((k) => !METADATA_KEYS.has(k) && !k.startsWith('_') && chemKeys.add(k));
+              Object.keys(bs).forEach((k) => !METADATA_KEYS.has(k) && !k.startsWith('_') && bssKeys.add(k));
+            }
+            const resChem = resolveColumns(Array.from(chemKeys), labelConfig);
+            const resBss = resolveColumns(Array.from(bssKeys), labelConfig);
+            for (const col of resChem) {
+              analysisCols.push({
+                rawKey: col.key,
+                label: `CHEM ${col.label}`,
+                range: col.range,
+                unitRangeStr: formatUnitRange(col.unit, col.range),
+                extractor: (rec, shiftKey) => {
+                  if (shiftKey !== 'shift1') return { val: null };
+                  const ch = rec.data?.chemical || rec.data?.chemicalData || {};
+                  const val = ch[col.key];
+                  const editInfo = getCellEditInfo(rec.data, 'chemical', col.key, ch);
+                  return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                },
+              });
+            }
+            for (const col of resBss) {
+              analysisCols.push({
+                rawKey: col.key,
+                label: `BSS ${col.label}`,
+                range: col.range,
+                unitRangeStr: formatUnitRange(col.unit, col.range),
+                extractor: (rec, shiftKey) => {
+                  if (shiftKey !== 'shift1') return { val: null };
+                  const bs = rec.data?.bss || rec.data?.bssData || {};
+                  const val = bs[col.key];
+                  const editInfo = getCellEditInfo(rec.data, 'bss', col.key, bs);
+                  return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                },
+              });
+            }
+          }
+          // Analysis For DM Water (all unit variants: DM WATER, A.UNIT, C.UNIT, M.B.UNIT, RAW WATER by reading.unit)
+          else if (
+            at.toLowerCase().includes('analysis for dm water') ||
+            at.toLowerCase().includes('dm water / anion unit') ||
+            Boolean(sampleData.readings && sampleData.readings.some((r) => r && r.unit && ['dm water', 'a.unit', 'c.unit', 'm.b.unit', 'raw water'].includes(String(r.unit).trim().toLowerCase())))
+          ) {
+            const KNOWN_UNITS = ['DM WATER', 'A.UNIT', 'C.UNIT', 'M.B.UNIT', 'RAW WATER'];
+            const presentUnitsSet = new Set();
+            const unitParamsMap = new Map();
+
+            for (const rec of Object.values(dateRecordsMap)) {
+              const rList = Array.isArray(rec.data?.readings) ? rec.data.readings : [];
+              rList.forEach((r) => {
+                if (!r || typeof r !== 'object') return;
+                const uNorm = String(r.unit || '').trim().toUpperCase();
+                if (!uNorm) return;
+                presentUnitsSet.add(uNorm);
+                if (!unitParamsMap.has(uNorm)) {
+                  unitParamsMap.set(uNorm, new Set());
+                }
+                const pSet = unitParamsMap.get(uNorm);
+                Object.entries(r).forEach(([k, v]) => {
+                  if (!k.startsWith('_') && !RECONCILIATION_METADATA_EXCLUSIONS.has(k.toLowerCase()) && isNonEmptyValue(v)) {
+                    pSet.add(k);
+                  }
+                });
+              });
+            }
+
+            const sortedUnits = Array.from(presentUnitsSet).sort((a, b) => {
+              const idxA = KNOWN_UNITS.indexOf(a);
+              const idxB = KNOWN_UNITS.indexOf(b);
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              if (idxA !== -1) return -1;
+              if (idxB !== -1) return 1;
+              return a.localeCompare(b);
+            });
+
+            for (const uName of sortedUnits) {
+              const pKeys = Array.from(unitParamsMap.get(uName) || []);
+              const resolvedUnitCols = resolveColumns(pKeys, { ...labelConfig, strictColumns: false });
+
+              for (const col of resolvedUnitCols) {
+                analysisCols.push({
+                  rawKey: `${uName}__${col.key}`,
+                  unitVariant: uName,
+                  paramKey: col.key,
+                  label: `${uName} ${col.label}`,
+                  range: col.range,
+                  unitRangeStr: formatUnitRange(col.unit, col.range),
+                  extractor: (rec, shiftKey) => {
+                    const rList = Array.isArray(rec?.data?.readings) ? rec.data.readings : [];
+                    for (const r of rList) {
+                      if (!r || typeof r !== 'object') continue;
+                      const rUnit = String(r.unit || '').trim().toUpperCase();
+                      if (rUnit !== uName) continue;
+
+                      let targetShift = 'shift1';
+                      if (r.time) {
+                        const p = parseAnalysisTime(r.time);
+                        if (p.isValid && p.shiftKey) targetShift = p.shiftKey;
+                      } else if (r.shift) {
+                        const sStr = String(r.shift).toLowerCase();
+                        if (sStr.includes('iii') || sStr.includes('3')) targetShift = 'shift3';
+                        else if (sStr.includes('ii') || sStr.includes('2')) targetShift = 'shift2';
+                        else targetShift = 'shift1';
+                      }
+
+                      if (targetShift === shiftKey) {
+                        const val = r[col.key];
+                        const editInfo = getCellEditInfo(rec.data, r.id || uName, col.key, r);
+                        return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                      }
+                    }
+                    return { val: null };
+                  },
+                });
+              }
+            }
+          }
           // Keyed Row Containers (rows, shifts, shiftRows, timeRows, Lean, Brine)
           else {
-            const rowContainer = findRowContainer(sampleData);
+            const rowContainer = getOverallRecordContainer(sampleData, isSlotKeyedAnalysis(at));
             if (rowContainer && typeof rowContainer === 'object' && Object.keys(rowContainer).length > 0) {
               const allRowKeys = new Set();
               for (const rec of Object.values(dateRecordsMap)) {
-                const cont = findRowContainer(rec.data) || {};
+                const cont = getOverallRecordContainer(rec.data, isSlotKeyedAnalysis(at));
                 Object.keys(cont).forEach((rk) => allRowKeys.add(rk.toLowerCase()));
               }
 
               const hasDay = allRowKeys.has('day');
-              const hasShiftKeys = ['shift1', 'shift2', 'shift3', 's1', 's2', 's3'].some((k) => allRowKeys.has(k));
+              const hasShiftKeys = ['shift1', 'shift2', 'shift3', 's1', 's2', 's3', 'ishift', 'iishift', 'iiishift'].some((k) => allRowKeys.has(k));
               const isSlotBased = isSlotKeyedAnalysis(at) || Array.from(allRowKeys).some((k) => /^t\d{2}$/.test(k));
               const isBrineMultiRow = ['tk109', 'tk110'].some((k) => allRowKeys.has(k));
 
@@ -3774,11 +4193,16 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
               else if (hasShiftKeys) {
                 const shiftParamKeys = new Set();
                 for (const rec of Object.values(dateRecordsMap)) {
-                  const cont = findRowContainer(rec.data) || {};
-                  Object.values(cont).forEach((sObj) => {
+                  const cont = getOverallRecordContainer(rec.data, false);
+                  ['shift1', 'shift2', 'shift3', 's1', 's2', 's3', 'ishift', 'iishift', 'iiishift'].forEach((sk) => {
+                    const sObj = getShiftRowObject(cont, sk);
                     if (sObj && typeof sObj === 'object') {
                       Object.keys(sObj).forEach((k) => {
-                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) shiftParamKeys.add(k);
+                        if (!METADATA_KEYS.has(k) && !k.startsWith('_')) {
+                          if (k === 'silica') shiftParamKeys.add('sio2');
+                          else if (k === 'hardness') shiftParamKeys.add('th');
+                          else shiftParamKeys.add(k);
+                        }
                       });
                     }
                   });
@@ -3791,20 +4215,76 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
                     range: col.range,
                     unitRangeStr: formatUnitRange(col.unit, col.range),
                     extractor: (rec, shiftKey) => {
-                      const cont = findRowContainer(rec.data) || {};
-                      const sObj = cont[shiftKey] || cont[shiftKey.replace('shift', 's')] || cont[shiftKey.replace('shift', 'i')] || {};
-                      const val = sObj[col.key];
+                      const cont = getOverallRecordContainer(rec.data, false);
+                      const sObj = getShiftRowObject(cont, shiftKey);
+                      let val = sObj[col.key];
+                      if (val === undefined) {
+                        if (col.key === 'sio2' && sObj.silica !== undefined) val = sObj.silica;
+                        if (col.key === 'th' && sObj.hardness !== undefined) val = sObj.hardness;
+                      }
                       const editInfo = getCellEditInfo(rec.data, shiftKey, col.key, sObj);
                       return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
                     },
                   });
+                }
+                const rawSaltKeys = new Set();
+                const compKeys = new Set();
+                for (const rec of Object.values(dateRecordsMap)) {
+                  const cont = getOverallRecordContainer(rec.data, false);
+                  const rsObj = cont.rawsalt || cont.rawSalt || {};
+                  Object.keys(rsObj).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_')) rawSaltKeys.add(k);
+                  });
+                  const cpObj = cont.composition || cont.composite || {};
+                  Object.keys(cpObj).forEach((k) => {
+                    if (!METADATA_KEYS.has(k) && !k.startsWith('_')) compKeys.add(k);
+                  });
+                }
+                if (rawSaltKeys.size > 0) {
+                  const resolvedRsCols = resolveColumns(Array.from(rawSaltKeys), labelConfig);
+                  for (const col of resolvedRsCols) {
+                    analysisCols.push({
+                      rawKey: col.key,
+                      label: `RAW SALT ${col.label}`,
+                      range: col.range,
+                      unitRangeStr: formatUnitRange(col.unit, col.range),
+                      extractor: (rec, shiftKey) => {
+                        if (shiftKey !== 'shift1') return { val: null };
+                        const cont = getOverallRecordContainer(rec.data, false);
+                        const rsObj = cont.rawsalt || cont.rawSalt || {};
+                        const val = rsObj[col.key];
+                        const editInfo = getCellEditInfo(rec.data, 'rawsalt', col.key, rsObj);
+                        return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                      },
+                    });
+                  }
+                }
+                if (compKeys.size > 0) {
+                  const labelPrefix = allRowKeys.has('composite') ? 'COMPOSITE' : 'COMPOSITION';
+                  const resolvedCpCols = resolveColumns(Array.from(compKeys), labelConfig);
+                  for (const col of resolvedCpCols) {
+                    analysisCols.push({
+                      rawKey: col.key,
+                      label: `${labelPrefix} ${col.label}`,
+                      range: col.range,
+                      unitRangeStr: formatUnitRange(col.unit, col.range),
+                      extractor: (rec, shiftKey) => {
+                        if (shiftKey !== 'shift1') return { val: null };
+                        const cont = getOverallRecordContainer(rec.data, false);
+                        const cpObj = cont.composition || cont.composite || {};
+                        const val = cpObj[col.key];
+                        const editInfo = getCellEditInfo(rec.data, 'composition', col.key, cpObj);
+                        return { val, isEdited: editInfo.isEdited, editNote: editInfo.note };
+                      },
+                    });
+                  }
                 }
               }
               // Single-row Daily Container (rows.day or rows.week)
               else {
                 const paramKeysSet = new Set();
                 for (const rec of Object.values(dateRecordsMap)) {
-                  const cont = findRowContainer(rec.data) || {};
+                  const cont = getOverallRecordContainer(rec.data, false);
                   Object.values(cont).forEach((rObj) => {
                     if (rObj && typeof rObj === 'object') {
                       Object.keys(rObj).forEach((k) => {
@@ -3822,7 +4302,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
                     unitRangeStr: formatUnitRange(col.unit, col.range),
                     extractor: (rec, shiftKey) => {
                       if (shiftKey !== 'shift1') return { val: null };
-                      const cont = findRowContainer(rec.data) || {};
+                      const cont = getOverallRecordContainer(rec.data, false);
                       const firstRow = Object.values(cont)[0] || {};
                       const val = firstRow[col.key];
                       const editInfo = getCellEditInfo(rec.data, Object.keys(cont)[0] || 'daily', col.key, firstRow);
@@ -4204,7 +4684,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
           hArr.forEach((item) => {
             if (item && typeof item === 'object') {
               Object.keys(item).forEach((k) => {
-                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id') {
+                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k.toLowerCase() !== 'isdefault') {
                   hourlyParamKeys.add(k);
                 }
               });
@@ -4228,7 +4708,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
             rArr.forEach((item) => {
               if (item && typeof item === 'object') {
                 Object.keys(item).forEach((k) => {
-                  if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift') {
+                  if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift' && k.toLowerCase() !== 'isdefault') {
                     allKeys.add(k);
                   }
                 });
@@ -4386,7 +4866,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
         }
         // Case B: Slot-Keyed Rows (TK 203, 205, 207, CR 202, 203)
         else if (isSlot) {
-          const cont = findRowContainer(rec.data) || {};
+          const cont = getOverallRecordContainer(rec.data, true);
           const allSlotKeys = Object.keys(SLOT_TIME_ORDER).sort((a, b) => SLOT_TIME_ORDER[a] - SLOT_TIME_ORDER[b]);
 
           for (const sKey of allSlotKeys) {
@@ -4485,116 +4965,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
         if (rec.mergedCount && rec.mergedCount > 1) {
           totalDocsCount += (rec.mergedCount - 1);
         }
-
-        // Sewer Water
-        if (at.toLowerCase().includes('sewer water')) {
-          const rList = getRawReadingsList(rec);
-          rList.forEach((item) => {
-            if (!item || typeof item !== 'object') return;
-            Object.entries(item).forEach(([k, v]) => {
-              if (METADATA_KEYS.has(k) || k.startsWith('_') || k === 'time' || k === 'id') return;
-              if (v && typeof v === 'object' && !Array.isArray(v)) {
-                Object.entries(v).forEach(([pk, pVal]) => {
-                  if (!METADATA_KEYS.has(pk) && !pk.startsWith('_') && isNonEmptyValue(pVal)) {
-                    inputParamCount++;
-                  }
-                });
-              }
-            });
-          });
-        }
-        // LSA Bagging (ShiftAnalysis + Hourly)
-        else if (at.toLowerCase().includes('lsa bagging') && !at.toLowerCase().includes('sieve')) {
-          // Shift analysis values
-          const sa = rec.data?.shiftAnalysis || {};
-          ['shift1', 'shift2', 'shift3'].forEach((sk) => {
-            const sObj = sa[sk] || {};
-            Object.entries(sObj).forEach(([k, v]) => {
-              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
-                inputParamCount++;
-              }
-            });
-          });
-          // Hourly readings values
-          const hList = getRawReadingsList(rec);
-          hList.forEach((item) => {
-            if (!item || typeof item !== 'object') return;
-            Object.entries(item).forEach(([k, v]) => {
-              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && isNonEmptyValue(v)) {
-                inputParamCount++;
-              }
-            });
-          });
-        }
-        // Other Timed Analyses
-        else if (isTimed) {
-          const rList = getRawReadingsList(rec);
-          rList.forEach((item) => {
-            if (!item || typeof item !== 'object') return;
-            Object.entries(item).forEach(([k, v]) => {
-              if (!METADATA_KEYS.has(k) && !k.startsWith('_') && k !== 'time' && k !== 'id' && k !== 'sample' && k !== 'shift' && isNonEmptyValue(v)) {
-                inputParamCount++;
-              }
-            });
-          });
-        }
-        // Slot-Keyed Analyses (TK 203, 205, 207, CR 202, 203)
-        else if (isSlot) {
-          const cont = findRowContainer(rec.data) || {};
-          Object.values(cont).forEach((slotObj) => {
-            if (slotObj && typeof slotObj === 'object') {
-              Object.entries(slotObj).forEach(([k, v]) => {
-                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
-                  inputParamCount++;
-                }
-              });
-            }
-          });
-        }
-        // Shift-Keyed or Daily Analyses (No Detail Sheet)
-        else {
-          if (rec.data?.units || rec.data?.towers) {
-            const containerKey = rec.data.units ? 'units' : 'towers';
-            const cont = rec.data[containerKey] || {};
-            Object.values(cont).forEach((uObj) => {
-              ['s1', 's2', 's3', 'shift1', 'shift2', 'shift3'].forEach((sk) => {
-                const sObj = uObj[sk];
-                if (sObj && typeof sObj === 'object') {
-                  Object.entries(sObj).forEach(([k, v]) => {
-                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
-                      inputParamCount++;
-                    }
-                  });
-                }
-              });
-            });
-          } else {
-            const cont = findRowContainer(rec.data);
-            if (cont && typeof cont === 'object' && Object.keys(cont).length > 0) {
-              Object.values(cont).forEach((rObj) => {
-                if (rObj && typeof rObj === 'object') {
-                  Object.entries(rObj).forEach(([k, v]) => {
-                    if (!METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v)) {
-                      inputParamCount++;
-                    }
-                  });
-                }
-              });
-            } else if (rec.data?.chemical || rec.data?.bss) {
-              const ch = rec.data.chemical || {};
-              const bs = rec.data.bss || {};
-              Object.entries(ch).forEach(([k, v]) => !METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v) && inputParamCount++);
-              Object.entries(bs).forEach(([k, v]) => !METADATA_KEYS.has(k) && !k.startsWith('_') && isNonEmptyValue(v) && inputParamCount++);
-            } else {
-              const pObj = rec.data?.parameters || rec.data || {};
-              Object.entries(pObj).forEach(([k, v]) => {
-                if (!METADATA_KEYS.has(k) && !k.startsWith('_') && typeof v !== 'object' && isNonEmptyValue(v)) {
-                  inputParamCount++;
-                }
-              });
-            }
-          }
-        }
+        inputParamCount += countNonEmptyRecordLeaves(rec.data);
       }
 
       // ── Count Output Non-Empty Parameter Values by Reading Generated Worksheet Cells ──
@@ -4657,10 +5028,9 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
           : 'Cooling Water';
       }
 
-      // Fail-fast assertion: Missing must be 0!
       if (missing !== 0) {
-        throw new Error(
-          `Non-circular Reconciliation Failure: Plant ${p} - ${reconciliationRowLabel} has ${missing} missing values! (Input: ${inputParamCount}, Output: ${outputParamCount})`
+        console.error(
+          `[Reconciliation Discrepancy] Plant: ${p} | Analysis: ${reconciliationRowLabel} | Missing: ${missing} | Input: ${inputParamCount} | Output: ${outputParamCount}`
         );
       }
 
@@ -4670,7 +5040,7 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
         docsCount: totalDocsCount,
         inputCount: inputParamCount,
         outputCount: outputParamCount,
-        missing: 0,
+        missing: missing,
       });
 
       totalInputReadingsAll += inputParamCount;
@@ -4712,6 +5082,11 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
   const recSubRow = notesSheet.getRow(notesRowIdx);
   recSubRow.getCell(1).value = 'Parameter values counted directly from raw database records (after merge rules) vs rendered worksheet cells. Excludes DATE/TIME/SHIFT/SOURCE/labels.';
   recSubRow.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } };
+  notesRowIdx++;
+
+  const recExclRow = notesSheet.getRow(notesRowIdx);
+  recExclRow.getCell(1).value = `Excluded Metadata Set: ${Array.from(RECONCILIATION_METADATA_EXCLUSIONS).sort().join(', ')} (plus duplicate aliases: chemicalData/bssData, tAlk-when-alk, rawsalt-when-rawSalt, composite-when-composition, timeRows duplicates).`;
+  recExclRow.getCell(1).font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF777777' } };
   notesRowIdx += 2;
 
   // Reconciliation Table Headers
@@ -4756,7 +5131,12 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
     const c6 = row.getCell(6);
     c6.value = r.missing;
     applyDataCellStyle(c6, false, false, false, false);
-    c6.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+    if (r.missing !== 0) {
+      c6.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF9C0006' } };
+      c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+    } else {
+      c6.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+    }
 
     notesRowIdx++;
   });
@@ -4769,7 +5149,8 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
   totalRecRow.getCell(3).value = grandTotalRecordCount;
   totalRecRow.getCell(4).value = totalInputReadingsAll;
   totalRecRow.getCell(5).value = totalOutputReadingsAll;
-  totalRecRow.getCell(6).value = 0;
+  const totalMissingAll = totalInputReadingsAll - totalOutputReadingsAll;
+  totalRecRow.getCell(6).value = totalMissingAll;
 
   for (let c = 1; c <= 6; c++) {
     const cell = totalRecRow.getCell(c);
@@ -4777,6 +5158,11 @@ async function generateOverallReportWorkbook({ from, to, user = null }) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
     cell.alignment = { vertical: 'middle', horizontal: c <= 2 ? 'left' : 'center' };
     cell.border = THIN_BLACK_BORDER;
+  }
+  if (totalMissingAll !== 0) {
+    const c6Total = totalRecRow.getCell(6);
+    c6Total.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF9C0006' } };
+    c6Total.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
   }
   notesRowIdx += 2;
 
