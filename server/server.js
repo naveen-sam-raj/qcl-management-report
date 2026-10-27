@@ -74,6 +74,7 @@ const saP4173AnalysisRoutes = require('./routes/saP4173AnalysisRoutes');
 const gasConcRoutes = require('./routes/gasConcRoutes');
 const cacl2AnalysisRoutes = require('./routes/cacl2AnalysisRoutes');
 const tflRoutes = require('./routes/tflRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const { initializeDefaultSuperAdmin } = require('./controllers/superAdminController');
 const autoPlantEmailMiddleware = require('./middleware/autoPlantEmailMiddleware');
 
@@ -135,6 +136,7 @@ app.use('/api/companies', companyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/plants', plantRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/tfl', tflRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/logs', logRoutes);

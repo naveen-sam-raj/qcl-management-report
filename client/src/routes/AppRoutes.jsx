@@ -11,6 +11,7 @@ import SuperAdminCompanies from '../pages/superadmin/SuperAdminCompanies';
 import SuperAdminAdmins from '../pages/superadmin/SuperAdminAdmins';
 import SuperAdminSettings from '../pages/superadmin/SuperAdminSettings';
 import TFLAdminDashboard from '../pages/company/TFLAdminDashboard';
+import PlantDirectoryPage from '../pages/company/PlantDirectoryPage';
 import PlantAnalysisPage from '../pages/company/PlantAnalysisPage';
 import EmptyCompanyDashboard from '../pages/company/EmptyCompanyDashboard';
 import UserManagementPage from '../pages/company/UserManagementPage';
@@ -63,7 +64,7 @@ const AppRoutes = () => {
       <Route path="/admin/tfl" element={<DashboardLayout requiredRole="company_admin" requiredCompany="TFL" />}>
         <Route index element={<TFLAdminDashboard />} />
         <Route path="overall-graph" element={<TFLOverallGraphPage />} />
-        <Route path="plants" element={<TFLAdminDashboard />} />
+        <Route path="plants" element={<PlantDirectoryPage />} />
         <Route path="plants/:id" element={<PlantAnalysisPage />} />
         <Route path="plants/:id/graph" element={<PlantAnalysisPage />} />
         <Route path="plants/:id/options/:optionName" element={<PlantAnalysisPage />} />
