@@ -10,7 +10,6 @@ import {
 import {
   ArrowLeft,
   Calendar,
-  Save,
   RotateCcw,
   CheckCircle2,
   AlertCircle,
@@ -18,10 +17,6 @@ import {
   Factory,
   Database,
   Lock,
-  Clock,
-  Mail,
-  RefreshCw,
-  Send,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 
@@ -101,6 +96,8 @@ const PARAMETERS = [
   { key: 'pcl',  label: 'PCl',  unit: 'Kgm/m³', colClass: 'min-w-[130px]' },
 ];
 
+const UNITS_ORDER = ['t07', 't09', 't11', 't13', 't15', 't17', 't19', 't21', 't23', 't01', 't03', 't05'];
+
 const TIME_SLOTS = [
   { key: 't07', time: '07:00', shift: 'I Shift',   shiftId: 'shift1' },
   { key: 't09', time: '09:00', shift: 'I Shift',   shiftId: 'shift1' },
@@ -116,29 +113,46 @@ const TIME_SLOTS = [
   { key: 't05', time: '05:00', shift: 'III Shift', shiftId: 'shift3' },
 ];
 
-const SHIFT_MAPPING = [
-  { key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't09', 't11', 't13'] },
-  { key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't17', 't19', 't21'] },
-  { key: 'shift3', name: 'III SHIFT (22:00 – 06:00)', slotKeys: ['t23', 't01', 't03', 't05'] },
-];
-
 const buildEmptyData = () =>
   Object.fromEntries(
     TIME_SLOTS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
 
-// Asia/Kolkata current date helper
-const getTodayAsiaKolkata = () => {
+/**
+ * Exact operating date in Asia/Kolkata timezone with 06:00-06:00 IST cycle (hourCycle h23)
+ * A timestamp between 00:00:00 and 05:59:59 IST belongs to the previous calendar day.
+ */
+export const getOperatingDateIST = (now = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+
+  const y = parseInt(parts.find((p) => p.type === 'year')?.value, 10);
+  const m = parseInt(parts.find((p) => p.type === 'month')?.value, 10);
+  const d = parseInt(parts.find((p) => p.type === 'day')?.value, 10);
+  const hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
+
+  let targetYear = y;
+  let targetMonth = m;
+  let targetDay = d;
+
+  if (hour < 6) {
+    const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
+    targetYear = prevDay.getUTCFullYear();
+    targetMonth = prevDay.getUTCMonth() + 1;
+    targetDay = prevDay.getUTCDate();
+  }
+
+  const mm = String(targetMonth).padStart(2, '0');
+  const dd = String(targetDay).padStart(2, '0');
+  return `${targetYear}-${mm}-${dd}`;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -193,47 +207,76 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── State (Date strictly restricted to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── State (Date strictly restricted to current Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [saveSuccess, setSaveSuccess]               = useState(false);
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle');
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lockedSlots, setLockedSlots]               = useState({});
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
+  const [editAuditHistory, setEditAuditHistory]     = useState([]);
 
-  // Confirmation modal state
+  // Confirmation modal state for correction save
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
   const [confirmData, setConfirmData]               = useState(null);
 
-  // Sequential Shift Workflow:
-  // - On initial load: I SHIFT is editable; II SHIFT & III SHIFT are waiting/disabled.
-  // - After I SHIFT save: I SHIFT remains editable until II SHIFT is saved; II SHIFT becomes available.
-  // - After II SHIFT save: I SHIFT is permanently locked; II SHIFT remains editable until III SHIFT is saved; III SHIFT becomes available.
-  // - After III SHIFT initial save: II SHIFT is permanently locked; exactly 1 final edit allowed for III SHIFT.
-  // - After III SHIFT final edit: all 3 shifts permanently locked for that date.
-  const isShiftDisabled = useCallback((shiftKey) => {
+  /**
+   * Slot-level lock state derivation:
+   * Returns: 'locked' | 'open' | 'waiting'
+   * - Does NOT store isOpen; strictly derived from data.lockedSlots
+   * - Fresh date (no saved slots): only t07 is 'open'; t09..t05 are 'waiting'
+   * - A slot is 'locked' if slot.isLocked/correctionUsed is true OR any successor slot isSaved
+   * - A slot is 'open' if it's not locked AND its predecessor is saved (or index === 0)
+   * - Otherwise, it is 'waiting'
+   */
+  const getSlotStatus = useCallback((slotKey) => {
+    const index = UNITS_ORDER.indexOf(slotKey);
+    if (index === -1) return 'locked';
+
+    const slot = lockedSlots[slotKey] || {};
+
+    // 1. Direct permanent lock on this slot
+    if (slot.isLocked || slot.correctionUsed) {
+      return 'locked';
+    }
+
+    // 2. Any successor slot saved permanently locks all predecessor slots
+    for (let i = index + 1; i < UNITS_ORDER.length; i++) {
+      const nextKey = UNITS_ORDER[i];
+      if (lockedSlots[nextKey]?.isSaved) {
+        return 'locked';
+      }
+    }
+
+    // 3. First slot (t07) is open if not locked
+    if (index === 0) {
+      return 'open';
+    }
+
+    // 4. Preceding slot must be saved for this slot to open
+    const prevKey = UNITS_ORDER[index - 1];
+    const isPrevSaved = Boolean(lockedSlots[prevKey]?.isSaved);
+    if (isPrevSaved) {
+      return 'open';
+    }
+
+    // 5. Otherwise waiting for predecessor
+    return 'waiting';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
     if (isViewOnly) return true;
-    if (shiftKey === 'shift1') {
-      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
-    }
-    if (shiftKey === 'shift2') {
-      if (!lockedShifts.shift1Saved) return true;
-      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
-    }
-    if (shiftKey === 'shift3') {
-      if (!lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift3) return true;
-      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-      return false;
-    }
-    return true;
-  }, [isViewOnly, lockedShifts]);
+    return getSlotStatus(slotKey) !== 'open';
+  }, [isViewOnly, getSlotStatus]);
+
+  const allSlotsLocked = UNITS_ORDER.every((k) => getSlotStatus(k) === 'locked');
 
   // Fetch existing data for current date
   useEffect(() => {
@@ -242,65 +285,65 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
 
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/tk-207-analysis?date=${date}`);
+        const response = await api.get(`/api/tk-207-analysis?date=${date}`);
         if (!active) return;
 
         if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
           setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
         }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
 
-        if (response.data && response.data.success && response.data.data) {
+        if (response.data && response.data.success) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
           }
 
-          if (record) {
-            const fetchedRows = record.rows || record.shifts || record.readings || record.data?.rows || record.data;
-            if (fetchedRows && typeof fetchedRows === 'object') {
-              const populated = buildEmptyData();
-              TIME_SLOTS.forEach((slot) => {
-                if (fetchedRows[slot.key]) {
-                  PARAMETERS.forEach((p) => {
-                    const val = fetchedRows[slot.key][p.key];
-                    populated[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
-                  });
-                }
-              });
-              setData(populated);
-              setOriginalData(JSON.parse(JSON.stringify(populated)));
-            } else {
-              setData(buildEmptyData());
-              setOriginalData(null);
-            }
-
-            setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
-            setEditedFields(record.editedFields || record.data?.editedFields || {});
+          const fetchedRows = record?.rows || record?.data?.rows || record?.readings;
+          if (fetchedRows && typeof fetchedRows === 'object') {
+            const populated = buildEmptyData();
+            TIME_SLOTS.forEach((slot) => {
+              if (fetchedRows[slot.key]) {
+                PARAMETERS.forEach((p) => {
+                  const val = fetchedRows[slot.key][p.key];
+                  populated[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+                });
+              }
+            });
+            setData(populated);
+            setOriginalData(JSON.parse(JSON.stringify(populated)));
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
-            setLockedShifts({});
-            setEditedFields({});
           }
+
+          // Hydrate lock state and audit
+          const resLockedSlots = response.data.lockedSlots || record?.lockedSlots || record?.data?.lockedSlots || {};
+          const resLockedShifts = response.data.lockedShifts || record?.lockedShifts || record?.data?.lockedShifts || {};
+          const resEditedFields = response.data.editedFields || record?.editedFields || record?.data?.editedFields || {};
+          const resAudit = response.data.editAuditHistory || record?.editAuditHistory || record?.data?.editAuditHistory || [];
+
+          setLockedSlots(resLockedSlots);
+          setLockedShifts(resLockedShifts);
+          setEditedFields(resEditedFields);
+          setEditAuditHistory(resAudit);
         } else {
           setData(buildEmptyData());
           setOriginalData(null);
+          setLockedSlots({});
           setLockedShifts({});
           setEditedFields({});
+          setEditAuditHistory([]);
         }
       } catch (err) {
         if (!active) return;
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
         setOriginalData(null);
+        setLockedSlots({});
         setLockedShifts({});
         setEditedFields({});
+        setEditAuditHistory([]);
       }
     };
     fetchExistingData();
@@ -315,11 +358,7 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
   // ── Real-time input change ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
-
-    // Find shift of this row
-    const slotObj = TIME_SLOTS.find((s) => s.key === rowKey);
-    const shiftId = slotObj ? slotObj.shiftId : null;
-    if (shiftId && isShiftDisabled(shiftId)) return;
+    if (isSlotDisabled(rowKey)) return;
 
     setData((prev) => ({
       ...prev,
@@ -335,7 +374,7 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
 
     setSaveSuccess(false);
     setSavePhase('idle');
-  }, [isShiftDisabled]);
+  }, [isSlotDisabled]);
 
   const handleReset = () => {
     if (originalData) {
@@ -349,7 +388,7 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     showToast('TK 207 analysis form reset.', 'info');
   };
 
-  // Full dataset validation before opening confirmation modal
+  // Full dataset validation before save
   const validate = () => {
     let hasError = false;
     const newErrors = {};
@@ -368,18 +407,19 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     return !hasError;
   };
 
-  // Check if a row differs from originalData
-  const isRowDiff = (oldRow, newRow) => {
-    if (!oldRow && newRow) return true;
-    if (oldRow && !newRow) return false;
+  // Check if a slot differs from originalData
+  const isSlotModified = (slotKey) => {
+    const oldRow = originalData ? originalData[slotKey] : null;
+    const newRow = data[slotKey];
     return PARAMETERS.some((p) => {
       let oldVal = oldRow?.[p.key] ?? null;
       let newVal = newRow?.[p.key] ?? null;
       if (newVal === '') newVal = null;
+      if (oldVal === '') oldVal = null;
       if (oldVal !== null && newVal !== null && !isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
         return Number(oldVal) !== Number(newVal);
       }
-      return String(oldVal) !== String(newVal);
+      return String(oldVal ?? '') !== String(newVal ?? '');
     });
   };
 
@@ -390,72 +430,58 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
       return;
     }
 
-    const shiftsToSave = [];
-    let isFinalEdit = false;
-
-    SHIFT_MAPPING.forEach((shift) => {
-      if (isShiftDisabled(shift.key)) return;
-
-      const hasAnyData = shift.slotKeys.some((sKey) => {
-        const row = data[sKey];
-        return row && Object.values(row).some((val) => val !== null && val !== '');
-      });
-
-      const hasDiff = shift.slotKeys.some((sKey) => {
-        const oldRow = originalData ? originalData[sKey] : null;
-        const newRow = data[sKey];
-        return isRowDiff(oldRow, newRow);
-      });
-
-      if (hasAnyData && hasDiff) {
-        shiftsToSave.push({
-          key: shift.key,
-          name: shift.name,
-          slotKeys: shift.slotKeys,
-        });
-
-        if (shift.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
-          isFinalEdit = true;
-        }
+    // Detect which slots have modified values
+    const changedSlots = [];
+    TIME_SLOTS.forEach((slot) => {
+      if (isSlotDisabled(slot.key)) return;
+      if (isSlotModified(slot.key)) {
+        changedSlots.push(slot.key);
       }
     });
 
-    if (shiftsToSave.length === 0) {
-      showToast('No new or modified shift data found to save.', 'info');
+    if (changedSlots.length === 0) {
+      showToast('No changes', 'info');
       return;
     }
 
-    if (shiftsToSave.length > 1) {
-      showToast('Only one shift can be saved at a time. Please save changes shift-by-by.', 'warning');
+    if (changedSlots.length > 1) {
+      showToast(`Only one slot may be entered or edited per save. Detected changes in: ${changedSlots.join(', ')}`, 'warning');
       return;
     }
 
-    setConfirmData({
-      date,
-      shift: shiftsToSave[0],
-      isFinalEdit,
-    });
-    setShowConfirmModal(true);
+    const targetSlotKey = changedSlots[0];
+    const targetSlotObj = TIME_SLOTS.find((s) => s.key === targetSlotKey);
+    const isCorrection = Boolean(lockedSlots[targetSlotKey]?.isSaved && !lockedSlots[targetSlotKey]?.isLocked);
+
+    // If slot is already saved and not locked, this is a correction save -> show confirm modal
+    if (isCorrection) {
+      setConfirmData({
+        date,
+        slotKey: targetSlotKey,
+        slotObj: targetSlotObj,
+        isCorrection: true,
+      });
+      setShowConfirmModal(true);
+      return;
+    }
+
+    // First save for this slot: save directly
+    executeSave(targetSlotKey);
   };
 
-  const handleConfirmSave = async () => {
+  const executeSave = async (targetSlotKey) => {
     if (saving) return;
     setSaving(true);
     setSavePhase('saving');
     setSaveSuccess(false);
-
-    // Close confirmation modal immediately to prevent modal freeze
     setShowConfirmModal(false);
 
-    const shiftBeingSaved = confirmData?.shift;
     const payload = {
       date,
       plant: plantId ? plantId.toUpperCase() : 'ACL',
       analysisType: 'TK 207 Analysis',
       tank: 'TK 207',
-      shift: shiftBeingSaved ? shiftBeingSaved.name : 'I SHIFT',
       submittedBy: user?.name || 'Plant Operator',
-      submittedAt: new Date().toISOString(),
       rows: Object.fromEntries(
         TIME_SLOTS.map((r) => [
           r.key,
@@ -472,29 +498,48 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     try {
       const response = await api.post('/api/tk-207-analysis', payload);
 
-      if (!response?.data?.success) {
-        showToast(response?.data?.message || 'Unable to save TK 207 data. Please try again.', 'error');
+      // 200 noChange -> toast "No changes"
+      if (response.data?.noChange) {
+        showToast('No changes', 'info');
         setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
+      if (!response.data?.success) {
+        showToast(response.data?.message || 'Unable to save TK 207 data. Please try again.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
         return;
       }
 
       setSaveSuccess(true);
-      const savedDoc = response.data?.data;
-      if (savedDoc && (savedDoc._id || savedDoc.id)) {
-        setRecordId(savedDoc._id || savedDoc.id);
+      setSavePhase('completed');
+      showToast(response.data?.message || `Successfully saved ${targetSlotKey} ✓`, 'success');
+
+      // Hydrate state from save response data
+      const responseData = response.data?.data || {};
+      if (response.data?.recordId || response.data?.data?._id) {
+        setRecordId(response.data.recordId || response.data.data?._id);
       }
-      if (savedDoc?.lockedShifts) {
-        setLockedShifts(savedDoc.lockedShifts);
+      if (responseData.lockedSlots) {
+        setLockedSlots(responseData.lockedSlots);
       }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
+      if (responseData.lockedShifts) {
+        setLockedShifts(responseData.lockedShifts);
       }
-      if (savedDoc?.rows) {
+      if (responseData.editedFields) {
+        setEditedFields(responseData.editedFields);
+      }
+      if (responseData.editAuditHistory) {
+        setEditAuditHistory(responseData.editAuditHistory);
+      }
+      if (responseData.rows) {
         const synced = buildEmptyData();
         TIME_SLOTS.forEach((slot) => {
-          if (savedDoc.rows[slot.key]) {
+          if (responseData.rows[slot.key]) {
             PARAMETERS.forEach((p) => {
-              const val = savedDoc.rows[slot.key][p.key];
+              const val = responseData.rows[slot.key][p.key];
               synced[slot.key][p.key] = val !== null && val !== undefined ? String(val) : '';
             });
           }
@@ -502,31 +547,13 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
         setData(synced);
         setOriginalData(JSON.parse(JSON.stringify(synced)));
       }
-
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
-      }
-
-      const emailRes = response.data?.emailNotification;
-      const emailSent = response.data?.emailSent;
-      const emailPending = response.data?.emailPending;
-      const statusFromApi = response.data?.emailStatus;
-
-      if (emailSent || statusFromApi === 'sent') {
-        setSavePhase('completed');
-        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
-        showToast('Saved — Email Sent ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
-        showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
-      }
     } catch (err) {
       setSavePhase('save_failed');
       setSaveSuccess(false);
       console.error('[TK207Analysis] Save failed:', err);
-      const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
+      // 400 / 409 -> show exact server message
+      const serverMessage = err.response?.data?.message || err.message || 'Error saving TK 207 analysis';
+      showToast(serverMessage, 'error');
     } finally {
       setSaving(false);
     }
@@ -559,63 +586,15 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
     }
   };
 
-  // Helper for Shift Status Badges
-  const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
-
-    if (lockedShifts[shiftId]) {
-      status = 'Locked';
-      bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 'shift1') {
-        if (lockedShifts.shift2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift2') {
-        if (!lockedShifts.shift1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift3') {
-        if (!lockedShifts.shift2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      }
-    }
-
-    return (
-      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-300 shadow-2xs ${bg}`}>
-        {status.toUpperCase()}
-      </span>
-    );
-  };
-
   return (
     <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+      {/* ── Breadcrumb Header with Operating Date ────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back + Titles */}
-          <div className="flex items-center gap-3">
+
+          {/* Left: Back + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={() => navigate(`${basePath}/plants/${plantId}`)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
@@ -624,8 +603,8 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
               <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
               <span>Back</span>
             </button>
+
             <div className="min-w-0">
-              {/* Breadcrumb */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
                 <Factory className="w-3.5 h-3.5 text-slate-400" />
                 <span>ACL Plant</span>
@@ -633,76 +612,72 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                 <Database className="w-3.5 h-3.5 text-blue-500" />
                 <span className="text-blue-600 font-semibold">TK 207</span>
               </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5 flex items-center gap-2">
-                <span>TK 207</span>
-                <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
+              <div className="flex items-center gap-2 mt-0.5">
+                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
+                  TK 207
+                </h1>
+                <span className="text-[11px] font-black px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-wide">
                   SHIFT TWICE
                 </span>
-                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                  Unit: Kgm/m³
-                </span>
-              </h1>
+              </div>
             </div>
           </div>
 
           {/* Right: Date Section + Action Buttons */}
-          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Current Date Display (Strictly Asia/Kolkata Today) */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <label
-                htmlFor="tk207-date-input"
-                className="text-xs font-bold text-slate-600 flex items-center gap-1 cursor-default shrink-0"
-              >
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <span>Date:</span>
-              </label>
-              <input
-                id="tk207-date-input"
-                type="date"
-                value={date}
-                readOnly
-                disabled
-                className="text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded px-2 py-0.5 shadow-2xs cursor-not-allowed opacity-90"
-                title="Date is strictly locked to today's date in Asia/Kolkata timezone"
-              />
-              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                Today
-              </span>
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {/* Operating Date (06:00-06:00 IST) */}
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 shadow-2xs select-none"
+              title="Operating Date (06:00-06:00 IST)"
+            >
+              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Date:</span>
+                <span id="tk207-current-date-display" className="text-xs font-mono font-bold text-slate-800 tracking-tight">
+                  {formatDateDisplay(date)}
+                </span>
+                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
+                  Operating Day
+                </span>
+              </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center gap-2">
-              {!isViewOnly && (
+            {/* Actions for Admin: Main button text always "Save" via alwaysShowSaveText */}
+            {!isViewOnly ? (
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
-                  type="button"
                   id="btn-tk207-reset"
                   onClick={handleReset}
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Reset form to last saved data"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 disabled:opacity-50 cursor-pointer"
+                  title="Reset modified fields"
                 >
-                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <RotateCcw className="w-3.5 h-3.5" />
                   <span>Reset</span>
                 </button>
-              )}
 
-              {!isViewOnly && (
                 <StatusSaveButton
                   id="btn-tk207-save"
                   saving={saving}
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  defaultLabel="Save Shift"
-                  title="Save active shift data and notify assigned user"
+                  alwaysShowSaveText={true}
+                  disabled={allSlotsLocked}
+                  title={allSlotsLocked ? 'All slots are locked for this date' : 'Save TK 207 slot data'}
                 />
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
+                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                <span>Read-Only View</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Status Banner (Persistence & Email Result) ────────────────────────── */}
+      {/* ── Status Banner (Truthful Persistence Result) ────────────────────── */}
       <SaveStatusBanner
         id="tk207-status-banner"
         saveSuccess={saveSuccess}
@@ -719,71 +694,45 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
         saving={saving}
       />
 
-      {/* ── Shift Status Tracker Bar ───────────────────────────────────────── */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2">
-          <Clock className="w-4 h-4 text-slate-500" />
-          <span className="font-bold text-slate-700">Shift Workflow Status:</span>
-        </div>
-        <div className="flex items-center gap-4 flex-wrap">
-          {SHIFT_MAPPING.map((shift) => (
-            <div key={shift.key} className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-600 text-[11px]">{shift.name.split(' ')[0]}:</span>
-              {getShiftBadge(shift.key)}
-            </div>
-          ))}
-        </div>
-        {isViewOnly && (
-          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            View Only Mode (Operator/User)
-          </span>
-        )}
-      </div>
-
-      {/* ── Main Data Entry Table ─────────────────────────────────────────── */}
+      {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse">
-            {/* Header */}
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
-              <tr className="bg-slate-900 text-white font-bold text-center select-none">
-                <th className="px-5 py-3.5 text-left text-xs uppercase tracking-wider font-extrabold border-r border-slate-800/80 w-36">
-                  <div className="flex items-center gap-1.5 text-slate-300">
-                    <Clock className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Time Slot</span>
-                  </div>
+              <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
+                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-40 sm:w-48 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
+                  Time / Shift / Status
                 </th>
-                {PARAMETERS.map((param) => (
+                {PARAMETERS.map((p, idx) => (
                   <th
-                    key={param.key}
-                    className={`px-4 py-3.5 text-center text-xs font-extrabold uppercase tracking-wider border-r border-slate-800/80 last:border-r-0 ${param.colClass}`}
+                    key={p.key}
+                    className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
+                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
+                    } ${p.colClass}`}
                   >
-                    <div className="flex flex-col items-center justify-center">
-                      <span className="text-white text-sm font-black">{param.label}</span>
-                      <span className="text-[10px] text-blue-300 font-semibold mt-0.5">({param.unit})</span>
-                      <span className="text-[9.5px] font-mono font-medium text-slate-400 mt-0.5">
-                        {TK207_LIMITS[param.key]?.formattedRange}
-                      </span>
-                    </div>
+                    <span>{p.label}</span> {p.unit && <span className="text-[10px] text-blue-300 font-semibold lowercase">({p.unit})</span>}
                   </th>
                 ))}
               </tr>
             </thead>
 
-            {/* Table Body */}
-            <tbody className="divide-y divide-slate-200/80 font-medium">
+            <tbody className="divide-y divide-slate-200">
               {visibleRows.map((row) => {
                 const styles = getRowStyles(row.shiftId);
-                const shiftLocked = isShiftDisabled(row.shiftId);
+                const status = getSlotStatus(row.key);
+                const isDisabled = isSlotDisabled(row.key);
+                const slotSaved = Boolean(lockedSlots[row.key]?.isSaved);
 
                 return (
                   <tr
                     key={row.key}
-                    className={`transition-colors duration-100 ${styles.row} ${shiftLocked ? 'opacity-85' : ''}`}
+                    className={`transition-colors duration-100 ${
+                      status === 'locked' ? 'bg-slate-50/80 opacity-90' : styles.row
+                    }`}
                   >
-                    {/* Time slot & shift label */}
+                    {/* Time slot & Shift & Slot Lock Status Badge */}
                     <td className="px-5 py-2.5 align-top">
-                      <div className="flex flex-col gap-1 mt-1">
+                      <div className="flex flex-col gap-1.5 mt-0.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                             {row.time}
@@ -791,15 +740,29 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                           <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}>
                             {row.shift}
                           </span>
-                          {shiftLocked && (
-                            <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                        </div>
+                        {/* Slot-level lock state indicator */}
+                        <div className="flex items-center gap-1">
+                          {status === 'locked' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-200 text-slate-700 inline-flex items-center gap-1 shadow-2xs">
+                              <Lock className="w-2.5 h-2.5 text-slate-500" /> LOCKED
+                            </span>
+                          )}
+                          {status === 'open' && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${
+                              slotSaved
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            }`}>
+                              {slotSaved ? 'EDITABLE' : 'OPEN'}
+                            </span>
+                          )}
+                          {status === 'waiting' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-100 text-slate-500 border border-slate-200 shadow-2xs">
+                              WAITING
+                            </span>
                           )}
                         </div>
-                        {['t07', 't15', 't23'].includes(row.key) && (
-                          <div className="mt-0.5">
-                            {getShiftBadge(row.shiftId)}
-                          </div>
-                        )}
                       </div>
                     </td>
 
@@ -813,114 +776,95 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
                       const limit = getCellLimit(plantId, 'tk207', row.key, param.key) || TK207_LIMITS[param.key];
                       const validation = validateCellValue(cellVal, limit);
                       const isOutOfLimit = validation.isOutOfLimit;
-                      const isNormal = validation.isNormal;
                       const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
-                      const isEdited = Boolean(editedFields[fieldKey]);
+
+                      const isEdited = Boolean(
+                        editedFields && (editedFields[fieldKey] || (editedFields.get && editedFields.get(fieldKey)))
+                      );
 
                       return (
-                        <td key={param.key} className="px-4 py-2 text-center align-top">
+                        <td key={param.key} className="px-4 py-2.5 text-center align-top">
                           <div className="flex flex-col items-center justify-start min-h-[58px]">
                             <div className="relative w-full max-w-[115px]">
                               <input
                                 id={`tk207-input-${row.key}-${param.key}`}
                                 type="text"
                                 inputMode="decimal"
+                                readOnly={isDisabled}
+                                disabled={isDisabled}
                                 value={cellVal}
-                                placeholder="0.00"
-                                disabled={shiftLocked}
                                 onChange={(e) =>
-                                  handleChange(row.key, param.key, e.target.value)
+                                  !isViewOnly && handleChange(row.key, param.key, e.target.value)
                                 }
+                                placeholder={isDisabled ? '—' : '0.00'}
                                 title={
-                                  shiftLocked
-                                    ? 'Field is locked for editing'
-                                    : limit
+                                  limit
                                     ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
+                                      ? `OUT OF LIMIT: ${cellVal} ${limit.unit} (Allowed range: ${limit.formattedRange}, Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
                                       : hasValue
-                                      ? `NORMAL: ${cellVal} Kgm/m³`
-                                      : `Target: ${limit.formattedTarget} (${limit.formattedTolerance})`
+                                      ? `Normal: ${cellVal} ${limit.unit} (Allowed range: ${limit.formattedRange})`
+                                      : `Allowed range: ${limit.formattedRange} (Target: ${limit.formattedTarget} ${limit.formattedTolerance})`
                                     : ''
                                 }
                                 className={`w-full max-w-[115px] mx-auto text-center text-sm font-mono font-bold px-3 py-1.5 rounded-lg border-2 shadow-2xs transition-all focus:outline-none ${
-                                  shiftLocked
-                                    ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed font-semibold'
+                                  isDisabled
+                                    ? 'bg-slate-100/90 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                                     : isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
+                                    ? 'border-rose-400 bg-rose-50/70 text-rose-950 focus:border-rose-600 focus:ring-2 focus:ring-rose-200 hover:border-rose-400'
                                     : isFormatError
-                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300/60'
-                                    : hasValue && isNormal
-                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
+                                    ? 'border-red-500 bg-red-50 text-red-950'
                                     : styles.inputFocus
                                 }`}
-                                aria-label={`${param.label} at ${row.time}`}
                               />
 
-                              {/* EDITED badge */}
+                              {/* Persistent Edited Badge */}
                               {isEdited && (
-                                <span
-                                  className="absolute -top-1.5 -left-1.5 bg-amber-500 text-white rounded px-1 text-[8.5px] font-black tracking-wider uppercase shadow-xs pointer-events-none"
-                                  title="Modified after initial save"
+                                <div
+                                  className="absolute -top-2 -right-2 z-10 px-1 py-0.2 bg-amber-500 text-white text-[8px] font-black rounded uppercase tracking-wider shadow-2xs"
+                                  title="This parameter was modified and saved"
                                 >
-                                  EDITED
-                                </span>
-                              )}
-
-                              {/* Out of limit alert dot */}
-                              {isOutOfLimit && (
-                                <span
-                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
-                                  title="Out of limit"
-                                >
-                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
-                                </span>
+                                  Edited
+                                </div>
                               )}
                             </div>
 
-                            {/* Invalid numeric error message */}
+                            {/* Error Message if invalid format */}
                             {isFormatError && (
                               <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-0.5 animate-fadeIn flex items-center justify-center gap-0.5 whitespace-nowrap">
                                 <AlertCircle className="w-2.5 h-2.5 shrink-0 text-red-600" />
-                                <span>{formatErrorMessage}</span>
+                                <span className="whitespace-nowrap">{formatErrorMessage}</span>
                               </div>
                             )}
 
-                            {/* Status and Range */}
-                            {!isFormatError && (
-                              <div className="mt-0.5 flex flex-col items-center justify-center">
-                                {hasValue && isNormal && (
-                                  <span
-                                    id={`tk207-status-${row.key}-${param.key}`}
-                                    className="text-[9.5px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5"
-                                  >
-                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
-                                    <span>NORMAL</span>
-                                  </span>
-                                )}
-
-                                {hasValue && isOutOfLimit && (
-                                  <span
-                                    id={`tk207-status-${row.key}-${param.key}`}
-                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9px] font-black tracking-tight whitespace-nowrap flex items-center justify-center gap-0.5 shadow-2xs"
-                                  >
-                                    <AlertCircle className="w-2 h-2 text-rose-600 shrink-0" />
-                                    <span>OUT OF LIMIT</span>
-                                  </span>
-                                )}
-
-                                <span
-                                  id={`tk207-range-${row.key}-${param.key}`}
-                                  className={`text-[9px] font-semibold tracking-tight ${
-                                    isOutOfLimit
-                                      ? 'text-rose-700 font-bold'
-                                      : hasValue
-                                      ? 'text-slate-600 font-bold'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  {limit?.formattedRange}
-                                </span>
+                            {/* Show allowed range badge when value is out of limit */}
+                            {!isFormatError && isOutOfLimit && limit && (
+                              <div
+                                id={`tk207-limit-badge-${row.key}-${param.key}`}
+                                className="mt-1 px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
+                                title={`Allowed: ${limit.formattedRange}`}
+                              >
+                                <span>Limit: {limit.formattedRange}</span>
                               </div>
+                            )}
+
+                            {/* Normal indicator when within limit */}
+                            {!isFormatError && !isOutOfLimit && limit && hasValue && (
+                              <span
+                                className="text-[9.5px] text-emerald-600 font-bold mt-1 tracking-tight flex items-center gap-0.5 animate-fadeIn"
+                                title={`Value within normal range (${limit.formattedRange})`}
+                              >
+                                <CheckCircle2 className="w-2.5 h-2.5" /> Normal
+                              </span>
+                            )}
+
+                            {/* Subtle target hint when field is empty and not disabled */}
+                            {!isFormatError && !isOutOfLimit && limit && !hasValue && !isDisabled && (
+                              <span
+                                className="text-[10px] text-slate-400 font-semibold mt-1 tracking-tight"
+                                title={`Target: ${limit.formattedTarget} ${limit.formattedTolerance}`}
+                              >
+                                {limit.formattedRange}
+                              </span>
                             )}
                           </div>
                         </td>
@@ -933,82 +877,77 @@ const TK207AnalysisPage = ({ plantId = 'acl' }) => {
           </table>
         </div>
 
-        {/* Table footer info */}
-        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            <span>
-              Values for <strong>TK 207</strong> (FNH₃, CNH₃, TCl, PCl). Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>.
-            </span>
-          </div>
-          <div className="font-mono text-[11px] text-slate-400">
-            Total Slots: {visibleRows.length} (24-hour monitoring across 3 shifts)
-          </div>
+        {/* Table footer hint */}
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500 font-medium">
+            Values for <strong>TK 207</strong>. Frequency: <strong>SHIFT TWICE</strong>. Unit: <strong>Kgm/m³</strong>. Limits: FNH₃: 3.92–4.12 • CNH₃: 1.82–2.02 • TCl: 5.37–5.57 • PCl: 3.45–3.65.
+          </p>
         </div>
       </div>
 
-      {/* ── Save Confirmation Modal ────────────────────────────────────────── */}
+      {/* ── Confirmation Modal for Correction Save ── */}
       {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                <Send className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900">
-                  Confirm Shift Submission
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-slideUp">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/50">
+              <div className="flex items-center gap-2 text-amber-900 font-bold">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                <h3 className="text-base font-bold text-slate-800">
+                  Confirm Slot Correction
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Please review the shift details before saving.
-                </p>
               </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Plant / Tank:</span>
-                <span className="font-bold text-slate-900">ACL Plant → TK 207</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Selected Date:</span>
-                <span className="font-bold text-slate-900">{formatDateDisplay(confirmData.date)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Shift to Save:</span>
-                <span className="font-extrabold text-blue-600">{confirmData.shift.name}</span>
-              </div>
-              {confirmData.isFinalEdit && (
-                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px] font-bold">
-                  ⚠️ Notice: This is the final allowed edit for III SHIFT. After this save, all shifts for today will lock permanently.
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 transition text-2xl leading-none cursor-pointer"
               >
-                Review / Cancel
+                &times;
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 text-sm font-semibold mb-4 shadow-2xs flex items-start gap-3">
+                <Lock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-extrabold text-amber-900 text-sm">
+                    This is your only correction for this slot.
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    Once saved, slot <strong>{confirmData.slotObj?.time} ({confirmData.slotObj?.shift})</strong> will be permanently locked and cannot be modified again.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-xs text-slate-700">
+                <div className="font-bold text-slate-900 mb-1">Proposed Values for {confirmData.slotObj?.time}:</div>
+                {PARAMETERS.map((p) => (
+                  <div key={p.key} className="flex justify-between border-b border-slate-200/50 pb-1 last:border-0">
+                    <span className="font-medium text-slate-600">{p.label}:</span>
+                    <span className="font-mono font-bold text-slate-900">{data[confirmData.slotKey]?.[p.key] || '—'} {p.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-2xs"
+                disabled={saving}
+              >
+                Cancel
               </button>
               <button
                 type="button"
-                onClick={handleConfirmSave}
+                onClick={() => executeSave(confirmData.slotKey)}
                 disabled={saving}
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-75 cursor-pointer shadow-2xs"
               >
                 {saving ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Saving...</span>
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    Saving...
                   </>
                 ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
+                  <>Confirm & Save Correction</>
                 )}
               </button>
             </div>

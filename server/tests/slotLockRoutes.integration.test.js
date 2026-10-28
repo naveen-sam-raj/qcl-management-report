@@ -457,6 +457,14 @@ async function run() {
       updatedAt: new Date('2026-10-26T05:01:00Z'),
     });
 
+    // Duplicate docs GET: returns doc with data, not the newer empty placeholder
+    const resDupGet = await getFetch(dupDate);
+    assert.strictEqual(resDupGet.status, 200);
+    assert.strictEqual(resDupGet.body.data.length, 1);
+    assert.ok(resDupGet.body.data[0].rows?.t07, 'GET must return doc with data, not newer empty placeholder');
+    assert.strictEqual(String(resDupGet.body.recordId), String(primaryDoc._id), 'GET must select primaryDoc with data');
+    console.log(`  [PASS] ${cfg.name}: Duplicate docs: GET returns doc with data, not the newer empty placeholder.`);
+
     const resDup = await postSave({
       date: dupDate,
       rows: {

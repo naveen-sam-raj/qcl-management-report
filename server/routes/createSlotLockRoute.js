@@ -479,7 +479,8 @@ function createSlotLockRoute({
             query.$or = [{ company: req.user.company }, { company: null }];
           }
 
-          const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+          const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+          const doc = pickCanonicalDoc(matchingDocs);
 
           if (doc && doc.data) {
             const resolvedLocks = doc.data.lockedShifts
