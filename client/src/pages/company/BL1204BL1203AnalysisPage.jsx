@@ -157,7 +157,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
     [isViewOnly, lockedShifts]
   );
 
-  // Get status for shift badge: NEW, EDITABLE, WAITING, LOCKED
+  // Get status for shift badge: NEW, OPEN, EDITABLE, WAITING, LOCKED
   const getShiftStatus = useCallback(
     (shiftKey) => {
       if (shiftKey === 'shift1') {
@@ -168,14 +168,14 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
       if (shiftKey === 'shift2') {
         if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
         if (lockedShifts.shift2Saved) return 'EDITABLE';
-        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        if (lockedShifts.shift1Saved) return 'OPEN';
         return 'WAITING';
       }
       if (shiftKey === 'shift3') {
         if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
           return 'LOCKED';
         if (lockedShifts.shift3Saved) return 'EDITABLE';
-        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        if (lockedShifts.shift2Saved) return 'OPEN';
         return 'WAITING';
       }
       return 'WAITING';
@@ -492,6 +492,9 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
