@@ -17,7 +17,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import {
-  getTodayAsiaKolkata,
+  getOperatingDateIST,
   formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
@@ -118,7 +118,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States (Locked Date in Asia/Kolkata) ──
-  const [date] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [errors, setErrors] = useState({});
@@ -448,6 +448,12 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
         return;
       }
 
+      if (response.data?.noChange) {
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       setSaveSuccess(true);
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -499,7 +505,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
       setSavePhase('save_failed');
       console.error('[BL1204Analysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
-      showToast?.('Save Error: ' + serverMessage, 'error');
+      showToast?.(serverMessage, 'error');
     } finally {
       setSaving(false);
     }
@@ -572,7 +578,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
 
           {/* Right: Read-Only Date Badge + Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="bl1204-date-display" />
+            <LockedDateDisplay date={date} id="bl1204-date-display" badgeText="Operating Day" />
 
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -594,6 +600,7 @@ const BL1204BL1203AnalysisPage = ({ plantId = 'co2' }) => {
                 onClick={handleSaveClick}
                 disabled={isEntireFormLocked}
                 title="Save Shift Data"
+                alwaysShowSaveText={true}
               />
             </div>
           </div>

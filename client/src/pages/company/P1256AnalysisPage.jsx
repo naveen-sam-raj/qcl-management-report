@@ -17,7 +17,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import {
-  getTodayAsiaKolkata,
+  getOperatingDateIST,
   formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
@@ -89,7 +89,7 @@ const P1256AnalysisPage = ({ plantId = 'co2' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  const [date] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [errors, setErrors] = useState({});
@@ -409,6 +409,12 @@ const P1256AnalysisPage = ({ plantId = 'co2' }) => {
         return;
       }
 
+      if (response.data?.noChange) {
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       setSaveSuccess(true);
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -460,7 +466,7 @@ const P1256AnalysisPage = ({ plantId = 'co2' }) => {
       setSavePhase('save_failed');
       console.error('[P1256Analysis] Save failed:', err);
       const serverMessage = err.response?.data?.message || err.message;
-      showToast?.('Save Error: ' + serverMessage, 'error');
+      showToast?.(serverMessage, 'error');
     } finally {
       setSaving(false);
     }
@@ -530,7 +536,7 @@ const P1256AnalysisPage = ({ plantId = 'co2' }) => {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="p1256-date-display" />
+            <LockedDateDisplay date={date} id="p1256-date-display" badgeText="Operating Day" />
 
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -552,6 +558,7 @@ const P1256AnalysisPage = ({ plantId = 'co2' }) => {
                 onClick={handleSaveClick}
                 disabled={isEntireFormLocked}
                 title="Save Shift Data"
+                alwaysShowSaveText={true}
               />
             </div>
           </div>

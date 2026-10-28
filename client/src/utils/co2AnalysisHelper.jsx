@@ -15,6 +15,43 @@ export const getTodayAsiaKolkata = () => {
 };
 
 /**
+ * Exact operating date in Asia/Kolkata timezone with 06:00-06:00 IST cycle (hourCycle h23)
+ * A timestamp between 00:00:00 and 05:59:59 IST belongs to the previous calendar day.
+ */
+export const getOperatingDateIST = (now = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+
+  const y = parseInt(parts.find((p) => p.type === 'year')?.value, 10);
+  const m = parseInt(parts.find((p) => p.type === 'month')?.value, 10);
+  const d = parseInt(parts.find((p) => p.type === 'day')?.value, 10);
+  const hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
+
+  let targetYear = y;
+  let targetMonth = m;
+  let targetDay = d;
+
+  if (hour < 6) {
+    const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
+    targetYear = prevDay.getUTCFullYear();
+    targetMonth = prevDay.getUTCMonth() + 1;
+    targetDay = prevDay.getUTCDate();
+  }
+
+  const mm = String(targetMonth).padStart(2, '0');
+  const dd = String(targetDay).padStart(2, '0');
+  return `${targetYear}-${mm}-${dd}`;
+};
+
+/**
  * Format ISO date string into Indian locale display (e.g., "Wed, 14 Oct 2026")
  */
 export const formatDateDisplay = (isoDate) => {
@@ -35,7 +72,7 @@ export const formatDateDisplay = (isoDate) => {
  * Standard Read-Only Date Display Badge matching ACL TK 209 reference
  * No editable date-picker; strictly locked to Asia/Kolkata today
  */
-export const LockedDateDisplay = ({ date, label = 'Date:', id = 'co2-date-display' }) => {
+export const LockedDateDisplay = ({ date, label = 'Date:', id = 'co2-date-display', badgeText = 'Today' }) => {
   return (
     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
       <label
@@ -54,11 +91,11 @@ export const LockedDateDisplay = ({ date, label = 'Date:', id = 'co2-date-displa
           readOnly
           disabled
           className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md border-slate-300 bg-slate-100 text-slate-700 cursor-not-allowed select-none"
-          title="Date is locked to Today (Asia/Kolkata timezone)"
+          title={`Date is locked to ${badgeText} (Asia/Kolkata timezone)`}
         />
       </div>
       <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-        Today (Asia/Kolkata)
+        {badgeText} (Asia/Kolkata)
       </span>
       {date && (
         <span className="text-[11px] text-slate-600 font-medium hidden md:inline-block">
