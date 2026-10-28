@@ -599,15 +599,18 @@ function createCO2WeeklyAnalysisRouter({
   analysisType,
   unit,
   tank,
-  parameters, // array of param keys
+  parameters, // array of param keys e.g. ['cl', 'so4', 'fe', 'tss']
   frequency = 'Once in a Week',
+  getNow = () => new Date(),
 }) {
   const router = express.Router();
   const inMemoryRecords = [];
+  const plantCodes = ['CO2', 'CO2 Plant', 'CO2 PLANT'];
+  const unitsOrder = ['week'];
 
   router.use(protect);
 
-  // ── GET: Fetch existing record ──
+  // ── GET: Fetch existing record for given date ──
   router.get('/', async (req, res) => {
     try {
       const { date, startDate, endDate } = req.query;
@@ -622,41 +625,70 @@ function createCO2WeeklyAnalysisRouter({
 
       if (date) {
         const query = {
-          plantCode: { $in: ['CO2', 'CO2 Plant', 'CO2 PLANT'] },
+          plantCode: { $in: plantCodes },
           analysisType,
           date,
         };
-        if (req.user && req.user.company) {
-          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        if (req.user?.company) {
+          const compId = req.user.company._id || req.user.company;
+          query.$or = [{ company: compId }, { company: null }];
         }
 
-        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        const matchingDocs = await PlantAnalysisRecord.find(query);
+        const doc = pickCanonicalDoc(matchingDocs);
+
         if (doc && doc.data) {
           const payloadData = doc.data;
           const rows = payloadData.rows || payloadData;
+
+          let lockedSlots = payloadData.lockedSlots;
+          const hasStoredLockedSlots = Boolean(lockedSlots && lockedSlots.week);
+          if (!hasStoredLockedSlots) {
+            const isSaved = Boolean(payloadData.initialSaved);
+            const editsCount = Number(payloadData.editCount || 0);
+            const isLocked = Boolean(payloadData.isLocked || (editsCount >= 1));
+            const correctionUsed = Boolean(payloadData.isLocked || editsCount >= 1);
+            lockedSlots = {
+              week: {
+                isSaved,
+                isLocked,
+                correctionUsed,
+                editsCount,
+              },
+            };
+          }
+
+          const initialSaved = Boolean(lockedSlots.week?.isSaved || payloadData.initialSaved);
+          const editCount = Number(lockedSlots.week?.editsCount ?? payloadData.editCount ?? 0);
+          const isLocked = Boolean(lockedSlots.week?.isLocked || (editCount >= 1) || payloadData.isLocked);
+          const editedFields = payloadData.editedFields || {};
+          const editAuditHistory = payloadData.editAuditHistory || [];
+
           return res.status(200).json({
             success: true,
             recordId: doc._id,
             emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            emailStatus: doc.emailStatus || 'pending',
+            emailStatus: doc.emailStatus || 'disabled',
             assignedOperatorEmail,
-            initialSaved: Boolean(payloadData.initialSaved),
-            editCount: payloadData.editCount || 0,
-            isLocked: Boolean(payloadData.isLocked || (payloadData.editCount >= 1)),
-            editedFields: payloadData.editedFields || {},
-            editAuditHistory: payloadData.editAuditHistory || [],
+            initialSaved,
+            editCount,
+            isLocked,
+            lockedSlots,
+            editedFields,
+            editAuditHistory,
             data: {
               ...payloadData,
               _id: doc._id,
               id: doc._id,
               date: doc.date,
               rows,
-              initialSaved: Boolean(payloadData.initialSaved),
-              editCount: payloadData.editCount || 0,
-              isLocked: Boolean(payloadData.isLocked || (payloadData.editCount >= 1)),
-              editedFields: payloadData.editedFields || {},
-              editAuditHistory: payloadData.editAuditHistory || [],
-              emailStatus: doc.emailStatus || 'pending',
+              initialSaved,
+              editCount,
+              isLocked,
+              lockedSlots,
+              editedFields,
+              editAuditHistory,
+              emailStatus: doc.emailStatus || 'disabled',
               emailRecipient: doc.emailRecipient || assignedOperatorEmail,
             },
           });
@@ -664,38 +696,61 @@ function createCO2WeeklyAnalysisRouter({
 
         const memMatch = inMemoryRecords.find((r) => r.date === date);
         if (memMatch) {
+          const isSaved = Boolean(memMatch.initialSaved);
+          const editCount = Number(memMatch.editCount || 0);
+          const isLocked = Boolean(memMatch.isLocked || editCount >= 1);
           return res.status(200).json({
             success: true,
             assignedOperatorEmail,
-            initialSaved: Boolean(memMatch.initialSaved),
-            isLocked: Boolean(memMatch.isLocked),
+            initialSaved,
+            editCount,
+            isLocked,
+            lockedSlots: memMatch.lockedSlots || {
+              week: {
+                isSaved,
+                isLocked,
+                correctionUsed: isLocked,
+                editsCount: editCount,
+              },
+            },
             data: memMatch,
           });
         }
+
+        const defaultSlots = {
+          week: {
+            isSaved: false,
+            isLocked: false,
+            correctionUsed: false,
+            editsCount: 0,
+          },
+        };
 
         return res.status(200).json({
           success: true,
           assignedOperatorEmail,
           initialSaved: false,
+          editCount: 0,
           isLocked: false,
+          lockedSlots: defaultSlots,
           data: null,
           message: `No record found for date ${date}`,
         });
       }
 
-      // List query
-      const query = {
-        plantCode: { $in: ['CO2', 'CO2 Plant', 'CO2 PLANT'] },
+      // Range / list query
+      const listQuery = {
+        plantCode: { $in: plantCodes },
         analysisType,
       };
       if (startDate && endDate) {
-        query.date = { $gte: startDate, $lte: endDate };
+        listQuery.date = { $gte: startDate, $lte: endDate };
       }
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+      if (req.user?.company) {
+        listQuery.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
       }
 
-      const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
+      const docs = await PlantAnalysisRecord.find(listQuery).sort({ date: -1 }).lean();
       if (docs && docs.length > 0) {
         return res.status(200).json({
           success: true,
@@ -730,10 +785,10 @@ function createCO2WeeklyAnalysisRouter({
     try {
       const payload = req.body || {};
 
-      if (req.user && req.user.role === 'user') {
+      if (req.user?.role === 'user') {
         return res.status(403).json({
           success: false,
-          message: `Forbidden: ${analysisType} data entry is restricted to Admins.`,
+          message: `Forbidden: ${analysisType} data entry and modification is restricted to authorized Admins.`,
         });
       }
 
@@ -753,230 +808,286 @@ function createCO2WeeklyAnalysisRouter({
         });
       }
 
-      // Backend Date Restriction Enforcement (Asia/Kolkata)
-      const todayKolkata = getTodayKolkata();
-      if (payload.date !== todayKolkata) {
+      // Strict operating date guard (06:00–06:00 IST).
+      // getNow is injected by route file / test harness.
+      // x-test-mode, x-test-now, x-test-env, payload.isTestMode, payload.now are NEVER consulted here.
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
+      if (payload.date !== operatingDate) {
         return res.status(400).json({
           success: false,
-          message: `Date restriction enforced: ${analysisType} records can only be created or modified for today's date (${todayKolkata}).`,
+          message: `Date restriction enforced: ${analysisType} records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
         });
       }
 
+      // Load existing docs via pickCanonicalDoc
       const query = {
         date: payload.date,
-        plantCode: { $in: ['CO2', 'CO2 Plant', 'CO2 PLANT'] },
+        plantCode: { $in: plantCodes },
         analysisType,
       };
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+      if (req.user?.company) {
+        const compId = req.user.company._id || req.user.company;
+        query.$or = [{ company: compId }, { company: null }];
       }
 
-      const existingDoc = await PlantAnalysisRecord.findOne(query);
+      const matchingDocs = await PlantAnalysisRecord.find(query);
+      const existingDoc = pickCanonicalDoc(matchingDocs);
       const existingData = existingDoc?.data || {};
-      const existingRows = existingData.rows || existingData;
+      const existingRows = existingData.rows || {};
 
-      let initialSaved = Boolean(existingData.initialSaved);
-      let editCount = existingData.editCount || 0;
-      let isLocked = Boolean(existingData.isLocked || (editCount >= 1));
-      let editedFields = { ...(existingData.editedFields || {}) };
-      let editAuditHistory = Array.isArray(existingData.editAuditHistory) ? [ ...existingData.editAuditHistory ] : [];
+      let existingLockedSlots = existingData.lockedSlots;
+      const hasStoredLockedSlots = Boolean(existingLockedSlots && existingLockedSlots.week);
+      if (!hasStoredLockedSlots) {
+        const isSaved = Boolean(existingData.initialSaved);
+        const editsCount = Number(existingData.editCount || 0);
+        const isLocked = Boolean(existingData.isLocked || (editsCount >= 1));
+        const correctionUsed = Boolean(existingData.isLocked || editsCount >= 1);
+        existingLockedSlots = {
+          week: {
+            isSaved,
+            isLocked,
+            correctionUsed,
+            editsCount,
+          },
+        };
+      }
 
-      if (isLocked) {
+      const incomingRowsRaw = payload.rows || {};
+      const incomingWeek = incomingRowsRaw.week !== undefined ? incomingRowsRaw.week : incomingRowsRaw;
+      const incomingRows = {
+        week: incomingWeek,
+      };
+
+      // Empty first save rejection: 0 valid non-empty values
+      const isSavedAlready = Boolean(existingLockedSlots.week?.isSaved);
+      if (!isSavedAlready && isUnitEmpty(incomingWeek)) {
         return res.status(400).json({
           success: false,
-          message: `This weekly analysis is locked after one correction. No further edits permitted.`,
+          message: 'Cannot save empty slot week. At least one non-empty value is required.',
         });
       }
 
-      const incomingWeek = (payload.rows && payload.rows.week) || payload.rows || {};
-      const oldWeek = (existingRows && existingRows.week) || existingRows || {};
+      // Pure engine transition
+      const transition = computeSlotTransition({
+        unitsOrder,
+        lockedSlots: existingLockedSlots,
+        storedRows: existingRows,
+        incomingRows,
+        now,
+      });
 
-      try {
-        if (initialSaved) {
-          const isEmpty = (v) => v === null || v === '' || v === undefined;
-
-          // Check if there are any real differences between oldWeek and incomingWeek
-          let hasRealChanges = false;
-          parameters.forEach((paramKey) => {
-            const rawOld = oldWeek[paramKey];
-            const rawNew = incomingWeek[paramKey];
-
-            const oldIsEmpty = isEmpty(rawOld);
-            const newIsEmpty = isEmpty(rawNew);
-
-            if (oldIsEmpty && newIsEmpty) return;
-            if (oldIsEmpty !== newIsEmpty) {
-              hasRealChanges = true;
-              return;
-            }
-            if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
-              if (Number(rawOld) !== Number(rawNew)) hasRealChanges = true;
-            } else if (String(rawOld).trim() !== String(rawNew).trim()) {
-              hasRealChanges = true;
-            }
-          });
-
-          // If no values changed at all, do NOT consume the edit and do not lock
-          if (!hasRealChanges) {
-            isLocked = false;
-          } else {
-            parameters.forEach((paramKey) => {
-              const rawOld = oldWeek[paramKey];
-              const rawNew = incomingWeek[paramKey];
-
-              const oldIsEmpty = isEmpty(rawOld);
-              const newIsEmpty = isEmpty(rawNew);
-
-              // If both old and new values are empty (null, '', undefined), no edit
-              if (oldIsEmpty && newIsEmpty) {
-                return;
-              }
-
-              // If old value was filled and new value is cleared, record as edit with newValue null
-              if (!oldIsEmpty && newIsEmpty) {
-                const oVal = !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld;
-                editedFields[`week_${paramKey}`] = true;
-                editAuditHistory.push({
-                  shiftKey: 'week',
-                  shiftName: 'Weekly Analysis',
-                  paramKey,
-                  stream: paramKey.toUpperCase(),
-                  oldValue: oVal,
-                  newValue: null,
-                  editedBy: req.user?.name || payload.submittedBy || 'Admin',
-                  editedById: req.user?._id || null,
-                  timestamp: new Date(),
-                });
-                return;
-              }
-
-              // If old value was empty and new value is filled for the first time, no edit badge/audit entry
-              if (oldIsEmpty && !newIsEmpty) {
-                return;
-              }
-
-              // Both old and new are filled: compare with numeric tolerance
-              let isParamChanged = false;
-              if (!isNaN(Number(rawOld)) && !isNaN(Number(rawNew))) {
-                isParamChanged = Number(rawOld) !== Number(rawNew);
-              } else {
-                isParamChanged = String(rawOld).trim() !== String(rawNew).trim();
-              }
-
-              if (isParamChanged) {
-                editedFields[`week_${paramKey}`] = true;
-                editAuditHistory.push({
-                  shiftKey: 'week',
-                  shiftName: 'Weekly Analysis',
-                  paramKey,
-                  stream: paramKey.toUpperCase(),
-                  oldValue: !isNaN(Number(rawOld)) ? Number(rawOld) : rawOld,
-                  newValue: !isNaN(Number(rawNew)) ? Number(rawNew) : rawNew,
-                  editedBy: req.user?.name || payload.submittedBy || 'Admin',
-                  editedById: req.user?._id || null,
-                  timestamp: new Date(),
-                });
-              }
-            });
-
-            editCount += 1;
-            isLocked = true; // Permitted correction consumed -> permanently locked
-          }
-        } else {
-          initialSaved = true;
-          isLocked = false;
-        }
-      } catch (trackErr) {
-        console.warn(`[CO2 Edit Tracking] Failed tracking edits for ${analysisType} (week):`, trackErr.message);
-        if (!initialSaved) {
-          initialSaved = true;
-        }
+      // Identical re-save: HTTP 200 { success: true, noChange: true }
+      if (transition.noChange) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No new or modified data found to save.',
+        });
       }
 
-      const updatedRecordData = {
-        id: existingData.id || `${unit}_${Date.now()}`,
-        date: payload.date,
-        plant: 'CO2 Plant',
-        analysisType,
-        tank: tank || unit,
-        unit,
-        frequency,
-        rows: payload.rows,
-        initialSaved,
-        editCount,
-        isLocked,
-        editedFields,
-        editAuditHistory,
-        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-        submittedById: req.user?._id || null,
-        submittedAt: new Date().toISOString(),
-        company: req.user?.company?._id || req.user?.company || null,
-      };
+      // Validation / lock / clear-all rejection
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
 
-      const savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
-        {
-          plantCode: { $in: ['CO2', 'CO2 Plant', 'CO2 PLANT'] },
-          analysisType,
-          date: payload.date,
-        },
-        {
-          plantName: 'CO2 Plant',
+      const targetUnit = transition.targetUnit;
+
+      // Audit tracking - only on corrections
+      let editedFields = { ...(existingData.editedFields || {}) };
+      let editAuditHistory = Array.isArray(existingData.editAuditHistory) ? [...existingData.editAuditHistory] : [];
+
+      if (transition.isCorrection) {
+        const auditResult = recordFieldEdits({
+          fields: parameters,
+          oldRows: existingRows.week || {},
+          newRows: incomingRows.week || {},
+          editorName: req.user?.name || payload.submittedBy || 'Admin',
+          editorId: req.user?._id || null,
+          itemKey: 'week',
+          existingEditedFields: editedFields,
+          existingAuditHistory: editAuditHistory,
+        });
+        editedFields = auditResult.editedFields;
+        editAuditHistory = auditResult.editAuditHistory;
+        transition.dotPathUpdates['data.editedFields'] = editedFields;
+        transition.dotPathUpdates['data.editAuditHistory'] = editAuditHistory;
+      }
+
+      // Dual-write legacy fields
+      const isSavedAfter = true;
+      const isLockedAfter = Boolean(transition.isCorrection);
+      const editCountAfter = transition.isCorrection ? (existingLockedSlots.week?.editsCount || 0) + 1 : 0;
+
+      transition.dotPathUpdates['data.initialSaved'] = isSavedAfter;
+      transition.dotPathUpdates['data.editCount'] = editCountAfter;
+      transition.dotPathUpdates['data.isLocked'] = isLockedAfter;
+
+      // Dual-write metadata
+      transition.dotPathUpdates['submittedBy'] = req.user?.name || payload.submittedBy || 'Plant Operator';
+      transition.dotPathUpdates['submittedById'] = req.user?._id || null;
+      transition.dotPathUpdates['savedAt'] = new Date();
+
+      let savedDoc = null;
+      const compId = req.user?.company ? (req.user.company._id || req.user.company) : null;
+
+      if (!existingDoc) {
+        // First save: upsert with $setOnInsert + $set, 409 on race
+        const missingFilter = {
           plantCode: 'CO2',
           analysisType,
-          unit,
           date: payload.date,
-          shift: frequency,
-          data: updatedRecordData,
-          submittedBy: updatedRecordData.submittedBy,
-          submittedById: updatedRecordData.submittedById,
-          company: updatedRecordData.company,
-          savedAt: new Date(),
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+          ...(compId ? { company: compId } : {}),
+          [`data.lockedSlots.${targetUnit}.isSaved`]: { $ne: true },
+        };
+        const updateDoc = {
+          $setOnInsert: {
+            plantName: 'CO2 Plant',
+            plantCode: 'CO2',
+            analysisType,
+            unit: unit || tank,
+            tank: tank || unit,
+            date: payload.date,
+            shift: frequency,
+            frequency,
+            company: compId,
+            createdAt: new Date(),
+          },
+          $set: transition.dotPathUpdates,
+        };
 
-      inMemoryRecords.unshift(updatedRecordData);
+        try {
+          const updateResult = await PlantAnalysisRecord.updateOne(missingFilter, updateDoc, { upsert: true });
+          if (updateResult.upsertedCount === 0) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently. Please retry.',
+            });
+          }
+          savedDoc = await PlantAnalysisRecord.findOne({
+            plantCode: 'CO2',
+            analysisType,
+            date: payload.date,
+          });
+        } catch (err) {
+          if (err.code === 11000 || String(err.message).includes('E11000')) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently. Please retry.',
+            });
+          }
+          throw err;
+        }
+      } else {
+        // Doc exists: findOneAndUpdate by _id, conditional guard on slot state
+        const existsFilter = {
+          _id: existingDoc._id,
+          ...(transition.isCorrection
+            ? {
+                [`data.lockedSlots.${targetUnit}.isSaved`]: true,
+                [`data.lockedSlots.${targetUnit}.correctionUsed`]: false,
+                [`data.lockedSlots.${targetUnit}.isLocked`]: false,
+              }
+            : {
+                $or: [
+                  { [`data.lockedSlots.${targetUnit}.isSaved`]: { $ne: true } },
+                  { [`data.lockedSlots.${targetUnit}`]: { $exists: false } },
+                ],
+              }),
+        };
 
-      // Email workflow
-      const saveEventId = `save_${unit}_${Date.now()}`;
-      let emailResult = { success: false, emailStatus: 'failed' };
-
-      try {
-        emailResult = await executeSaveAndEmailWorkflow({
-          plantIdentifier: 'CO2',
-          analysisType,
-          unit,
-          shift: frequency,
-          date: payload.date,
-          data: payload.rows,
-          submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-          submittedById: req.user?._id || null,
-          company: updatedRecordData.company,
-          explicitRecord: savedDoc,
-          rawBody: payload,
-          saveEventId,
-        });
-      } catch (mailErr) {
-        console.warn(`[AutoPlantEmail] Note for ${analysisType}:`, mailErr.message);
-        emailResult = { success: false, emailStatus: 'failed', error: mailErr.message };
+        try {
+          savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
+            existsFilter,
+            { $set: transition.dotPathUpdates },
+            { new: true }
+          );
+          if (!savedDoc) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Slot was locked or modified concurrently. Please retry.',
+            });
+          }
+        } catch (err) {
+          if (err.code === 11000 || String(err.message).includes('E11000')) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document was modified concurrently. Please retry.',
+            });
+          }
+          throw err;
+        }
       }
 
-      const emailSent = Boolean(emailResult && (emailResult.emailSent || emailResult.success));
-      const emailStatus = emailSent ? 'sent' : 'failed';
-      const emailRecipient = emailResult?.recipient || savedDoc?.emailRecipient || null;
+      // Email notification workflow
+      let assignedOperatorEmail = null;
+      try {
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('CO2', {
+          company: req.user?.company?._id || req.user?.company || null,
+        });
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (uErr) {
+        assignedOperatorEmail = null;
+      }
 
-      return res.status(201).json({
+      try {
+        await executeSaveAndEmailWorkflow({
+          plantIdentifier: 'CO2',
+          analysisType,
+          unit: unit || tank,
+          shift: frequency,
+          date: payload.date,
+          data: savedDoc?.data,
+          submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+          submittedById: req.user?._id || null,
+          company: req.user?.company?._id || req.user?.company || null,
+          explicitRecord: savedDoc,
+          rawBody: payload,
+        });
+      } catch (notifyErr) {
+        console.warn(`[CO2 ${analysisType}] Notification dispatch skipped:`, notifyErr.message);
+      }
+
+      const resLockedSlots = savedDoc?.data?.lockedSlots || {
+        week: {
+          isSaved: isSavedAfter,
+          isLocked: isLockedAfter,
+          correctionUsed: isLockedAfter,
+          editsCount: editCountAfter,
+        },
+      };
+
+      return res.status(200).json({
         success: true,
         message: `Successfully saved ${analysisType} in MongoDB ✓`,
-        data: updatedRecordData,
+        recordId: savedDoc?._id,
         emailSent: false,
         emailPending: false,
         emailStatus: 'disabled',
-        emailRecipient: null,
-        initialSaved,
-        editCount,
-        isLocked,
-        recordId: savedDoc._id,
+        emailRecipient: assignedOperatorEmail,
+        initialSaved: isSavedAfter,
+        editCount: editCountAfter,
+        isLocked: isLockedAfter,
+        lockedSlots: resLockedSlots,
+        editedFields,
+        editAuditHistory,
+        data: {
+          ...(savedDoc?.data || {}),
+          _id: savedDoc?._id,
+          id: savedDoc?._id,
+          date: payload.date,
+          initialSaved: isSavedAfter,
+          editCount: editCountAfter,
+          isLocked: isLockedAfter,
+          lockedSlots: resLockedSlots,
+          editedFields,
+          editAuditHistory,
+          emailStatus: 'disabled',
+          emailRecipient: assignedOperatorEmail,
+        },
       });
     } catch (err) {
       console.error(`[CO2 ${analysisType} POST] Error:`, err);

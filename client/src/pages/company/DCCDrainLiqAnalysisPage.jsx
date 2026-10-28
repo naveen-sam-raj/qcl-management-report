@@ -17,7 +17,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import {
-  getTodayAsiaKolkata,
+  getOperatingDateIST,
   formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
@@ -102,7 +102,7 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  const [date] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [errors, setErrors] = useState({});
@@ -334,6 +334,14 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
     try {
       const response = await api.post('/api/dcc-drain-liq-analysis', payload);
 
+      if (response?.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected — document unchanged', 'info');
+        return;
+      }
+
+
       if (!response?.data?.success) {
         showToast?.(
           response.data?.message || 'Unable to save DCC DRAIN LIQ data. Please try again.',
@@ -380,6 +388,9 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
@@ -456,7 +467,7 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="dcc-drain-liq-date-display" />
+            <LockedDateDisplay date={date} id="dcc-drain-liq-date-display" badgeText="Operating Day" />
 
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -478,6 +489,7 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
                 onClick={handleSaveClick}
                 disabled={isFormDisabled}
                 title="Save Weekly Analysis"
+                alwaysShowSaveText={true}
               />
             </div>
           </div>
@@ -689,8 +701,7 @@ const DCCDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>DCC DRAIN LIQ</strong> (Cl, SO4, Fe, TSS in PPM). Weekly 1-time
-              edit lock workflow enforced.
+              Values for <strong>DCC DRAIN LIQ</strong> (Cl, SO4, Fe, TSS in PPM). one correction allowed after first save.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">
