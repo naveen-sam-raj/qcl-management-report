@@ -102,6 +102,7 @@ const SHIFT_DISPLAY_NAMES = {
  */
 function createCO2ShiftAnalysisRouter({
   analysisType,
+  analysisTypes = null,
   unit,
   tank,
   parameters,
@@ -110,6 +111,7 @@ function createCO2ShiftAnalysisRouter({
   plantCode = 'CO2',
   plantName = 'CO2 Plant',
   plantIdentifier = 'CO2',
+  unitKeys = ['shift1', 'shift2', 'shift3'],
   shiftDisplayNames = SHIFT_DISPLAY_NAMES,
   dataKey = 'rows',
   extraFields = {},
@@ -118,9 +120,10 @@ function createCO2ShiftAnalysisRouter({
 }) {
   const router = express.Router();
   const inMemoryRecords = [];
-  const unitsOrder = ['shift1', 'shift2', 'shift3'];
+  const unitsOrder = Array.isArray(unitKeys) && unitKeys.length > 0 ? unitKeys : ['shift1', 'shift2', 'shift3'];
   const effectiveUnit = unitValue !== undefined ? unitValue : (unit || tank);
   const effectiveTank = unitValue !== undefined ? unitValue : (tank || unit);
+  const analysisTypeFilter = Array.isArray(analysisTypes) && analysisTypes.length > 0 ? { $in: analysisTypes } : analysisType;
 
   router.use(protect);
 
@@ -135,15 +138,35 @@ function createCO2ShiftAnalysisRouter({
         assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
       } catch (_) {}
 
-      const defaultLocks = getInitialLockState({ type: 'shift', items: unitsOrder });
-      const defaultLockedSlots = {
-        shift1: { isSaved: false, isLocked: false, correctionUsed: false },
-        shift2: { isSaved: false, isLocked: false, correctionUsed: false },
-        shift3: { isSaved: false, isLocked: false, correctionUsed: false },
-      };
+      const u1 = unitsOrder[0];
+      const u2 = unitsOrder[1];
+      const u3 = unitsOrder[2];
+
+      const defaultLockedSlots = {};
+      unitsOrder.forEach((k) => {
+        defaultLockedSlots[k] = { isSaved: false, isLocked: false, correctionUsed: false };
+      });
+
+      const defaultLocks = unitsOrder[0] === 'shift1'
+        ? getInitialLockState({ type: 'shift', items: unitsOrder })
+        : {
+            [`${u1}Saved`]: false,
+            [`${u2}Saved`]: false,
+            [`${u3}Saved`]: false,
+            [`${u1}Locked`]: false,
+            [`${u2}Locked`]: true,
+            [`${u3}Locked`]: true,
+            [`${u1}Edits`]: 0,
+            [`${u2}Edits`]: 0,
+            [`${u3}Edits`]: 0,
+            [u1]: false,
+            [u2]: true,
+            [u3]: true,
+            slots: defaultLockedSlots,
+          };
 
       if (date) {
-        const query = { plantCode: { $in: plantCodes }, analysisType, date };
+        const query = { plantCode: { $in: plantCodes }, analysisType: analysisTypeFilter, date };
         if (req.user?.company) {
           query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
         }
@@ -154,13 +177,43 @@ function createCO2ShiftAnalysisRouter({
         if (doc?.data) {
           const payloadData = doc.data;
           const rows = payloadData.rows || payloadData.shifts || payloadData;
-          const resolvedLocks = payloadData.lockedShifts
-            ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: unitsOrder })
-            : defaultLocks;
           const resolvedLockedSlots =
             payloadData.lockedSlots && Object.keys(payloadData.lockedSlots).length > 0
               ? { ...defaultLockedSlots, ...payloadData.lockedSlots }
               : deriveLegacyLockedSlotsShift(rows, payloadData.lockedShifts, unitsOrder);
+
+          let resolvedLocks = payloadData.lockedShifts;
+          if (unitsOrder[0] === 'shift1') {
+            resolvedLocks = payloadData.lockedShifts
+              ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: unitsOrder })
+              : defaultLocks;
+          } else {
+            if (!resolvedLocks || Object.keys(resolvedLocks).length === 0) {
+              const s1s = Boolean(resolvedLockedSlots[u1]?.isSaved);
+              const s2s = Boolean(resolvedLockedSlots[u2]?.isSaved);
+              const s3s = Boolean(resolvedLockedSlots[u3]?.isSaved);
+              const s1c = Boolean(resolvedLockedSlots[u1]?.correctionUsed);
+              const s2c = Boolean(resolvedLockedSlots[u2]?.correctionUsed);
+              const s3c = Boolean(resolvedLockedSlots[u3]?.correctionUsed);
+              const s1l = Boolean(resolvedLockedSlots[u1]?.isLocked || s2s || s1c);
+              const s2l = Boolean(resolvedLockedSlots[u2]?.isLocked || s3s || s2c);
+              const s3l = Boolean(resolvedLockedSlots[u3]?.isLocked || s3c);
+              resolvedLocks = {
+                [`${u1}Saved`]: s1s,
+                [`${u2}Saved`]: s2s,
+                [`${u3}Saved`]: s3s,
+                [`${u1}Locked`]: s1l,
+                [`${u2}Locked`]: s2l,
+                [`${u3}Locked`]: s3l,
+                [`${u1}Edits`]: s1c ? 1 : 0,
+                [`${u2}Edits`]: s2c ? 1 : 0,
+                [`${u3}Edits`]: s3c ? 1 : 0,
+                [u1]: s1l,
+                [u2]: !s1s || s2l,
+                [u3]: !s2s || s3l,
+              };
+            }
+          }
 
           return res.status(200).json({
             success: true,
@@ -203,7 +256,7 @@ function createCO2ShiftAnalysisRouter({
       }
 
       // Range / list query
-      const listQuery = { plantCode: { $in: plantCodes }, analysisType };
+      const listQuery = { plantCode: { $in: plantCodes }, analysisType: analysisTypeFilter };
       if (startDate && endDate) listQuery.date = { $gte: startDate, $lte: endDate };
       if (req.user?.company) {
         listQuery.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
@@ -261,7 +314,7 @@ function createCO2ShiftAnalysisRouter({
       }
 
       // Load existing docs via pickCanonicalDoc
-      const query = { date: payload.date, plantCode: { $in: plantCodes }, analysisType };
+      const query = { date: payload.date, plantCode: { $in: plantCodes }, analysisType: analysisTypeFilter };
       if (req.user?.company) {
         const compId = req.user.company._id || req.user.company;
         query.$or = [{ company: compId }, { company: null }];
@@ -278,6 +331,10 @@ function createCO2ShiftAnalysisRouter({
       }
 
       const incomingRowsRaw = payload.rows || payload.shifts || {};
+      const rawShiftKey = payload.shiftKey || payload.unitKey;
+      const explicitUnitKey = rawShiftKey && unitsOrder.includes(String(rawShiftKey).trim())
+        ? String(rawShiftKey).trim()
+        : null;
 
       // 1. Check if any unit is currently saved in this document
       const hasAnySaved = unitsOrder.some((u) => existingLockedSlots[u]?.isSaved);
@@ -288,27 +345,48 @@ function createCO2ShiftAnalysisRouter({
       );
 
       // If document has no saved units yet and no non-empty units provided in payload, reject empty first save
-      if (!hasAnySaved && nonEmptyUnsaved.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot save empty slot " + unitsOrder[0] + ". At least one non-empty value is required.",
-        });
+      if (!hasAnySaved) {
+        if (explicitUnitKey) {
+          const explicitVal = incomingRowsRaw[explicitUnitKey] !== undefined ? incomingRowsRaw[explicitUnitKey] : (payload.parameters || {});
+          if (isUnitEmpty(explicitVal)) {
+            return res.status(400).json({
+              success: false,
+              message: "Cannot save empty slot " + explicitUnitKey + ". At least one non-empty value is required.",
+            });
+          }
+        } else if (nonEmptyUnsaved.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot save empty slot " + unitsOrder[0] + ". At least one non-empty value is required.",
+          });
+        }
       }
 
       // 3. Normalize incomingRows:
+      // - If explicitUnitKey is provided, only target that unit and preserve other units from existing
       // - For saved units: preserve incoming if provided, else existing stored.
       // - For unsaved units: include only non-empty entries (dropping empty unsaved entries).
       const incomingRows = {};
-      for (const u of unitsOrder) {
-        if (existingLockedSlots[u]?.isSaved) {
-          if (incomingRowsRaw[u] !== undefined) {
-            incomingRows[u] = incomingRowsRaw[u];
+      if (explicitUnitKey) {
+        for (const u of unitsOrder) {
+          if (u === explicitUnitKey) {
+            incomingRows[u] = incomingRowsRaw[u] !== undefined ? incomingRowsRaw[u] : (payload.parameters || {});
           } else if (existingRows[u] !== undefined) {
             incomingRows[u] = existingRows[u];
           }
-        } else {
-          if (incomingRowsRaw[u] !== undefined && !isUnitEmpty(incomingRowsRaw[u])) {
-            incomingRows[u] = incomingRowsRaw[u];
+        }
+      } else {
+        for (const u of unitsOrder) {
+          if (existingLockedSlots[u]?.isSaved) {
+            if (incomingRowsRaw[u] !== undefined) {
+              incomingRows[u] = incomingRowsRaw[u];
+            } else if (existingRows[u] !== undefined) {
+              incomingRows[u] = existingRows[u];
+            }
+          } else {
+            if (incomingRowsRaw[u] !== undefined && !isUnitEmpty(incomingRowsRaw[u])) {
+              incomingRows[u] = incomingRowsRaw[u];
+            }
           }
         }
       }
@@ -378,30 +456,34 @@ function createCO2ShiftAnalysisRouter({
         currentSlots[unitsOrder[p]].isLocked = true;
       }
 
-      const s1Saved = Boolean(currentSlots.shift1?.isSaved);
-      const s2Saved = Boolean(currentSlots.shift2?.isSaved);
-      const s3Saved = Boolean(currentSlots.shift3?.isSaved);
-      const s1Corr  = Boolean(currentSlots.shift1?.correctionUsed);
-      const s2Corr  = Boolean(currentSlots.shift2?.correctionUsed);
-      const s3Corr  = Boolean(currentSlots.shift3?.correctionUsed);
-      const s1Lock  = Boolean(currentSlots.shift1?.isLocked || s2Saved || s1Corr);
-      const s2Lock  = Boolean(currentSlots.shift2?.isLocked || s3Saved || s2Corr);
-      const s3Lock  = Boolean(currentSlots.shift3?.isLocked || s3Corr);
+      const u1 = unitsOrder[0];
+      const u2 = unitsOrder[1];
+      const u3 = unitsOrder[2];
 
-      // Dual-write flat lockedShifts dot-paths (client contract)
-      transition.dotPathUpdates['data.lockedShifts.shift1Saved']  = s1Saved;
-      transition.dotPathUpdates['data.lockedShifts.shift2Saved']  = s2Saved;
-      transition.dotPathUpdates['data.lockedShifts.shift3Saved']  = s3Saved;
-      transition.dotPathUpdates['data.lockedShifts.shift1Locked'] = s1Lock;
-      transition.dotPathUpdates['data.lockedShifts.shift2Locked'] = s2Lock;
-      transition.dotPathUpdates['data.lockedShifts.shift3Locked'] = s3Lock;
-      transition.dotPathUpdates['data.lockedShifts.shift1Edits']  = s1Corr ? 1 : 0;
-      transition.dotPathUpdates['data.lockedShifts.shift2Edits']  = s2Corr ? 1 : 0;
-      transition.dotPathUpdates['data.lockedShifts.shift3Edits']  = s3Corr ? 1 : 0;
+      const u1Saved = Boolean(currentSlots[u1]?.isSaved);
+      const u2Saved = Boolean(currentSlots[u2]?.isSaved);
+      const u3Saved = Boolean(currentSlots[u3]?.isSaved);
+      const u1Corr  = Boolean(currentSlots[u1]?.correctionUsed);
+      const u2Corr  = Boolean(currentSlots[u2]?.correctionUsed);
+      const u3Corr  = Boolean(currentSlots[u3]?.correctionUsed);
+      const u1Lock  = Boolean(currentSlots[u1]?.isLocked || u2Saved || u1Corr);
+      const u2Lock  = Boolean(currentSlots[u2]?.isLocked || u3Saved || u2Corr);
+      const u3Lock  = Boolean(currentSlots[u3]?.isLocked || u3Corr);
+
+      // Flat lockedShifts dot-paths (derived directly from unitKeys)
+      transition.dotPathUpdates[`data.lockedShifts.${u1}Saved`]  = u1Saved;
+      transition.dotPathUpdates[`data.lockedShifts.${u2}Saved`]  = u2Saved;
+      transition.dotPathUpdates[`data.lockedShifts.${u3}Saved`]  = u3Saved;
+      transition.dotPathUpdates[`data.lockedShifts.${u1}Locked`] = u1Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u2}Locked`] = u2Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u3}Locked`] = u3Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u1}Edits`]  = u1Corr ? 1 : 0;
+      transition.dotPathUpdates[`data.lockedShifts.${u2}Edits`]  = u2Corr ? 1 : 0;
+      transition.dotPathUpdates[`data.lockedShifts.${u3}Edits`]  = u3Corr ? 1 : 0;
       // Disabled (true = locked/disabled in UI)
-      transition.dotPathUpdates['data.lockedShifts.shift1'] = s1Lock;
-      transition.dotPathUpdates['data.lockedShifts.shift2'] = !s1Saved || s2Lock;
-      transition.dotPathUpdates['data.lockedShifts.shift3'] = !s2Saved || s3Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u1}`]       = u1Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u2}`]       = !u1Saved || u2Lock;
+      transition.dotPathUpdates[`data.lockedShifts.${u3}`]       = !u2Saved || u3Lock;
 
       if (dataKey === 'shifts' || extraFields.shifts) {
         transition.dotPathUpdates[`data.shifts.${targetUnit}`] = incomingRows[targetUnit];
@@ -488,10 +570,14 @@ function createCO2ShiftAnalysisRouter({
                 ],
               }),
         };
+        const existingUpdates = { ...transition.dotPathUpdates };
+        if (existingDoc.analysisType !== analysisType) {
+          existingUpdates.analysisType = analysisType;
+        }
         try {
           savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
             existsFilter,
-            { $set: transition.dotPathUpdates },
+            { $set: existingUpdates },
             { new: true }
           );
         } catch (err) {
@@ -508,14 +594,14 @@ function createCO2ShiftAnalysisRouter({
       // Build response payload
       const mergedRows = { ...(existingRows || {}), [targetUnit]: incomingRows[targetUnit] };
       const lockedShifts = {
-        shift1Saved:  s1Saved, shift2Saved:  s2Saved, shift3Saved:  s3Saved,
-        shift1Locked: s1Lock,  shift2Locked: s2Lock,  shift3Locked: s3Lock,
-        shift1Edits:  s1Corr ? 1 : 0,
-        shift2Edits:  s2Corr ? 1 : 0,
-        shift3Edits:  s3Corr ? 1 : 0,
-        shift1: s1Lock,
-        shift2: !s1Saved || s2Lock,
-        shift3: !s2Saved || s3Lock,
+        [`${u1}Saved`]:  u1Saved, [`${u2}Saved`]:  u2Saved, [`${u3}Saved`]:  u3Saved,
+        [`${u1}Locked`]: u1Lock,  [`${u2}Locked`]: u2Lock,  [`${u3}Locked`]: u3Lock,
+        [`${u1}Edits`]:  u1Corr ? 1 : 0,
+        [`${u2}Edits`]:  u2Corr ? 1 : 0,
+        [`${u3}Edits`]:  u3Corr ? 1 : 0,
+        [u1]: u1Lock,
+        [u2]: !u1Saved || u2Lock,
+        [u3]: !u2Saved || u3Lock,
       };
       const lockedSlots = { ...currentSlots, ...(savedDoc.data?.lockedSlots || {}) };
 

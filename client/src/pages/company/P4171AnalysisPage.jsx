@@ -20,6 +20,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay } from '../../utils/co2AnalysisHelper';
 
 // ─── SA Plant P417 Parameters & Validation Limits ────────────────────────────
 // Plant: SA Plant ONLY
@@ -138,8 +139,10 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   const basePath = user?.role === "user" ? "/portal" : "/admin/tfl";
 
   // ── States ──
-  const [date, setDate] = useState("");
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
+  const [originalData, setOriginalData] = useState(null);
+  const [lockedShifts, setLockedShifts] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -157,33 +160,136 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           
+          if (record?.lockedShifts) {
+            setLockedShifts(record.lockedShifts);
+          }
           if (!record) {
             setData(buildEmptyData());
+            setOriginalData(buildEmptyData());
           } else if (record.shifts) {
             setData(record.shifts);
+            setOriginalData(JSON.parse(JSON.stringify(record.shifts)));
           } else if (record.readings && Object.keys(record.readings).length > 0) {
             setData(record.readings);
+            setOriginalData(JSON.parse(JSON.stringify(record.readings)));
           } else if (record.rows) {
             setData(record.rows);
+            setOriginalData(JSON.parse(JSON.stringify(record.rows)));
           } else if (record.data && !Array.isArray(record.data)) {
             setData(record.data);
+            setOriginalData(JSON.parse(JSON.stringify(record.data)));
           } else if (Array.isArray(record) && record.length > 0) {
             setData(record);
+            setOriginalData(JSON.parse(JSON.stringify(record)));
           } else if (record.data && record.data.rows) {
             setData(record.data.rows);
+            setOriginalData(JSON.parse(JSON.stringify(record.data.rows)));
           } else {
             setData(buildEmptyData());
+            setOriginalData(buildEmptyData());
           }
         } else {
           setData(buildEmptyData());
+          setOriginalData(buildEmptyData());
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
         setData(buildEmptyData());
+        setOriginalData(buildEmptyData());
       }
     };
     fetchExistingData();
   }, [date]);
+
+  const isShiftDisabled = (shiftKey) => {
+    if (user?.role === 'user') return true;
+    if (shiftKey === 's1') {
+      return Boolean(lockedShifts.s1) || Boolean(lockedShifts.s2Saved);
+    }
+    if (shiftKey === 's2') {
+      if (!lockedShifts.s1Saved) return true;
+      return Boolean(lockedShifts.s2) || Boolean(lockedShifts.s3Saved);
+    }
+    if (shiftKey === 's3') {
+      if (!lockedShifts.s2Saved) return true;
+      if (lockedShifts.s3) return true;
+      if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) return true;
+      return false;
+    }
+    return false;
+  };
+
+  const getActiveShiftKey = () => {
+    const s1Changed = originalData?.s1 && Object.keys(data.s1 || {}).some(k => String(data.s1[k] ?? '') !== String(originalData.s1[k] ?? ''));
+    if (s1Changed && !lockedShifts.s2Saved && !lockedShifts.s1) {
+      return 's1';
+    }
+    const s2Changed = originalData?.s2 && Object.keys(data.s2 || {}).some(k => String(data.s2[k] ?? '') !== String(originalData.s2[k] ?? ''));
+    if (s2Changed && lockedShifts.s1Saved && !lockedShifts.s3Saved && !lockedShifts.s2) {
+      return 's2';
+    }
+    if (!lockedShifts.s1Saved) return 's1';
+    if (!lockedShifts.s2Saved) return 's2';
+    return 's3';
+  };
+
+  const getShiftBadge = (shiftId) => {
+    let status = 'Waiting';
+    let bg = 'bg-amber-100 text-amber-700';
+
+    if (lockedShifts[shiftId]) {
+      status = 'Locked';
+      bg = 'bg-slate-200 text-slate-700';
+    } else if (shiftId === 's1') {
+      if (lockedShifts.s2Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s1Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's2') {
+      if (!lockedShifts.s1Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s2Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's3') {
+      if (!lockedShifts.s2Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Final Edit Allowed';
+        bg = 'bg-orange-100 text-orange-800 border border-orange-300';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    }
+
+    return (
+      <span
+        id={`p417-shift-badge-${shiftId}`}
+        className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}
+      >
+        {status}
+      </span>
+    );
+  };
 
 
   // ── Cell Value Change Handler ──
@@ -270,34 +376,74 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
     setSavePhase('saving');
 
     try {
+      const shiftKey = getActiveShiftKey();
       const payload = {
         date,
+        shiftKey,
         plant: "SA",
         analysisType: "P417 Analysis",
         tank: "P417",
         frequency: "Shift Twice",
         shifts: data,
         rows: data,
-        parameters: data.s1 || {},
+        parameters: data[shiftKey] || data.s1 || {},
         submittedBy: user?.name || "Plant Operator",
       };
 
       const response = await api.post("/api/sa-p417-1-analysis", payload);
-      const isEmailSent = response.data?.emailNotification?.status === 'sent' ||
-                          response.data?.emailDeliveryStatus === 'delivered' ||
-                          response.data?.emailDeliveryStatus === 'sent';
-      const isEmailFailed = response.data?.emailNotification?.status === 'failed' ||
-                            response.data?.emailDeliveryStatus === 'failed';
+
+      if (response.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected — shift already up to date.', 'info');
+        return;
+      }
+
+      setSaveSuccess(true);
+      const savedDoc = response.data?.data;
+      if (savedDoc?.lockedShifts) {
+        setLockedShifts(savedDoc.lockedShifts);
+      }
+      if (savedDoc?.shifts || savedDoc?.rows) {
+        const docRows = savedDoc.shifts || savedDoc.rows;
+        const synced = buildEmptyData();
+        SHIFTS.forEach((s) => {
+          if (docRows[s.key]) {
+            PARAMETERS.forEach((p) => {
+              const val = docRows[s.key][p.key];
+              synced[s.key][p.key] = val !== null && val !== undefined ? String(val) : '';
+            });
+          }
+        });
+        setData(synced);
+        setOriginalData(JSON.parse(JSON.stringify(synced)));
+      }
+
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const statusFromApi = response.data?.emailStatus;
+      const emailErrMsg = emailRes?.error || response.data?.emailError || emailRes?.status || '';
+
       const recipient = response.data?.emailNotification?.recipient ||
                         response.data?.notificationRecipient ||
                         response.data?.recipientEmail ||
                         response.data?.emailRecipient ||
                         response.data?.recipient || '';
       setRecipientEmail(recipient);
-      setEmailStatusDetail(response.data?.emailNotification?.error || response.data?.emailStatus || '');
-      setSaveSuccess(true);
-      setSavePhase(isEmailFailed ? 'email_failed' : 'completed');
-      showToast?.(response.data?.message || "P417 Analysis data saved successfully!", "success");
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+        showToast?.(response.data?.message || 'Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email disabled');
+        showToast?.('Saved ✓', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(emailErrMsg || 'Email delivery failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (emailErrMsg || 'Server error'), 'warning');
+      }
     } catch (err) {
       console.error("[P417Analysis] Save failed:", err);
       setSavePhase('save_failed');
@@ -366,6 +512,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
               onClick={handleSave}
               defaultLabel="Save Analysis"
               title="Save P417 Analysis"
+              alwaysShowSaveText={true}
             />
           </div>
         </div>
@@ -399,28 +546,8 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
               </h2>
             </div>
 
-            {/* Date Input */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="p417-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <Calendar className="w-3 h-3 text-indigo-600" />
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="p417-date-input"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="pl-2.5 pr-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold text-slate-700 bg-white shadow-2xs hover:border-slate-400 transition"
-                required
-              />
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium bg-slate-200/60 px-2 py-0.5 rounded-md">
-                {formatDateDisplay(date)}
-              </span>
-            </div>
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="p4171-date-display" badgeText="Operating Day" />
           </div>
 
           <div className="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
@@ -459,18 +586,21 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
             <tbody className="divide-y divide-slate-100 text-xs">
               {SHIFTS.map((shift) => (
                 <tr key={shift.key} className="hover:bg-slate-50/80 transition-colors">
-                  {/* Shift Label */}
+                  {/* Shift Label & Status Badge */}
                   <td className="py-3 px-5 border-r border-slate-100 bg-slate-50/50">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
-                      <div>
-                        <span className="font-extrabold text-slate-900 text-xs tracking-wide">
-                          {shift.label}
-                        </span>
-                        <div className="text-[10px] text-slate-400 font-medium">
-                          {shift.time}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                        <div>
+                          <span className="font-extrabold text-slate-900 text-xs tracking-wide">
+                            {shift.label}
+                          </span>
+                          <div className="text-[10px] text-slate-400 font-medium">
+                            {shift.time}
+                          </div>
                         </div>
                       </div>
+                      {getShiftBadge(shift.key)}
                     </div>
                   </td>
 
@@ -509,8 +639,11 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
                                     : `Allowed range: ${limit.formattedRange}`
                                   : param.label
                               }
+                              disabled={isShiftDisabled(shift.key)}
                               className={`w-full text-center font-mono text-sm font-bold py-1.5 px-2.5 rounded-lg border-2 transition shadow-2xs focus:outline-none ${
-                                isOutOfLimit
+                                isShiftDisabled(shift.key)
+                                  ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none"
+                                  : isOutOfLimit
                                   ? "border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200"
                                   : isFormatError
                                   ? "border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300"
@@ -598,6 +731,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
             <span className="font-semibold text-slate-700">P417 Shift Analysis:</span>
             <span>Frequency: Shift Twice • Parameters: FNH₃ (Limit: 1.98–2.18 Kgm/m³), CNH₃, TCl, NaCl</span>
           </div>
+          <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
         </div>
       </div>
     </div>

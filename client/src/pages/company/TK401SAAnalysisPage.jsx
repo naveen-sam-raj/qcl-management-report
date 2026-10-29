@@ -21,6 +21,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay } from '../../utils/co2AnalysisHelper';
 
 // ─── SA Plant TK 401 Parameters & Validation Limits ──────────────────────────
 // Plant: SA Plant ONLY
@@ -186,7 +187,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States (Date is locked strictly to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
@@ -454,6 +455,13 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
     try {
       const response = await api.post('/api/sa-tk-401-analysis', payload);
 
+      if (response.data?.noChange) {
+        showToast?.(response.data?.message || 'No new or modified data found to save.', 'info');
+        setSaving(false);
+        setSavePhase('idle');
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast?.(response.data?.message || 'Unable to save TK 401 data. Please try again.', 'error');
         setSavePhase('idle');
@@ -503,6 +511,9 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailErrMsg || 'Email delivery failed');
@@ -554,43 +565,50 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
 
   // Helper for Shift Status Badges
   const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
+    let status = 'Waiting';
+    let bg = 'bg-amber-100 text-amber-700';
 
     if (lockedShifts[shiftId]) {
       status = 'Locked';
       bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 's1') {
-        if (lockedShifts.s2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 's2') {
-        if (!lockedShifts.s1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.s3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 's3') {
-        if (!lockedShifts.s2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s3Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
+    } else if (shiftId === 's1') {
+      if (lockedShifts.s2Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s1Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's2') {
+      if (!lockedShifts.s1Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s2Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's3') {
+      if (!lockedShifts.s2Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
       }
     }
 
@@ -636,22 +654,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
 
           {/* Right: Date Section + Actions */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Strictly Restricted to Today (Asia/Kolkata) */}
-            <div
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 shadow-2xs select-none"
-              title="Date selection restricted strictly to current date (Asia/Kolkata)"
-            >
-              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Date:</span>
-                <span id="tk401-current-date-display" className="text-xs font-mono font-bold text-slate-800 tracking-tight">
-                  {formatDateDisplay(date)}
-                </span>
-                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider ml-0.5">
-                  Today
-                </span>
-              </div>
-            </div>
+            <LockedDateDisplay date={date} id="tk401sa-date-display" badgeText="Operating Day" />
 
             {/* Actions */}
             {!isViewOnly ? (
@@ -673,6 +676,7 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
+                  alwaysShowSaveText={true}
                   defaultLabel="Save / Submit"
                   title="Save permitted shift data and notify registered user"
                 />
@@ -922,10 +926,13 @@ const TK401SAAnalysisPage = ({ plantId = 'sa' }) => {
         </div>
 
         {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">TK 401 Shift Analysis:</span>
             <span>Frequency: Once in a Shift • Parameters: FNH₃, CNH₃, TCl, PCl, TCaO</span>
+          </div>
+          <div className="text-[11px] text-slate-500 font-medium">
+            One correction allowed after first save; saving the next shift locks the previous one.
           </div>
         </div>
       </div>

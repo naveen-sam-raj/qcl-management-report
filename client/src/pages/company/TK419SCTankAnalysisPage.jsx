@@ -21,6 +21,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay } from '../../utils/co2AnalysisHelper';
 
 // ─── SA Plant TK 419 Parameters & Validation Limits ──────────────────────────
 // Plant: SA Plant ONLY
@@ -139,7 +140,7 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States (Date is locked strictly to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
@@ -413,6 +414,13 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
         return;
       }
 
+      if (response.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected — shift already up to date.', 'info');
+        return;
+      }
+
       setSaveSuccess(true);
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
@@ -456,6 +464,10 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Email disabled');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailErrMsg || 'Email delivery failed');
@@ -507,43 +519,50 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
 
   // Helper for Shift Status Badges
   const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
+    let status = 'Waiting';
+    let bg = 'bg-amber-100 text-amber-700';
 
     if (lockedShifts[shiftId]) {
       status = 'Locked';
       bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 's1') {
-        if (lockedShifts.s2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 's2') {
-        if (!lockedShifts.s1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.s3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 's3') {
-        if (!lockedShifts.s2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.s3Saved) {
-          status = 'Final Edit Allowed';
-          bg = 'bg-orange-100 text-orange-800 border border-orange-300';
-        }
+    } else if (shiftId === 's1') {
+      if (lockedShifts.s2Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s1Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's2') {
+      if (!lockedShifts.s1Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s2Saved) {
+        status = 'Editable';
+        bg = 'bg-blue-100 text-blue-700';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
+      }
+    } else if (shiftId === 's3') {
+      if (!lockedShifts.s2Saved) {
+        status = 'Waiting';
+        bg = 'bg-amber-100 text-amber-700';
+      } else if (lockedShifts.s3Saved && (lockedShifts.s3Edits || 0) >= 1) {
+        status = 'Locked';
+        bg = 'bg-slate-200 text-slate-700';
+      } else if (lockedShifts.s3Saved) {
+        status = 'Final Edit Allowed';
+        bg = 'bg-orange-100 text-orange-800 border border-orange-300';
+      } else {
+        status = 'OPEN';
+        bg = 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold';
       }
     }
 
@@ -592,12 +611,8 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
 
           {/* Right: Date Lock and Actions */}
           <div className="flex items-center gap-3 shrink-0 flex-wrap">
-            {/* Read-only Current Date display */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 shadow-2xs">
-              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="text-xs font-bold text-slate-700">{formatDateDisplay(date)}</span>
-              <span className="text-[10px] text-slate-500 font-mono">({date})</span>
-            </div>
+            {/* Read-only Operating Day Display via LockedDateDisplay */}
+            <LockedDateDisplay date={date} id="tk419sa-date-display" badgeText="Operating Day" />
 
             {!isViewOnly ? (
               <div className="flex items-center gap-2">
@@ -619,6 +634,7 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
                   onClick={handleSaveClick}
                   defaultLabel="Save / Submit"
                   title="Save permitted shift data and notify registered user"
+                  alwaysShowSaveText={true}
                 />
               </div>
             ) : (
@@ -869,6 +885,7 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
             <span className="font-semibold text-slate-700">TK 419 SC TANK Shift Analysis:</span>
             <span>Frequency: Once in a Shift • Parameters: FNH₃, CNH₃</span>
           </div>
+          <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
         </div>
       </div>
 
