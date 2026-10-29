@@ -20,6 +20,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
 // ─── Shift & Component Parameters ─────────────────────────────────────────────
 
@@ -101,8 +102,8 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Date is locked strictly to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── States (Date is locked strictly to Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [shiftsData, setShiftsData]                 = useState(buildInitialShiftData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
@@ -129,44 +130,43 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
   const isShiftDisabled = useCallback((shiftKey) => {
     if (isViewOnly) return true;
     if (shiftKey === 'shift1') {
-      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift1Locked) || Boolean(lockedShifts.shift2Saved);
     }
     if (shiftKey === 'shift2') {
       if (!lockedShifts.shift1Saved) return true;
-      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift2Locked) || Boolean(lockedShifts.shift3Saved);
     }
     if (shiftKey === 'shift3') {
       if (!lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift3) return true;
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
       if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
       return false;
     }
     return true;
   }, [isViewOnly, lockedShifts]);
 
-  // Compute UI status text for each shift row
-  const getShiftStatus = (shiftKey) => {
+  // Compute UI status for each shift row
+  const getShiftStatus = useCallback((shiftKey) => {
     if (shiftKey === 'shift1') {
-      if (lockedShifts.shift1 || lockedShifts.shift2Saved) return { label: 'LOCKED', color: 'bg-slate-100 text-slate-600 border-slate-200' };
-      if (lockedShifts.shift1Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
-      return { label: 'NEW', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+      if (lockedShifts.shift1Saved) return 'EDITABLE';
+      return 'NEW';
     }
     if (shiftKey === 'shift2') {
-      if (!lockedShifts.shift1Saved) return { label: 'WAITING (SHIFT 1)', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-      if (lockedShifts.shift2 || lockedShifts.shift3Saved) return { label: 'LOCKED', color: 'bg-slate-100 text-slate-600 border-slate-200' };
-      if (lockedShifts.shift2Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
-      return { label: 'NEW', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+      if (lockedShifts.shift2Saved) return 'EDITABLE';
+      if (lockedShifts.shift1Saved) return 'OPEN';
+      return 'WAITING';
     }
     if (shiftKey === 'shift3') {
-      if (!lockedShifts.shift2Saved) return { label: 'WAITING (SHIFT 2)', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-      if (lockedShifts.shift3 || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) {
-        return { label: 'LOCKED', color: 'bg-slate-100 text-slate-600 border-slate-200' };
-      }
-      if (lockedShifts.shift3Saved) return { label: 'FINAL EDIT ALLOWED', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
-      return { label: 'NEW', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
+        return 'LOCKED';
+      if (lockedShifts.shift3Saved) return 'EDITABLE';
+      if (lockedShifts.shift2Saved) return 'OPEN';
+      return 'WAITING';
     }
-    return { label: 'UNKNOWN', color: 'bg-slate-100 text-slate-600 border-slate-200' };
-  };
+    return 'WAITING';
+  }, [lockedShifts]);
 
   // Fetch existing data for current date
   useEffect(() => {
@@ -407,6 +407,13 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
     try {
       const response = await api.post('/api/acl-300-analysis', payload);
 
+      if (response?.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected — save skipped', 'info');
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast?.(response?.data?.message || 'Unable to save ACL 300# data. Please try again.', 'error');
         setSavePhase('idle');
@@ -452,6 +459,10 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.(`Saved — Email Sent ✓`, 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Notifications disabled for this plant');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || 'Email delivery failed');
@@ -498,7 +509,11 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
   };
 
   // Check if all shifts are permanently locked
-  const isAllLocked = lockedShifts.shift1 && lockedShifts.shift2 && lockedShifts.shift3;
+  const isAllLocked = Boolean(
+    (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) &&
+    (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) &&
+    (lockedShifts.shift3 || lockedShifts.shift3Locked || ((lockedShifts.shift3Edits || 0) >= 1))
+  );
 
   return (
     <div className="space-y-3 sm:space-y-3.5 animate-fadeIn font-sans">
@@ -532,34 +547,8 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section + Actions */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Locked Current Date (Asia/Kolkata) */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
-              <label
-                htmlFor="acl300-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="acl300-date-input"
-                  type="date"
-                  value={date}
-                  readOnly
-                  disabled
-                  className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md border-slate-300 bg-slate-100 text-slate-700 cursor-not-allowed select-none"
-                  title="Date is locked to Today (Asia/Kolkata timezone)"
-                />
-              </div>
-              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                {formatDateDisplay(date)}
-              </span>
-              <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
-                Today
-              </span>
-            </div>
+            {/* Locked Operating Date (Asia/Kolkata) */}
+            <LockedDateDisplay date={date} id="acl300-date-display" badgeText="Operating Day" />
 
             {/* Actions */}
             {!isViewOnly ? (
@@ -578,12 +567,10 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
                 <StatusSaveButton
                   id="btn-acl300-save"
                   saving={saving}
-                  isLocked={isAllLocked}
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  disabled={!canEdit || isAllLocked}
-                  defaultLabel="Save / Submit"
+                  alwaysShowSaveText={true}
                   title="Save permitted shift data and notify registered user"
                 />
               </div>
@@ -683,7 +670,6 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
             <tbody className="divide-y divide-slate-100">
               {SHIFTS.map((shift) => {
                 const disabled = isShiftDisabled(shift.key);
-                const statusInfo = getShiftStatus(shift.key);
 
                 return (
                   <tr
@@ -707,9 +693,7 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
                             <span className="text-xs sm:text-sm font-extrabold text-slate-900 tracking-tight">
                               {shift.name}
                             </span>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase tracking-wider ${statusInfo.color}`}>
-                              {statusInfo.label}
-                            </span>
+                            <RecordStatusBadge status={getShiftStatus(shift.key)} />
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {shift.timing}
@@ -776,7 +760,7 @@ const ACL300AnalysisPage = ({ plantId = 'acl' }) => {
 
         {/* Card Footer */}
         <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/60 text-[11px] text-slate-500 flex items-center justify-between">
-          <span>ACL 300# Operational Quality Standard (Particle Distribution & NaCl %)</span>
+          <span>ACL 300# Operational Quality Standard (Particle Distribution & NaCl %) — One correction allowed after first save; saving the next shift locks the previous one.</span>
           <span className="font-semibold text-slate-700">TFL ACL Plant Standard</span>
         </div>
       </div>

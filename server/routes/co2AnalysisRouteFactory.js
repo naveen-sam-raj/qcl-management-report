@@ -106,11 +106,21 @@ function createCO2ShiftAnalysisRouter({
   tank,
   parameters,
   getNow = () => new Date(),
+  plantCodes = ['CO2', 'CO2 Plant', 'CO2 PLANT'],
+  plantCode = 'CO2',
+  plantName = 'CO2 Plant',
+  plantIdentifier = 'CO2',
+  shiftDisplayNames = SHIFT_DISPLAY_NAMES,
+  dataKey = 'rows',
+  extraFields = {},
+  unitValue = undefined,
+  onAfterSave = null,
 }) {
   const router = express.Router();
   const inMemoryRecords = [];
   const unitsOrder = ['shift1', 'shift2', 'shift3'];
-  const plantCodes = ['CO2', 'CO2 Plant', 'CO2 PLANT'];
+  const effectiveUnit = unitValue !== undefined ? unitValue : (unit || tank);
+  const effectiveTank = unitValue !== undefined ? unitValue : (tank || unit);
 
   router.use(protect);
 
@@ -121,7 +131,7 @@ function createCO2ShiftAnalysisRouter({
 
       let assignedOperatorEmail = null;
       try {
-        const { assignedUser, primaryEmail } = await getPlantAssignedUser('CO2');
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser(plantIdentifier);
         assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
       } catch (_) {}
 
@@ -168,6 +178,8 @@ function createCO2ShiftAnalysisRouter({
               id: doc._id,
               date: doc.date,
               rows,
+              ...(dataKey === 'shifts' || extraFields.shifts ? { shifts: payloadData.shifts || rows } : {}),
+              ...(extraFields.shiftRows ? { shiftRows: payloadData.shiftRows || rows } : {}),
               lockedShifts: resolvedLocks,
               lockedSlots: resolvedLockedSlots,
               editedFields: payloadData.editedFields || {},
@@ -206,7 +218,7 @@ function createCO2ShiftAnalysisRouter({
       }
       return res.status(200).json({ success: true, count: inMemoryRecords.length, data: inMemoryRecords });
     } catch (err) {
-      console.error(`[CO2 ${analysisType} GET] Error:`, err);
+      console.error(`[${plantCode} ${analysisType} GET] Error:`, err);
       return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
   });
@@ -391,6 +403,13 @@ function createCO2ShiftAnalysisRouter({
       transition.dotPathUpdates['data.lockedShifts.shift2'] = !s1Saved || s2Lock;
       transition.dotPathUpdates['data.lockedShifts.shift3'] = !s2Saved || s3Lock;
 
+      if (dataKey === 'shifts' || extraFields.shifts) {
+        transition.dotPathUpdates[`data.shifts.${targetUnit}`] = incomingRows[targetUnit];
+      }
+      if (extraFields.shiftRows) {
+        transition.dotPathUpdates[`data.shiftRows.${targetUnit}`] = incomingRows[targetUnit];
+      }
+
       // Persist hydrated slots for legacy docs on first conditional write
       if (existingDoc && !hasStoredLockedSlots) {
         for (const s of unitsOrder) {
@@ -413,17 +432,17 @@ function createCO2ShiftAnalysisRouter({
       if (!existingDoc) {
         // First save: upsert with $setOnInsert + $set, 409 on race
         const missingFilter = {
-          plantCode: 'CO2',
+          plantCode: { $in: plantCodes },
           analysisType,
           date: payload.date,
           [`data.lockedSlots.${targetUnit}.isSaved`]: { $ne: true },
         };
         const updateDoc = {
           $setOnInsert: {
-            plantName: 'CO2 Plant',
-            plantCode: 'CO2',
+            plantName,
+            plantCode,
             analysisType,
-            unit: unit || tank,
+            unit: effectiveUnit,
             date: payload.date,
             shift: 'All Shifts',
             company: req.user?.company?._id || req.user?.company || null,
@@ -436,7 +455,7 @@ function createCO2ShiftAnalysisRouter({
           if (updateResult.upsertedCount === 0) {
             return res.status(409).json({ success: false, message: 'Conflict: Document for this date was created concurrently. Please retry.' });
           }
-          savedDoc = await PlantAnalysisRecord.findOne({ plantCode: 'CO2', analysisType, date: payload.date });
+          savedDoc = await PlantAnalysisRecord.findOne({ plantCode: { $in: plantCodes }, analysisType, date: payload.date });
         } catch (err) {
           if (err.code === 11000 || String(err.message).includes('E11000')) {
             return res.status(409).json({ success: false, message: 'Conflict: Document for this date was created concurrently. Please retry.' });
@@ -504,13 +523,15 @@ function createCO2ShiftAnalysisRouter({
         id:             savedDoc._id,
         _id:            savedDoc._id,
         date:           payload.date,
-        plant:          'CO2 Plant',
+        plant:          plantName,
         analysisType,
-        tank:           tank || unit,
-        unit,
+        tank:           effectiveTank,
+        unit:           effectiveUnit,
         frequency:      'Once in a shift',
-        shift:          SHIFT_DISPLAY_NAMES[targetUnit] || targetUnit,
+        shift:          shiftDisplayNames[targetUnit] || targetUnit,
         rows:           mergedRows,
+        ...(dataKey === 'shifts' || extraFields.shifts ? { shifts: mergedRows } : {}),
+        ...(extraFields.shiftRows ? { shiftRows: mergedRows } : {}),
         lockedSlots,
         lockedShifts,
         editedFields,
@@ -529,7 +550,7 @@ function createCO2ShiftAnalysisRouter({
             action:    `${analysisType.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_SAVED`,
             user:      req.user?._id,
             userName:  req.user?.name,
-            details:   `${analysisType} saved for date: ${payload.date}, shift: ${SHIFT_DISPLAY_NAMES[targetUnit]}.`,
+            details:   `${analysisType} saved for date: ${payload.date}, shift: ${shiftDisplayNames[targetUnit] || targetUnit}.`,
             timestamp: new Date(),
           });
         }
@@ -540,10 +561,10 @@ function createCO2ShiftAnalysisRouter({
       let emailResult = { success: false, emailStatus: 'failed' };
       try {
         emailResult = await executeSaveAndEmailWorkflow({
-          plantIdentifier: 'CO2',
+          plantIdentifier,
           analysisType,
-          unit,
-          shift:          SHIFT_DISPLAY_NAMES[targetUnit] || targetUnit,
+          unit:           effectiveUnit,
+          shift:          shiftDisplayNames[targetUnit] || targetUnit,
           date:           payload.date,
           data:           updatedRecordData,
           submittedBy:    req.user?.name || payload.submittedBy || 'Plant Operator',
@@ -559,9 +580,17 @@ function createCO2ShiftAnalysisRouter({
         emailResult = { success: false, emailStatus: 'failed', error: mailErr.message };
       }
 
+      if (typeof onAfterSave === 'function') {
+        try {
+          await onAfterSave({ savedDoc, payload, mergedRows, targetUnit, updatedRecordData });
+        } catch (postSaveErr) {
+          console.warn(`[${analysisType} onAfterSave] Error:`, postSaveErr.message);
+        }
+      }
+
       return res.status(200).json({
         success:          true,
-        message:          `Successfully saved ${SHIFT_DISPLAY_NAMES[targetUnit]} in MongoDB ✓`,
+        message:          `Successfully saved ${shiftDisplayNames[targetUnit] || targetUnit} in MongoDB ✓`,
         data:             updatedRecordData,
         emailSent:        false,
         emailPending:     false,
@@ -576,7 +605,7 @@ function createCO2ShiftAnalysisRouter({
         editAuditHistory,
       });
     } catch (err) {
-      console.error(`[CO2 ${analysisType} POST] Error:`, err);
+      console.error(`[${plantCode} ${analysisType} POST] Error:`, err);
       return res.status(500).json({ success: false, message: 'Server error saving analysis record: ' + err.message });
     }
   });

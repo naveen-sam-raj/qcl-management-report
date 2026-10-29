@@ -25,6 +25,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import {
+  getOperatingDateIST,
+  LockedDateDisplay,
+  RecordStatusBadge,
+} from '../../utils/co2AnalysisHelper';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -46,22 +51,6 @@ const buildEmptyData = () =>
   Object.fromEntries(
     ROWS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
-
-// Helper for exact date in Asia/Kolkata timezone (YYYY-MM-DD)
-const getTodayAsiaKolkata = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -117,7 +106,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── State (Date is locked strictly to Today's date in Asia/Kolkata) ──
-  const [date, setDate]               = useState(() => getTodayAsiaKolkata());
+  const [date, setDate]               = useState(() => getOperatingDateIST());
   const [data, setData]               = useState(buildEmptyData());
   const [errors, setErrors]           = useState({});
   const [saving, setSaving]           = useState(false);
@@ -151,6 +140,36 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     }
     return true;
   }, [isViewOnly, lockedShifts]);
+
+  // Get status for shift badge: NEW, OPEN, EDITABLE, WAITING, LOCKED
+  const getShiftStatus = useCallback(
+    (shiftKey) => {
+      if (shiftKey === 'shift1') {
+        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        return 'NEW';
+      }
+      if (shiftKey === 'shift2') {
+        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        if (lockedShifts.shift1Saved) return 'OPEN';
+        return 'WAITING';
+      }
+      if (shiftKey === 'shift3') {
+        if (
+          lockedShifts.shift3 ||
+          lockedShifts.shift3Locked ||
+          (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)
+        )
+          return 'LOCKED';
+        if (lockedShifts.shift3Saved) return 'EDITABLE';
+        if (lockedShifts.shift2Saved) return 'OPEN';
+        return 'WAITING';
+      }
+      return 'WAITING';
+    },
+    [lockedShifts]
+  );
 
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
@@ -396,6 +415,13 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     try {
       response = await api.post('/pure-salt-sieve-analysis', payload);
 
+      if (response?.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast(response?.data?.message || 'Unable to save the data. Please try again.', 'error');
         setSavePhase('idle');
@@ -419,8 +445,22 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         setRecipientEmail(response.data.emailRecipient);
       }
 
-      setSavePhase('completed');
-      showToast('Saved in MongoDB successfully ✓', 'success');
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const statusFromApi = response.data?.emailStatus;
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
+        showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
+      } else {
+        setSavePhase('email_failed');
+        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+      }
       setSaveSuccess(true);
     } catch (err) {
       setSavePhase('save_failed');
@@ -503,22 +543,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section + Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Read-Only Restricted Strictly to Today (Asia/Kolkata) */}
-            <div
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 shadow-2xs select-none"
-              title="Date selection restricted strictly to current date (Asia/Kolkata)"
-            >
-              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Date:</span>
-                <span id="ps-sieve-current-date-display" className="text-xs font-mono font-bold text-slate-800 tracking-tight">
-                  {formatDateDisplay(date)}
-                </span>
-                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
-                  Today
-                </span>
-              </div>
-            </div>
+            <LockedDateDisplay date={date} id="ps-sieve-date-display" badgeText="Operating Day" />
 
             {/* Actions */}
             {!isViewOnly ? (
@@ -540,6 +565,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
+                  alwaysShowSaveText={true}
                   defaultLabel="Save / Submit"
                   title="Save sieve analysis data and dispatch automated Excel report"
                 />
@@ -619,53 +645,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
                           >
                             {row.badgeText}
                           </span>
-                          {(() => {
-                            let status = 'NEW';
-                            let bg = 'bg-indigo-100 text-indigo-700';
-
-                            if (lockedShifts[row.key]) {
-                              status = 'Locked';
-                              bg = 'bg-slate-200 text-slate-700';
-                            } else {
-                              if (row.key === 'shift1') {
-                                if (lockedShifts.shift2Saved) {
-                                  status = 'Locked';
-                                  bg = 'bg-slate-200 text-slate-700';
-                                } else if (lockedShifts.shift1Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              } else if (row.key === 'shift2') {
-                                if (!lockedShifts.shift1Saved) {
-                                  status = 'Waiting';
-                                  bg = 'bg-amber-100 text-amber-700';
-                                } else if (lockedShifts.shift3Saved) {
-                                  status = 'Locked';
-                                  bg = 'bg-slate-200 text-slate-700';
-                                } else if (lockedShifts.shift2Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              } else if (row.key === 'shift3') {
-                                if (!lockedShifts.shift2Saved) {
-                                  status = 'Waiting';
-                                  bg = 'bg-amber-100 text-amber-700';
-                                } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-                                  status = 'Locked';
-                                  bg = 'bg-slate-200 text-slate-700';
-                                } else if (lockedShifts.shift3Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              }
-                            }
-
-                            return (
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
-                                {status}
-                              </span>
-                            );
-                          })()}
+                          <RecordStatusBadge status={getShiftStatus(row.key)} />
                         </div>
                       </div>
                     </td>
@@ -777,10 +757,13 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Table footer hint */}
-        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
             All sieve fractions are in <strong>percentage (%)</strong>. Tolerance limits apply strictly to <strong>II SHIFT</strong>.
           </p>
+          <div className="text-[11px] text-slate-500 font-medium">
+            One correction allowed after first save; saving the next shift locks the previous one.
+          </div>
         </div>
       </div>
 

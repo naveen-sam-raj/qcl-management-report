@@ -21,6 +21,11 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import {
+  getOperatingDateIST,
+  LockedDateDisplay,
+  RecordStatusBadge,
+} from '../../utils/co2AnalysisHelper';
 
 // ─── TK 204 Parameters & Shift Rows Configuration ────────────────────────────
 // Frequency: Once in a shift (I Shift, II Shift, III Shift)
@@ -43,20 +48,6 @@ const buildEmptyData = () =>
   Object.fromEntries(
     SHIFTS.map((s) => [s.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
-
-// Helper for exact date in Asia/Kolkata timezone (YYYY-MM-DD)
-const getTodayAsiaKolkata = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
-};
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -83,7 +74,7 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States (Date is locked strictly to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
@@ -123,6 +114,36 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
     }
     return true;
   }, [isViewOnly, lockedShifts]);
+
+  // Get status for shift badge: NEW, OPEN, EDITABLE, WAITING, LOCKED
+  const getShiftStatus = useCallback(
+    (shiftKey) => {
+      if (shiftKey === 'shift1') {
+        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        return 'NEW';
+      }
+      if (shiftKey === 'shift2') {
+        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        if (lockedShifts.shift1Saved) return 'OPEN';
+        return 'WAITING';
+      }
+      if (shiftKey === 'shift3') {
+        if (
+          lockedShifts.shift3 ||
+          lockedShifts.shift3Locked ||
+          (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)
+        )
+          return 'LOCKED';
+        if (lockedShifts.shift3Saved) return 'EDITABLE';
+        if (lockedShifts.shift2Saved) return 'OPEN';
+        return 'WAITING';
+      }
+      return 'WAITING';
+    },
+    [lockedShifts]
+  );
 
   // Fetch existing data for current date
   useEffect(() => {
@@ -359,6 +380,13 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
     try {
       const response = await api.post('/api/tk-204-analysis', payload);
 
+      if (response?.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast?.(response.data?.message || 'Unable to save TK 204 data. Please try again.', 'error');
         setSavePhase('idle');
@@ -403,6 +431,9 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
         showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
@@ -530,22 +561,7 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section + Actions */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Strictly Restricted to Today (Asia/Kolkata) */}
-            <div
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 shadow-2xs select-none"
-              title="Date selection restricted strictly to current date (Asia/Kolkata)"
-            >
-              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Date:</span>
-                <span id="tk204-current-date-display" className="text-xs font-mono font-bold text-slate-800 tracking-tight">
-                  {formatDateDisplay(date)}
-                </span>
-                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-0.5">
-                  Today
-                </span>
-              </div>
-            </div>
+            <LockedDateDisplay date={date} id="tk204-date-display" badgeText="Operating Day" />
 
             {/* Actions */}
             {!isViewOnly ? (
@@ -567,6 +583,7 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
+                  alwaysShowSaveText={true}
                   title="Save permitted shift data and notify registered user"
                 />
               </div>
@@ -668,7 +685,7 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
                           </div>
                         </div>
                         <div className="mt-1">
-                          {getShiftBadge(shift.key)}
+                          <RecordStatusBadge status={getShiftStatus(shift.key)} />
                         </div>
                       </div>
                     </td>
@@ -798,10 +815,13 @@ const TK204AnalysisPage = ({ plantId = 'acl' }) => {
         </div>
 
         {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">TK 204 Tolerance Limits:</span>
             <span>FNH₃: 2.99–3.19 • CNH₃: 3.60–3.80 • TCl: 4.99–5.19 • PCl: 1.29–1.49 Kgm/m³</span>
+          </div>
+          <div className="text-[11px] text-slate-500 font-medium">
+            One correction allowed after first save; saving the next shift locks the previous one.
           </div>
         </div>
       </div>
