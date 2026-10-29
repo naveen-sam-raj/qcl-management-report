@@ -11,6 +11,11 @@ import {
 } from '../../services/analysisValidation';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
 import {
+  getOperatingDateIST,
+  LockedDateDisplay,
+  RecordStatusBadge,
+} from '../../utils/co2AnalysisHelper';
+import {
   ArrowLeft,
   Calendar,
   Save,
@@ -158,7 +163,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const shiftDisplayNames = SHIFT_DISPLAY_NAMES;
 
   // ── State (Date is locked strictly to Today's date in Asia/Kolkata) ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [date, setDate] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -184,6 +189,38 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     return null;
   }, []);
 
+  const getRowStatus = useCallback(
+    (key) => {
+      if (key === 'rawSalt') {
+        if (lockedShifts.rawSalt || lockedShifts.rawSaltLocked || lockedShifts.rawSaltSaved) return 'LOCKED';
+        return 'NEW';
+      }
+      if (key === 'composition') {
+        if (lockedShifts.composition || lockedShifts.compositionLocked || lockedShifts.compositionSaved) return 'LOCKED';
+        return 'NEW';
+      }
+      if (key === 'shift1') {
+        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1Saved) return 'EDITABLE';
+        return 'OPEN';
+      }
+      if (key === 'shift2') {
+        if (!lockedShifts.shift1Saved) return 'WAITING';
+        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2Saved) return 'EDITABLE';
+        return 'OPEN';
+      }
+      if (key === 'shift3') {
+        if (!lockedShifts.shift2Saved) return 'WAITING';
+        if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) return 'LOCKED';
+        if (lockedShifts.shift3Saved) return 'EDITABLE';
+        return 'OPEN';
+      }
+      return 'NEW';
+    },
+    [lockedShifts]
+  );
+
   // EmailJS & Excel Reporting States
   const [recipientEmail, setRecipientEmail] = useState(
     user?.email || import.meta.env.VITE_DEFAULT_REPORT_RECIPIENT_EMAIL || ''
@@ -192,6 +229,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [savePhase, setSavePhase] = useState('idle');
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
   const [lastExcelData, setLastExcelData] = useState(null);
+  
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -284,7 +322,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
   const handleReset = () => {
     setData(buildEmptyData());
-    setDate(getTodayAsiaKolkata());
+    setDate(getOperatingDateIST());
     setActiveEditingShift('shift1');
     setErrors({});
     setSaveSuccess(false);
@@ -469,9 +507,18 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       response = await api.post('/pure-salt-analysis', payload);
 
       // Step: Confirm MongoDB save successful
+      if (response?.data?.noChange) {
+        showToast('No new or modified data found to save.', 'info');
+        setShowConfirmModal(false);
+        setSaving(false);
+        setSavePhase('idle');
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast(response?.data?.message || 'Unable to save the data. Please try again.', 'error');
         setShowConfirmModal(false);
+        setSaving(false);
         setSavePhase('idle');
         return;
       }
@@ -492,9 +539,22 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       setActiveEditingShift(resolveActiveShift(savedRecord?.lockedShifts || {}));
       setShowConfirmModal(false);
 
+      // Check email status from server
+      const emailRes = response.data?.emailNotification;
+      const emailSent = response.data?.emailSent;
+      const statusFromApi = response.data?.emailStatus;
+
+      if (emailSent || statusFromApi === 'sent') {
+        setSavePhase('completed');
+        showToast?.('Saved — Email Sent ✓', 'success');
+      } else if (statusFromApi === 'disabled') {
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
+      } else {
+        setSavePhase('email_failed');
+        showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+      }
       setSaveSuccess(true);
-      setSavePhase('completed');
-      showToast(response.data?.message || 'Saved in MongoDB successfully ✓', 'success');
     } catch (err) {
       setSavePhase('idle');
       console.error('[PureSaltAnalysis] Database save failed:', err);
@@ -542,39 +602,8 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Date Section, Recipient Email, Test & Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Integrated Date Section - Allows historical navigation and current date entry */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <label
-                htmlFor="psa-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="psa-date-input"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setSaveSuccess(false);
-                    setSavePhase('idle');
-                  }}
-                  className="pl-2.5 pr-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700 bg-white shadow-2xs hover:border-slate-400 transition"
-                  required
-                />
-              </div>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-blue-800 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
-                {formatDateDisplay(date)}
-              </span>
-              {date === getTodayAsiaKolkata() && (
-                <span className="text-[9.5px] font-bold text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded uppercase tracking-wider border border-emerald-200 shadow-2xs">
-                  TODAY
-                </span>
-              )}
-            </div>
+            {/* Locked Operating Date Display */}
+            <LockedDateDisplay date={date} id="psa-date-display" badgeText="Operating Day" />
 
             {/* Actions */}
             {!isViewOnly ? (
@@ -597,6 +626,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
                   title="Save analysis data and dispatch automated Excel report"
+                  alwaysShowSaveText={true}
                 />
               </div>
             ) : (
@@ -817,44 +847,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                               {row.highlightType === 'raw' ? 'Input' : 'Final'}
                             </span>
                           )}
-                          {(() => {
-                            let status = 'NEW';
-                            let bg = 'bg-indigo-100 text-indigo-700';
-
-                            if (lockedShifts[row.key]) {
-                              status = 'Locked';
-                              bg = 'bg-slate-200 text-slate-700';
-                            } else {
-                              if (row.key === 'shift1') {
-                                if (lockedShifts.shift1Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              } else if (row.key === 'shift2') {
-                                if (!lockedShifts.shift1Saved) {
-                                  status = 'Waiting';
-                                  bg = 'bg-amber-100 text-amber-700';
-                                } else if (lockedShifts.shift2Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              } else if (row.key === 'shift3') {
-                                if (!lockedShifts.shift2Saved) {
-                                  status = 'Waiting';
-                                  bg = 'bg-amber-100 text-amber-700';
-                                } else if (lockedShifts.shift3Saved) {
-                                  status = 'Editable';
-                                  bg = 'bg-blue-100 text-blue-700';
-                                }
-                              }
-                            }
-
-                            return (
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${bg}`}>
-                                {status}
-                              </span>
-                            );
-                          })()}
+                          <RecordStatusBadge status={getRowStatus(row.key)} />
                         </div>
 
                         {/* Shift Edit Selector Action Button */}
