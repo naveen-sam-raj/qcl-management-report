@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 import {
   getCellLimit,
   validateCellValue,
@@ -112,7 +113,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States (Strict Current-Date Restriction) ──
-  const [date]                                          = useState(() => getTodayAsiaKolkata());
+  const [date]                                          = useState(() => getOperatingDateIST());
   const [data, setData]                                 = useState(buildEmptyData());
   const [originalData, setOriginalData]                 = useState(null);
   const [errors, setErrors]                             = useState({});
@@ -125,12 +126,63 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
   const [recipientEmail, setRecipientEmail]             = useState('');
   const [emailStatusDetail, setEmailStatusDetail]       = useState('');
   const [isPermanentMailError, setIsPermanentMailError] = useState(false);
+  const [lockedShifts, setLockedShifts]                 = useState({});
+  const [lockedSlots, setLockedSlots]                   = useState({});
   const [editedFields, setEditedFields]                 = useState({});
   const [retryingEmail, setRetryingEmail]               = useState(false);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]         = useState(false);
   const [confirmData, setConfirmData]                   = useState(null);
+
+  const isShiftDisabled = useCallback((shiftKey) => {
+    if (isViewOnly) return true;
+    if (shiftKey === 'iShift') {
+      return Boolean(lockedShifts.iShift) || Boolean(lockedShifts.iiShiftSaved);
+    }
+    if (shiftKey === 'iiShift') {
+      if (!lockedShifts.iShiftSaved) return true;
+      return Boolean(lockedShifts.iiShift) || Boolean(lockedShifts.iiiShiftSaved);
+    }
+    if (shiftKey === 'iiiShift') {
+      if (!lockedShifts.iiShiftSaved) return true;
+      if (lockedShifts.iiiShift) return true;
+      if (lockedShifts.iiiShiftSaved && (lockedShifts.iiiShiftEdits || 0) >= 1) return true;
+      return false;
+    }
+    if (shiftKey === 'composite') {
+      if (lockedShifts.composite) return true;
+      if (lockedShifts.compositeSaved && (lockedShifts.compositeEdits || 0) >= 1) return true;
+      return false;
+    }
+    return true;
+  }, [isViewOnly, lockedShifts]);
+
+  const getShiftBadgeStatus = useCallback((shiftKey) => {
+    if (shiftKey === 'iShift') {
+      if (lockedShifts.iShift || lockedShifts.iiShiftSaved) return 'LOCKED';
+      if (lockedShifts.iShiftSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (shiftKey === 'iiShift') {
+      if (!lockedShifts.iShiftSaved) return 'WAITING';
+      if (lockedShifts.iiShift || lockedShifts.iiiShiftSaved) return 'LOCKED';
+      if (lockedShifts.iiShiftSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (shiftKey === 'iiiShift') {
+      if (!lockedShifts.iiShiftSaved) return 'WAITING';
+      if (lockedShifts.iiiShift || (lockedShifts.iiiShiftSaved && (lockedShifts.iiiShiftEdits || 0) >= 1)) return 'LOCKED';
+      if (lockedShifts.iiiShiftSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (shiftKey === 'composite') {
+      if (lockedShifts.composite || (lockedShifts.compositeSaved && (lockedShifts.compositeEdits || 0) >= 1)) return 'LOCKED';
+      if (lockedShifts.compositeSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    return 'WAITING';
+  }, [lockedShifts]);
 
   // Fetch existing data when date mounts / loads
   useEffect(() => {
@@ -163,10 +215,14 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
               setOriginalData(null);
             }
 
+            setLockedShifts(rec.lockedShifts || response.data.lockedShifts || {});
+            setLockedSlots(rec.lockedSlots || response.data.lockedSlots || {});
             setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
+            setLockedShifts({});
+            setLockedSlots({});
             setEditedFields({});
           }
         }
@@ -184,6 +240,8 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
 
   // ── Input Changes ──
   const handleChange = useCallback((shiftKey, paramKey, value) => {
+    if (isViewOnly) return;
+    if (isShiftDisabled(shiftKey)) return;
     if (!isValidDecimal(value)) return;
 
     setData((prev) => ({
@@ -204,7 +262,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
     if (savePhase !== 'idle') {
       setSavePhase('idle');
     }
-  }, [savePhase]);
+  }, [savePhase, isViewOnly, isShiftDisabled]);
 
   // ── Reset ──
   const handleReset = () => {
@@ -241,27 +299,45 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
 
   // ── Open Save Confirmation Modal ──
   const handleSaveClick = () => {
+    if (isViewOnly) return;
     if (!validate()) {
       showToast?.('Please enter valid numeric values for highlighted fields.', 'error');
       return;
     }
 
-    const hasValues = Object.values(data).some((sObj) =>
-      Object.values(sObj).some((val) => val !== '' && val !== null && val !== undefined)
-    );
+    const changedShifts = [];
+    SHIFTS.forEach((s) => {
+      if (isShiftDisabled(s.key)) return;
+      const currentVals = data[s.key] || {};
+      const hasAny = Object.values(currentVals).some(v => v !== '' && v !== null && v !== undefined);
+      const origVals = originalData ? (originalData[s.key] || {}) : {};
+      const isDiff = PARAMETERS.some(p => {
+        const oVal = origVals[p.key] ?? '';
+        const cVal = currentVals[p.key] ?? '';
+        return oVal !== cVal;
+      });
+      if (hasAny && isDiff) {
+        changedShifts.push(s.key);
+      }
+    });
 
-    if (!hasValues) {
-      showToast?.('Please enter at least one measurement value before saving.', 'warning');
+    if (changedShifts.length === 0) {
+      showToast?.('No new or modified measurement values found to save.', 'info');
       return;
     }
 
-    const activeShifts = SHIFTS.filter((s) =>
-      Object.values(data[s.key] || {}).some((v) => v !== '' && v !== null && v !== undefined)
-    );
+    if (changedShifts.length > 1) {
+      showToast?.('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+      return;
+    }
+
+    const activeShiftKey = changedShifts[0];
+    const activeShiftObj = SHIFTS.find(s => s.key === activeShiftKey);
 
     setConfirmData({
       date,
-      activeShifts,
+      targetShift: activeShiftKey,
+      activeShifts: [activeShiftObj],
       data,
     });
     setShowConfirmModal(true);
@@ -275,16 +351,25 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
     setShowConfirmModal(false);
 
     try {
+      const targetShift = confirmData?.targetShift || 'iShift';
       const payload = {
         date,
         plant: 'SA',
         unit: 'LSA',
         analysisType: 'LSA Shift Analysis',
+        shift: targetShift,
         shifts: data,
         submittedBy: user?.name || 'Shift Chemist',
       };
 
       const res = await api.post('/api/lsa-analysis', payload);
+
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected', 'info');
+        return;
+      }
 
       if (!res.data?.success) {
         showToast?.(res.data?.message || 'Failed to save LSA Shift Analysis.', 'error');
@@ -302,12 +387,19 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
 
       setRecordId(newRecordId || recordId);
       setEditedFields(newEdited);
+      setLockedShifts(returnedDoc.lockedShifts || res.data?.lockedShifts || {});
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
       setRecipientEmail(res.data?.emailRecipient || returnedDoc.emailRecipient || '');
 
       const isEmailSent = res.data?.emailDeliveryStatus === 'sent' || res.data?.emailStatus === 'sent';
       const isEmailFailed = res.data?.emailDeliveryStatus === 'failed' || res.data?.emailStatus === 'failed';
+      const isEmailDisabled = res.data?.emailDeliveryStatus === 'disabled' || res.data?.emailStatus === 'disabled';
 
-      if (isEmailSent) {
+      if (isEmailDisabled) {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+        showToast?.('LSA Shift Analysis saved successfully!', 'success');
+      } else if (isEmailSent) {
         setSavePhase('completed');
         setEmailStatusDetail(`Notification dispatched to ${res.data?.emailRecipient || 'SA Plant operator'}`);
         showToast?.('LSA Shift Analysis saved and email notification sent!', 'success');
@@ -429,6 +521,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                 onClick={handleSaveClick}
                 defaultLabel="Save / Submit"
                 title="Save LSA Shift data"
+                alwaysShowSaveText={true}
               />
             )}
           </div>
@@ -462,32 +555,8 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
               </span>
             </div>
 
-            {/* Date Input inside Table Header - Locked to Today in Asia/Kolkata */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="lsa-shift-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="lsa-shift-date-input"
-                  type="date"
-                  value={date}
-                  readOnly
-                  disabled
-                  className="pl-2.5 pr-2 py-1 text-xs font-semibold border rounded-lg text-slate-800 border-slate-300 bg-slate-100 cursor-not-allowed opacity-90 shadow-2xs"
-                  title="Date automatically locked to current date (Asia/Kolkata timezone)"
-                  required
-                />
-              </div>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-700 font-bold bg-blue-100/70 px-2 py-0.5 rounded-md border border-blue-200">
-                <Calendar className="w-3 h-3 text-blue-500" />
-                {formatDateDisplay(date)}
-              </span>
-            </div>
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="lsa-shift-date-display" badgeText="Operating Day" />
           </div>
           <span className="text-[11px] font-bold text-slate-400 font-mono hidden sm:inline">
             Na₂CO₃ · NaCl · Fe · Na₂SO₄ · VM · IR · BD · Turbidity
@@ -524,6 +593,8 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
             <tbody className="divide-y divide-slate-200">
               {SHIFTS.map((shift) => {
                 const shiftEdits = editedFields[shift.key] || {};
+                const shiftDisabled = isShiftDisabled(shift.key);
+                const shiftStatus = getShiftBadgeStatus(shift.key);
 
                 return (
                   <tr
@@ -532,13 +603,14 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                   >
                     {/* Shift Label Badge */}
                     <td className="px-5 py-3 align-middle whitespace-nowrap">
-                      <div className="flex flex-col">
+                      <div className="flex flex-col items-center gap-1.5">
                         <span className={`text-xs font-mono px-2.5 py-1 rounded shadow-2xs inline-block text-center ${shift.badgeStyle}`}>
                           {shift.label}
                         </span>
-                        <span className="text-[10px] text-slate-500 font-medium mt-0.5 text-center">
+                        <span className="text-[10px] text-slate-500 font-medium text-center">
                           {shift.desc}
                         </span>
+                        <RecordStatusBadge status={shiftStatus} />
                       </div>
                     </td>
 
@@ -564,7 +636,7 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
                                 id={`lsa-input-${shift.key}-${param.key}`}
                                 type="text"
                                 inputMode="decimal"
-                                disabled={isViewOnly}
+                                disabled={isViewOnly || shiftDisabled}
                                 value={cellVal}
                                 onChange={(e) =>
                                   handleChange(shift.key, param.key, e.target.value)
@@ -673,9 +745,14 @@ const LSAShiftAnalysisPage = ({ plantId = 'sa' }) => {
 
         {/* Table footer hint */}
         <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-500 font-medium">
-            Values for <strong>LSA Shift Analysis</strong> (Frequency: <strong>Once in a Shift</strong> · Na₂CO₃, NaCl, Fe, Na₂SO₄, VM, IR, BD, Turbidity). Numeric values only. Boundary values are considered normal.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+            <p className="text-xs text-slate-500 font-medium">
+              Values for <strong>LSA Shift Analysis</strong> (Frequency: <strong>Once in a Shift</strong> · Na₂CO₃, NaCl, Fe, Na₂SO₄, VM, IR, BD, Turbidity). Numeric values only. Boundary values are considered normal.
+            </p>
+            <span className="text-xs text-indigo-700 font-medium">
+              One correction allowed after first save; saving the next shift locks the previous one. 24-Hour Composite is independent.
+            </span>
+          </div>
         </div>
       </div>
 

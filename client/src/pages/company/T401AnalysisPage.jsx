@@ -24,6 +24,7 @@ import {
   Mail,
 } from "lucide-react";
 import { StatusSaveButton, SaveStatusBanner } from "../../components/common/AnalysisStatusBanner";
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from "../../utils/co2AnalysisHelper";
 
 // ─── SA Plant T 401 Parameters & Validation Limits ───────────────────────────
 // Plant: SA Plant
@@ -171,7 +172,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
   const basePath = isViewOnly ? "/portal" : "/admin/tfl";
 
   // ── States (Strict Current-Date Restriction) ──
-  const [date]                              = useState(() => getTodayAsiaKolkata());
+  const [date]                              = useState(() => getOperatingDateIST());
   const [data, setData]                     = useState(buildEmptyData());
   const [originalData, setOriginalData]     = useState(null);
   const [errors, setErrors]                 = useState({});
@@ -186,6 +187,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
   const [isPermanentMailError, setIsPermanentMailError] = useState(false);
   const [lockedShifts, setLockedShifts]             = useState({});
+  const [lockedSlots, setLockedSlots]               = useState({});
   const [editedFields, setEditedFields]             = useState({});
   const [retryingEmail, setRetryingEmail]           = useState(false);
 
@@ -221,27 +223,27 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
   const getShiftBadgeStatus = useCallback((towerKey, shiftKey) => {
     const uLocks = lockedShifts[towerKey] || {};
     if (shiftKey === 's1') {
-      if (uLocks.s1 || uLocks.s2Saved) return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
-      if (uLocks.s1Saved) return { label: 'EDITABLE', color: 'bg-amber-100 text-amber-800 border-amber-300' };
-      return { label: 'NEW', color: 'bg-sky-100 text-sky-800 border-sky-300' };
+      if (uLocks.s1 || uLocks.s2Saved) return 'LOCKED';
+      if (uLocks.s1Saved) return 'EDITABLE';
+      return 'OPEN';
     }
     if (shiftKey === 's2') {
-      if (uLocks.s2 || uLocks.s3Saved) return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
-      if (uLocks.s2Saved) return { label: 'EDITABLE', color: 'bg-amber-100 text-amber-800 border-amber-300' };
-      if (uLocks.s1Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-      return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+      if (!uLocks.s1Saved) return 'WAITING';
+      if (uLocks.s2 || uLocks.s3Saved) return 'LOCKED';
+      if (uLocks.s2Saved) return 'EDITABLE';
+      return 'OPEN';
     }
     if (shiftKey === 's3') {
+      if (!uLocks.s2Saved) return 'WAITING';
       if (uLocks.s3 || (uLocks.s3Saved && (uLocks.s3Edits || 0) >= 1)) {
-        return { label: 'LOCKED', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+        return 'LOCKED';
       }
-      if (uLocks.s3Saved && (uLocks.s3Edits || 0) === 0) {
-        return { label: 'FINAL EDIT', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+      if (uLocks.s3Saved) {
+        return 'EDITABLE';
       }
-      if (uLocks.s2Saved) return { label: 'EDITABLE', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-      return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+      return 'OPEN';
     }
-    return { label: 'WAITING', color: 'bg-slate-100 text-slate-500 border-slate-300' };
+    return 'WAITING';
   }, [lockedShifts]);
 
   // Fetch existing data for today
@@ -287,11 +289,13 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
             }
 
             setLockedShifts(rec.lockedShifts || response.data.lockedShifts || {});
+            setLockedSlots(rec.lockedSlots || response.data.lockedSlots || {});
             setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
             setLockedShifts({});
+            setLockedSlots({});
             setEditedFields({});
           }
         }
@@ -301,6 +305,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
         setData(buildEmptyData());
         setOriginalData(null);
         setLockedShifts({});
+        setLockedSlots({});
         setEditedFields({});
       }
     };
@@ -423,18 +428,20 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
       return;
     }
 
-    // If single option is selected, enforce single-shift saving
-    if (selectedOption !== 'all') {
-      const distinctShifts = [...new Set(changes.map(c => c.shiftKey))];
-      if (distinctShifts.length > 1) {
-        showToast?.("Only one shift can be saved at a time. Please save changes shift-by-shift.", "warning");
-        return;
-      }
+    const distinctTowers = [...new Set(changes.map(c => c.towerKey))];
+    const distinctShifts = [...new Set(changes.map(c => c.shiftKey))];
+
+    if (distinctTowers.length > 1 || distinctShifts.length > 1) {
+      showToast?.("Only one tower and one shift can be saved at a time. Please save changes shift-by-shift.", "warning");
+      return;
     }
 
+    const targetChange = changes[0];
     setConfirmData({
-      selectedOption,
-      changes,
+      targetTower: targetChange.towerKey,
+      targetShift: targetChange.shiftKey,
+      selectedOption: targetChange.towerKey,
+      changes: [targetChange],
       date,
     });
     setShowConfirmModal(true);
@@ -448,13 +455,14 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
     setSaveSuccess(false);
     setShowConfirmModal(false);
 
+    const targetTower = confirmData?.targetTower || (selectedOption !== 'all' ? selectedOption : 'a');
     const payload = {
       date,
       plant: "SA",
       analysisType: "T 401 Analysis",
       tower: "T 401",
-      targetTower: selectedOption,
-      selectedOption,
+      targetTower,
+      selectedOption: targetTower,
       units: data,
       towers: data,
       submittedBy: user?.name || "Shift Chemist",
@@ -463,6 +471,13 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
 
     try {
       const response = await api.post("/api/t-401-analysis", payload);
+
+      if (response.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected', 'info');
+        return;
+      }
 
       if (!response?.data?.success) {
         showToast?.(response.data?.message || "Failed to save T 401 Analysis.", "error");
@@ -480,6 +495,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
       const newRecordId = response.data?.recordId || returnedDoc._id || returnedDoc.id;
 
       setLockedShifts(newLocked);
+      setLockedSlots(response.data?.lockedSlots || returnedDoc.lockedSlots || {});
       setEditedFields(newEdited);
       if (newRecordId) setRecordId(newRecordId);
 
@@ -487,7 +503,11 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
       const recipient = response.data?.emailRecipient;
       if (recipient) setRecipientEmail(recipient);
 
-      if (deliveryStatus === 'sent') {
+      if (deliveryStatus === 'disabled' || response.data?.emailStatus === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+        showToast?.('T 401 Analysis data saved successfully!', 'success');
+      } else if (deliveryStatus === 'sent') {
         setSavePhase('completed');
         setEmailStatusDetail(`Notification email delivered successfully to ${recipient || 'SA Plant operator'}.`);
         showToast?.(`T 401 Analysis saved & notification sent to ${recipient || 'operator'}!`, 'success');
@@ -500,8 +520,8 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
         setEmailStatusDetail(`Database save succeeded. Email failed: ${smtpErr}`);
         showToast?.('Data saved, but notification email delivery failed.', 'warning');
       } else {
-        setSavePhase('idle');
-        setEmailStatusDetail('Saved — Email notification queued.');
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved successfully. Email notification is processing in background.');
         showToast?.('T 401 Analysis data saved successfully!', 'success');
       }
     } catch (err) {
@@ -581,19 +601,8 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
               </span>
             </div>
 
-            {/* Date Display (Strict Current Date Lock) */}
-            <div className="flex items-center gap-1.5 ml-0 sm:ml-2">
-              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-0.5">
-                <span>Date:</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-blue-900 bg-blue-50/80 border border-blue-200 rounded-lg">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                <span>{formatDateDisplay(date)}</span>
-                <span className="text-[9.5px] font-semibold text-blue-600 bg-blue-100/80 px-1 py-0.2 rounded">
-                  Today (Asia/Kolkata)
-                </span>
-              </span>
-            </div>
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="t401-date-display" badgeText="Operating Day" />
           </div>
 
           {/* Right: Actions */}
@@ -619,6 +628,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
                 onClick={handleSaveClick}
                 defaultLabel="Save / Submit"
                 title="Save T 401 data"
+                alwaysShowSaveText={true}
               />
             )}
           </div>
@@ -747,18 +757,14 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
                       >
                         {/* Shift Badge & Status */}
                         <td className="py-1 pr-1 align-middle">
-                          <div className="flex flex-col items-center">
+                          <div className="flex flex-col items-center gap-0.5">
                             <span
                               className={`font-mono font-extrabold px-1.5 py-0.5 rounded text-[10px] border shadow-2xs inline-block text-center w-7 ${shift.badgeColor}`}
                               title={shift.title}
                             >
                               {shift.label}
                             </span>
-                            <span
-                              className={`text-[7.5px] font-black uppercase px-1 py-0.2 rounded border mt-0.5 whitespace-nowrap leading-none ${shiftStatus.color}`}
-                            >
-                              {shiftStatus.label}
-                            </span>
+                            <RecordStatusBadge status={shiftStatus} />
                           </div>
                         </td>
 
@@ -791,7 +797,7 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
                                     }
                                     title={
                                       isDisabled
-                                        ? `Locked / Read-only (${shiftStatus.label})`
+                                        ? `Locked / Read-only (${shiftStatus})`
                                         : limit
                                         ? isOutOfLimit
                                           ? `OUT OF LIMIT: ${cellVal} Kgm/m³ (Allowed: ${limit.formattedRange})`
@@ -876,6 +882,12 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ── Footer Policy Banner ── */}
+      <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
+        <span>One correction allowed after first save; saving the next shift locks the previous one. Towers A–F operate independently.</span>
+        <span className="font-semibold text-slate-500">Frequency: Once in a Shift</span>
       </div>
 
       {/* ── Pre-Save Confirmation Modal ── */}

@@ -21,6 +21,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 import {
   validateCellValue,
   SA_E501_LIMITS,
@@ -99,7 +100,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
   });
 
   // ── States (Strict Current-Date Restriction) ──
-  const [date]                                          = useState(() => getTodayAsiaKolkata());
+  const [date]                                          = useState(() => getOperatingDateIST());
   const [readings, setReadings]                         = useState(DEFAULT_READINGS);
   const [originalReadings, setOriginalReadings]         = useState(null);
   const [errors, setErrors]                             = useState({});
@@ -112,12 +113,60 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
   const [recipientEmail, setRecipientEmail]             = useState('');
   const [emailStatusDetail, setEmailStatusDetail]       = useState('');
   const [isPermanentMailError, setIsPermanentMailError] = useState(false);
+  const [lockedShifts, setLockedShifts]                 = useState({});
+  const [lockedSlots, setLockedSlots]                   = useState({});
   const [editedFields, setEditedFields]                 = useState({});
   const [retryingEmail, setRetryingEmail]               = useState(false);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]         = useState(false);
   const [confirmData, setConfirmData]                   = useState(null);
+
+  const getShiftSlotKey = useCallback((readingId, shift) => {
+    if (readingId === '1' || shift === 'I') return 'shift1';
+    if (readingId === '2' || shift === 'II') return 'shift2';
+    if (readingId === '3' || shift === 'III') return 'shift3';
+    return 'shift1';
+  }, []);
+
+  const isShiftDisabled = useCallback((slotKey) => {
+    if (isViewOnly) return true;
+    if (slotKey === 'shift1') {
+      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+    }
+    if (slotKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return true;
+      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+    }
+    if (slotKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift3) return true;
+      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
+      return false;
+    }
+    return true;
+  }, [isViewOnly, lockedShifts]);
+
+  const getShiftBadgeStatus = useCallback((slotKey) => {
+    if (slotKey === 'shift1') {
+      if (lockedShifts.shift1 || lockedShifts.shift2Saved) return 'LOCKED';
+      if (lockedShifts.shift1Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return 'WAITING';
+      if (lockedShifts.shift2 || lockedShifts.shift3Saved) return 'LOCKED';
+      if (lockedShifts.shift2Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return 'WAITING';
+      if (lockedShifts.shift3 || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) return 'LOCKED';
+      if (lockedShifts.shift3Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    return 'WAITING';
+  }, [lockedShifts]);
 
   // Fetch existing data for today
   useEffect(() => {
@@ -150,6 +199,8 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               setOriginalReadings(null);
             }
 
+            setLockedShifts(rec.lockedShifts || response.data.lockedShifts || {});
+            setLockedSlots(rec.lockedSlots || response.data.lockedSlots || {});
             setEditedFields(rec.editedFields || response.data.editedFields || {});
           } else {
             setReadings(DEFAULT_READINGS);
@@ -184,40 +235,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       delete copy[`${id}_${field}`];
       return copy;
     });
-  }, [isViewOnly]);
-
-  // ── Add new reading row ──
-  const handleAddRow = () => {
-    if (isViewOnly) return;
-    const nextId = String(Date.now());
-    const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI'];
-    const nextShift =
-      readings.length < romanNumerals.length
-        ? romanNumerals[readings.length]
-        : `SHIFT ${readings.length + 1}`;
-
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        shift: nextShift,
-        e501_fnh3: '',
-        e501_na2co3: '',
-        t501_fnh3: '',
-        t501_na2co3: '',
-      },
-    ]);
-  };
-
-  // ── Remove reading row ──
-  const handleRemoveRow = (id) => {
-    if (isViewOnly) return;
-    if (readings.length <= 1) {
-      showToast?.('At least one shift row is required.', 'warning');
-      return;
-    }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-  };
+  }, [isViewOnly, getShiftSlotKey, isShiftDisabled]);
 
   // ── Reset ──
   const handleReset = () => {
@@ -270,19 +288,41 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       return;
     }
 
+    const modifiedShifts = [];
+    readings.forEach((r) => {
+      const slotKey = getShiftSlotKey(r.id, r.shift);
+      if (isShiftDisabled(slotKey)) return;
+      const origRow = originalReadings?.find(o => o.id === r.id);
+      const isDiff = NUMERIC_FIELDS.some(f => {
+        const origVal = origRow?.[f] ?? '';
+        const curVal = r[f] ?? '';
+        return origVal !== curVal;
+      });
+      const hasAnyVal = NUMERIC_FIELDS.some(f => r[f] !== '' && r[f] !== null && r[f] !== undefined);
+      if (hasAnyVal && isDiff) {
+        modifiedShifts.push(slotKey);
+      }
+    });
+
+    if (modifiedShifts.length === 0) {
+      showToast?.('No new or modified measurement values found to save.', 'info');
+      return;
+    }
+
+    if (modifiedShifts.length > 1) {
+      showToast?.('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+      return;
+    }
+
     const filledRows = readings.filter(r =>
       NUMERIC_FIELDS.some(f => r[f] !== '' && r[f] !== null && r[f] !== undefined)
     );
-
-    if (filledRows.length === 0) {
-      showToast?.('Please enter at least one measurement value before saving.', 'warning');
-      return;
-    }
 
     setConfirmData({
       date,
       readings: filledRows,
       totalCount: readings.length,
+      targetSlot: modifiedShifts[0],
     });
     setShowConfirmModal(true);
   };
@@ -305,6 +345,13 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
       const res = await api.post('/api/e501-t501-analysis', payload);
 
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes detected', 'info');
+        return;
+      }
+
       if (!res.data?.success) {
         showToast?.(res.data?.message || 'Failed to save E 501 / T 501 Analysis.', 'error');
         setSavePhase('idle');
@@ -320,13 +367,19 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
 
       setEditedFields(newEdited);
+      setLockedShifts(returnedDoc.lockedShifts || res.data?.lockedShifts || {});
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
       if (newRecordId) setRecordId(newRecordId);
 
       const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
       const recipient = res.data?.emailRecipient;
       if (recipient) setRecipientEmail(recipient);
 
-      if (deliveryStatus === 'sent') {
+      if (deliveryStatus === 'disabled' || res.data?.emailStatus === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+        showToast?.('E 501 / T 501 data saved successfully!', 'success');
+      } else if (deliveryStatus === 'sent') {
         setSavePhase('completed');
         setEmailStatusDetail(`Email sent to ${recipient || 'plant operator'}`);
         showToast?.('Saved & Email Sent Successfully!', 'success');
@@ -448,6 +501,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               onClick={handleSaveClick}
               defaultLabel="Save E 501 / T 501 Data"
               title="Save E 501 / T 501 observations"
+              alwaysShowSaveText={true}
             />
           )}
         </div>
@@ -482,31 +536,8 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               </span>
             </div>
 
-            {/* Date Input inside Table Header - Locked to Today */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="e501-t501-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="e501-t501-date-input"
-                  type="date"
-                  value={date}
-                  readOnly
-                  disabled
-                  className="pl-2.5 pr-2 py-1 text-xs font-bold border border-slate-300 rounded-lg text-slate-800 bg-slate-100 cursor-not-allowed select-none"
-                  title="Date is automatically locked to today (Asia/Kolkata timezone)"
-                />
-              </div>
-              <span className="inline-flex items-center gap-1 text-[11px] text-indigo-800 font-bold bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
-                <Calendar className="w-3 h-3 text-indigo-600" />
-                {formatDateDisplay(date)} (Today)
-              </span>
-            </div>
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="e501-t501-date-display" badgeText="Operating Day" />
           </div>
 
           <div className="flex items-center gap-3">
@@ -602,14 +633,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                     T 501 <span className="text-[10px] text-indigo-200 font-normal">(g/l)</span>
                   </th>
                 )}
-                {!isViewOnly && (
-                  <th
-                    rowSpan={2}
-                    className="py-3 px-3 w-16 text-center border-b border-slate-800"
-                  >
-                    Action
-                  </th>
-                )}
+
               </tr>
               {/* Row 2: Sub-columns */}
               <tr className="bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider text-center">
@@ -639,6 +663,9 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               {readings.map((reading, index) => {
                 const rowKey = reading.id || `shift_${reading.shift}`;
                 const rowEdits = editedFields[rowKey] || {};
+                const slotKey = getShiftSlotKey(reading.id, reading.shift);
+                const shiftDisabled = isShiftDisabled(slotKey);
+                const shiftStatus = getShiftBadgeStatus(slotKey);
 
                 return (
                   <tr
@@ -651,26 +678,12 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                     </td>
 
                     {/* Shift */}
-                    <td className="py-2.5 px-3 text-center border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.shift}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(reading.id, 'shift', e.target.value)
-                          }
-                          placeholder="Shift"
-                          className="w-full text-center bg-slate-50 border border-slate-200 rounded-md py-1 px-2 text-xs font-extrabold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition disabled:bg-slate-100"
-                        />
-                        {rowEdits.shift && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
+                    <td className="py-2.5 px-3 text-center border-r border-slate-100 align-middle">
+                      <div className="flex flex-col items-center justify-center gap-1.5">
+                        <span className="font-mono text-xs font-black text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-300">
+                          {reading.shift === 'I' ? 'I SHIFT' : reading.shift === 'II' ? 'II SHIFT' : reading.shift === 'III' ? 'III SHIFT' : `SHIFT ${reading.shift}`}
+                        </span>
+                        <RecordStatusBadge status={shiftStatus} />
                       </div>
                     </td>
 
@@ -697,7 +710,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
-                                    disabled={isViewOnly}
+                                    disabled={isViewOnly || shiftDisabled}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -806,7 +819,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
-                                    disabled={isViewOnly}
+                                    disabled={isViewOnly || shiftDisabled}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -920,7 +933,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
-                                    disabled={isViewOnly}
+                                    disabled={isViewOnly || shiftDisabled}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -1029,7 +1042,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                                     id={`input-${reading.id}-${field}`}
                                     type="text"
                                     inputMode="decimal"
-                                    disabled={isViewOnly}
+                                    disabled={isViewOnly || shiftDisabled}
                                     value={cellVal}
                                     onChange={(e) =>
                                       handleCellChange(reading.id, field, e.target.value)
@@ -1120,19 +1133,7 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                       </>
                     )}
 
-                    {/* Delete Row */}
-                    {!isViewOnly && (
-                      <td className="py-2.5 px-3 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(reading.id)}
-                          disabled={readings.length <= 1}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                          title="Delete Shift Row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    )}
+
                   </tr>
                 );
               })}
@@ -1165,13 +1166,18 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
-              Active Shifts:
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-[11px] text-slate-500 font-medium">
+              One correction allowed after first save; saving the next shift locks the previous one.
             </span>
-            <span className="px-3 py-1 bg-indigo-100 text-indigo-800 font-mono font-extrabold rounded-md border border-indigo-300">
-              {readings.length} Shifts
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                Shifts:
+              </span>
+              <span className="px-3 py-1 bg-indigo-100 text-indigo-800 font-mono font-extrabold rounded-md border border-indigo-300">
+                3 Fixed (I, II, III)
+              </span>
+            </div>
           </div>
         </div>
       </div>

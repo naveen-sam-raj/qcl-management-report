@@ -1,24 +1,13 @@
 const express = require('express');
-const router = express.Router();
+const { PlantAnalysisRecord } = require('../models');
 const { protect } = require('../middleware/auth');
-const { ActivityLog, PlantAnalysisRecord, Plant } = require('../models');
 const {
-  hydrateLockState,
-  getInitialLockState,
-  validateSequentialSave,
-  applySequentialSaveTransition,
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isUnitEmpty,
 } = require('../services/analysisLockEngine');
-
-// Helper: Get today's date in Asia/Kolkata timezone (YYYY-MM-DD)
-const getTodayKolkata = () => {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-};
-
-// In-memory cache storage for T 401 records
-const t401Records = [];
-
-// Apply authentication middleware
-router.use(protect);
+const { getOperatingDateIST } = require('../utils/operatingDate');
+const { getPlantAssignedUser } = require('../services/plantNotificationService');
 
 const TOWERS = ['a', 'b', 'c', 'd', 'e', 'f'];
 const SHIFTS = ['s1', 's2', 's3'];
@@ -37,471 +26,703 @@ const SHIFT_DISPLAY_NAMES = {
   s1: 'I SHIFT',
   s2: 'II SHIFT',
   s3: 'III SHIFT',
-  shift1: 'I SHIFT',
-  shift2: 'II SHIFT',
-  shift3: 'III SHIFT',
 };
 
-const hydrateTowerLocks = (rawLocks) => {
+const ANALYSIS_TYPES = ['T 401 Analysis', 'T401 Analysis'];
+const CANONICAL_ANALYSIS_TYPE = 'T 401 Analysis';
+const PLANT_CODES = ['SA', 'SA Plant', 'SA PLANT'];
+
+const cleanParamValues = (obj = {}) => {
+  const res = {};
+  PARAM_KEYS.forEach((pk) => {
+    const val = obj[pk];
+    if (val !== undefined && val !== null && val !== '') {
+      res[pk] = Number(val);
+    }
+  });
+  return res;
+};
+
+const defaultEmptyTowerShifts = () => {
   const result = {};
-  for (const uKey of TOWERS) {
-    result[uKey] = hydrateLockState(rawLocks?.[uKey], { type: 'shift', items: SHIFTS });
-  }
+  TOWERS.forEach((t) => {
+    result[t] = {
+      s1: Object.fromEntries(PARAM_KEYS.map((k) => [k, ''])),
+      s2: Object.fromEntries(PARAM_KEYS.map((k) => [k, ''])),
+      s3: Object.fromEntries(PARAM_KEYS.map((k) => [k, ''])),
+    };
+  });
   return result;
 };
 
-const getInitialTowerLocks = () => {
-  const result = {};
-  for (const uKey of TOWERS) {
-    result[uKey] = getInitialLockState({ type: 'shift', items: SHIFTS });
-  }
-  return result;
+const defaultInitialTowerLocks = () => {
+  const lockedSlots = {};
+  const lockedShifts = {};
+  TOWERS.forEach((t) => {
+    lockedSlots[t] = {
+      s1: { isSaved: false, isLocked: false, correctionUsed: false },
+      s2: { isSaved: false, isLocked: true, correctionUsed: false },
+      s3: { isSaved: false, isLocked: true, correctionUsed: false },
+    };
+    lockedShifts[t] = {
+      s1Saved: false,
+      s2Saved: false,
+      s3Saved: false,
+      s1Locked: false,
+      s2Locked: true,
+      s3Locked: true,
+      s1Edits: 0,
+      s2Edits: 0,
+      s3Edits: 0,
+      s1: false,
+      s2: true,
+      s3: true,
+      allPermanentlyLocked: false,
+      slots: lockedSlots[t],
+    };
+  });
+  return { lockedSlots, lockedShifts };
 };
 
-/**
- * @desc    Save or edit SA Plant T 401 Analysis data with tower-wise & sequential shift locking
- * @route   POST /api/t-401-analysis
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body;
+const deriveT401Locks = (doc) => {
+  const data = doc?.data || {};
+  const existingLockedSlots = data.lockedSlots || {};
+  const existingLockedShifts = data.lockedShifts || {};
+  const units = data.units || data.towers || data.shifts || {};
 
-    // 1. Mandatory Date Check
-    if (!payload || !payload.date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis Date is required to save T 401 Analysis.',
-      });
+  const lockedSlots = {};
+  const lockedShifts = {};
+
+  TOWERS.forEach((t) => {
+    if (existingLockedSlots[t] && typeof existingLockedSlots[t] === 'object') {
+      lockedSlots[t] = existingLockedSlots[t];
+      lockedShifts[t] = existingLockedShifts[t] || {
+        s1Saved: Boolean(lockedSlots[t].s1?.isSaved),
+        s2Saved: Boolean(lockedSlots[t].s2?.isSaved),
+        s3Saved: Boolean(lockedSlots[t].s3?.isSaved),
+        s1Locked: Boolean(lockedSlots[t].s1?.isLocked),
+        s2Locked: Boolean(lockedSlots[t].s2?.isLocked),
+        s3Locked: Boolean(lockedSlots[t].s3?.isLocked),
+        s1Edits: lockedSlots[t].s1?.correctionUsed ? 1 : 0,
+        s2Edits: lockedSlots[t].s2?.correctionUsed ? 1 : 0,
+        s3Edits: lockedSlots[t].s3?.correctionUsed ? 1 : 0,
+        s1: Boolean(lockedSlots[t].s1?.isLocked),
+        s2: Boolean(lockedSlots[t].s2?.isLocked),
+        s3: Boolean(lockedSlots[t].s3?.isLocked),
+        allPermanentlyLocked: Boolean(
+          lockedSlots[t].s1?.isLocked && lockedSlots[t].s2?.isLocked && lockedSlots[t].s3?.isLocked
+        ),
+        slots: lockedSlots[t],
+      };
+      return;
     }
 
-    // 2. Strict Current-Date Restriction (Asia/Kolkata)
-    const todayKolkata = getTodayKolkata();
-    if (payload.date !== todayKolkata) {
-      return res.status(400).json({
+    const tLocks = existingLockedShifts[t] || {};
+    const tUnits = units[t] || {};
+
+    const s1Saved = Boolean(tLocks.s1Saved || !isUnitEmpty(tUnits.s1));
+    const s2Saved = Boolean(tLocks.s2Saved || !isUnitEmpty(tUnits.s2));
+    const s3Saved = Boolean(tLocks.s3Saved || !isUnitEmpty(tUnits.s3));
+
+    const s1Corr = Boolean(tLocks.s1Edits >= 1 || (tLocks.s1Locked && !s2Saved));
+    const s2Corr = Boolean(tLocks.s2Edits >= 1 || (tLocks.s2Locked && !s3Saved));
+    const s3Corr = Boolean(tLocks.s3Edits >= 1 || tLocks.s3Locked);
+
+    lockedSlots[t] = {
+      s1: {
+        isSaved: s1Saved,
+        isLocked: s1Saved ? (s2Saved ? true : s1Corr) : false,
+        correctionUsed: s1Corr,
+      },
+      s2: {
+        isSaved: s2Saved,
+        isLocked: s2Saved ? (s3Saved ? true : s2Corr) : !s1Saved,
+        correctionUsed: s2Corr,
+      },
+      s3: {
+        isSaved: s3Saved,
+        isLocked: s3Saved ? s3Corr : !s2Saved,
+        correctionUsed: s3Corr,
+      },
+    };
+
+    const allPermanentlyLocked = Boolean(
+      tLocks.allPermanentlyLocked ||
+        (lockedSlots[t].s1.isLocked && lockedSlots[t].s2.isLocked && lockedSlots[t].s3.isLocked)
+    );
+
+    lockedShifts[t] = {
+      s1Saved,
+      s2Saved,
+      s3Saved,
+      s1Locked: lockedSlots[t].s1.isLocked,
+      s2Locked: lockedSlots[t].s2.isLocked,
+      s3Locked: lockedSlots[t].s3.isLocked,
+      s1Edits: s1Corr ? 1 : 0,
+      s2Edits: s2Corr ? 1 : 0,
+      s3Edits: s3Corr ? 1 : 0,
+      s1: lockedSlots[t].s1.isLocked,
+      s2: lockedSlots[t].s2.isLocked,
+      s3: lockedSlots[t].s3.isLocked,
+      allPermanentlyLocked,
+      slots: lockedSlots[t],
+    };
+  });
+
+  return { lockedSlots, lockedShifts };
+};
+
+function createT401AnalysisRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+  router.use(protect);
+
+  router.get('/', async (req, res) => {
+    try {
+      const { date } = req.query;
+
+      let assignedOperatorEmail = null;
+      try {
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA');
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (_) {}
+
+      const { lockedSlots: defaultLockedSlots, lockedShifts: defaultLockedShifts } = defaultInitialTowerLocks();
+
+      if (date) {
+        const query = {
+          date,
+          plantCode: { $in: PLANT_CODES },
+          analysisType: { $in: ANALYSIS_TYPES },
+        };
+        if (req.user?.company) {
+          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        }
+
+        const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        const doc = pickCanonicalDoc(matchingDocs);
+
+        if (doc?.data) {
+          const payloadData = doc.data;
+          const { lockedSlots, lockedShifts } = deriveT401Locks(doc);
+          const units = payloadData.units || payloadData.towers || payloadData.shifts || defaultEmptyTowerShifts();
+
+          const recordData = {
+            ...payloadData,
+            _id: doc._id,
+            id: doc._id.toString(),
+            date: doc.date,
+            plant: doc.plantCode,
+            analysisType: doc.analysisType,
+            units,
+            towers: units,
+            shifts: units,
+            lockedSlots,
+            lockedShifts,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            submittedBy: doc.submittedBy,
+          };
+
+          return res.status(200).json({
+            success: true,
+            data: [recordData],
+            record: recordData,
+            recordId: doc._id,
+            units,
+            towers: units,
+            shifts: units,
+            lockedSlots,
+            lockedShifts,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            assignedOperatorEmail,
+            emailStatus: 'disabled',
+            emailRecipient: assignedOperatorEmail,
+          });
+        }
+
+        const initialUnits = defaultEmptyTowerShifts();
+        return res.status(200).json({
+          success: true,
+          data: [],
+          record: null,
+          recordId: null,
+          units: initialUnits,
+          towers: initialUnits,
+          shifts: initialUnits,
+          lockedSlots: defaultLockedSlots,
+          lockedShifts: defaultLockedShifts,
+          editedFields: {},
+          editAuditHistory: [],
+          assignedOperatorEmail,
+          emailStatus: 'disabled',
+          emailRecipient: assignedOperatorEmail,
+          message: `No record found for date ${date}`,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        data: [],
+      });
+    } catch (err) {
+      console.error('[T 401 GET] Error:', err);
+      return res.status(500).json({
         success: false,
-        message: `Date restriction enforced: T 401 Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+        message: 'Server error while retrieving T 401 analysis records.',
       });
     }
+  });
 
-    const units = payload.units || payload.towers || {};
-    const errors = [];
+  router.post('/', async (req, res) => {
+    try {
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. Operator role is read-only for this analysis.',
+        });
+      }
 
-    // Validate numeric values if entered
-    TOWERS.forEach((uKey) => {
-      const uObj = units[uKey] || {};
-      SHIFTS.forEach((sKey) => {
-        const sObj = uObj[sKey] || uObj[`shift${sKey.slice(1)}`] || {};
-        PARAM_KEYS.forEach((pKey) => {
-          const val = sObj[pKey];
-          if (val === '' || val === null || val === undefined) return;
-          const num = Number(val);
-          if (isNaN(num)) {
-            errors.push(`Tower '${TOWER_DISPLAY_NAMES[uKey]}', Shift '${SHIFT_DISPLAY_NAMES[sKey]}', Parameter '${pKey.toUpperCase()}' must be a valid number.`);
-          }
+      const payload = req.body || {};
+      if (!payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save T 401 Analysis.',
+        });
+      }
+
+      const now = typeof getNow === 'function' ? getNow() : new Date();
+      const operatingDate = getOperatingDateIST(now);
+
+      if (payload.date !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: T 401 Analysis records can only be created or modified for today's date (${operatingDate}). Historical or future modifications are not permitted.`,
+        });
+      }
+
+      // Mandatory targetTower check: multi-tower or "all" rejected
+      const targetTower = payload.targetTower || payload.selectedOption;
+      if (!targetTower || targetTower === 'all' || !TOWERS.includes(targetTower)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Target tower is required. Single-tower submission enforced (options a through f).',
+        });
+      }
+
+      const unitsRaw = payload.units || payload.towers || payload.shifts || {};
+      const targetTowerDataRaw = unitsRaw[targetTower] || {};
+
+      // Clean parameter values on target tower
+      const targetTowerClean = {};
+      SHIFTS.forEach((sk) => {
+        if (targetTowerDataRaw[sk]) {
+          targetTowerClean[sk] = cleanParamValues(targetTowerDataRaw[sk]);
+        }
+      });
+
+      // Query existing doc
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: payload.date,
+        plantCode: { $in: PLANT_CODES },
+        analysisType: { $in: ANALYSIS_TYPES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+      const existingUnits = existingData.units || existingData.towers || existingData.shifts || {};
+      const existingTowerData = existingUnits[targetTower] || {};
+      const { lockedSlots: currentLockedSlots, lockedShifts: currentLockedShifts } = deriveT401Locks(existingDoc);
+
+      const towerLockedSlots = currentLockedSlots[targetTower];
+
+      // Check whether other towers in payload were also modified -> reject multi-tower POST
+      const otherTowersChanged = TOWERS.filter((t) => t !== targetTower).some((t) => {
+        const tInc = unitsRaw[t];
+        const tExist = existingUnits[t];
+        if (!tInc) return false;
+        return SHIFTS.some((sk) => {
+          return PARAM_KEYS.some((pk) => {
+            const nv = tInc?.[sk]?.[pk];
+            const ov = tExist?.[sk]?.[pk];
+            if (nv === undefined || nv === null || nv === '') return false;
+            return String(nv) !== String(ov ?? '');
+          });
         });
       });
-    });
 
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed. Enter numeric values only.',
-        errors,
-      });
-    }
-
-    const plantTarget = payload.plant || 'SA';
-
-    // 3. Query existing record in MongoDB for today's date
-    const query = {
-      date: payload.date,
-      plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-      analysisType: { $in: ['T 401 Analysis', 'T401 Analysis'] },
-    };
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company }, { company: null }];
-    }
-
-    let existingDoc = await PlantAnalysisRecord.findOne(query);
-    let existingData = existingDoc?.data || {};
-    let existingUnits = existingData.units || existingData.towers || {};
-
-    // lockedShifts structure: { [towerKey]: lockState }
-    let lockedShifts = existingData.lockedShifts
-      ? hydrateTowerLocks(existingData.lockedShifts)
-      : getInitialTowerLocks();
-    let editedFields = { ...(existingData.editedFields || {}) };
-    let editAuditHistory = [...(existingData.editAuditHistory || [])];
-
-    // Helper: Compare values numerically or as strings
-    const isParamDiff = (o, n) => {
-      if (o === undefined || o === null || o === '') o = null;
-      if (n === undefined || n === null || n === '') n = null;
-      if (o === null && n === null) return false;
-      if (o === null || n === null) return true;
-      if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-        return Number(o) !== Number(n);
+      if (otherTowersChanged) {
+        return res.status(400).json({
+          success: false,
+          message: 'Multi-tower submission rejected: Exactly one tower can be saved at a time.',
+        });
       }
-      return String(o) !== String(n);
-    };
 
-    const isShiftDiff = (uKey, sKey) => {
-      const oldObj = (existingUnits[uKey] && (existingUnits[uKey][sKey] || existingUnits[uKey][`shift${sKey.slice(1)}`])) || {};
-      const newObj = (units[uKey] && (units[uKey][sKey] || units[uKey][`shift${sKey.slice(1)}`])) || {};
-      return PARAM_KEYS.some((p) => isParamDiff(oldObj[p], newObj[p]));
-    };
+      const explicitUnitKey = payload.shift && SHIFTS.includes(payload.shift) ? payload.shift : null;
 
-    const hasShiftData = (uKey, sKey) => {
-      const sObj = (units[uKey] && (units[uKey][sKey] || units[uKey][`shift${sKey.slice(1)}`])) || {};
-      return PARAM_KEYS.some((p) => sObj[p] !== '' && sObj[p] !== null && sObj[p] !== undefined);
-    };
-
-    const isShiftLocked = (uKey, sKey) => {
-      const uLocks = lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS });
-      const check = validateSequentialSave({
-        lockState: uLocks,
-        targetItem: sKey,
-        itemsOrder: SHIFTS,
-        isDiff: true,
-        type: 'shift',
-      });
-      return !check.allowed;
-    };
-
-    // Filter which towers are in scope if targetTower is specified, otherwise all
-    const targetTower = payload.targetTower || payload.selectedOption; // 'a'-'f', 'all', or undefined
-    const towersToCheck = (targetTower && targetTower !== 'all' && TOWERS.includes(targetTower))
-      ? [targetTower]
-      : TOWERS;
-
-    // Check lock violations across in-scope towers
-    for (const uKey of towersToCheck) {
-      for (const sKey of SHIFTS) {
-        if (hasShiftData(uKey, sKey) && isShiftLocked(uKey, sKey)) {
-          if (isShiftDiff(uKey, sKey)) {
-            const check = validateSequentialSave({
-              lockState: lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS }),
-              targetItem: sKey,
-              itemsOrder: SHIFTS,
-              isDiff: true,
-              type: 'shift',
-            });
-            return res.status(400).json({
-              success: false,
-              message: check.message || `Cannot edit ${TOWER_DISPLAY_NAMES[uKey]} ${SHIFT_DISPLAY_NAMES[sKey]} because it is locked.`,
-            });
-          }
+      // Identify modified shifts on target tower
+      const shiftsWithDiff = [];
+      for (const sk of SHIFTS) {
+        const inc = targetTowerClean[sk];
+        if (explicitUnitKey && sk !== explicitUnitKey) continue;
+        if (!inc) continue;
+        const exist = existingTowerData[sk] || {};
+        const isDiff = PARAM_KEYS.some((pk) => {
+          const nv = inc[pk];
+          const ov = exist[pk];
+          if (nv === undefined || nv === null || nv === '') return ov !== undefined && ov !== null && ov !== '';
+          return String(nv) !== String(ov ?? '');
+        });
+        if (isDiff) {
+          shiftsWithDiff.push(sk);
         }
       }
-    }
 
-    // Determine changes per tower
-    // changesToSave: Array of { towerKey, shiftKey, validation }
-    const changesToSave = [];
-    for (const uKey of towersToCheck) {
-      const uLocks = lockedShifts[uKey] || getInitialLockState({ type: 'shift', items: SHIFTS });
-      for (const sKey of SHIFTS) {
-        if (hasShiftData(uKey, sKey) && isShiftDiff(uKey, sKey) && !isShiftLocked(uKey, sKey)) {
-          const check = validateSequentialSave({
-            lockState: uLocks,
-            targetItem: sKey,
-            itemsOrder: SHIFTS,
-            isDiff: true,
-            type: 'shift',
-          });
-          if (!check.allowed) {
-            return res.status(check.statusCode || 400).json({
-              success: false,
-              message: `${TOWER_DISPLAY_NAMES[uKey]}: ${check.message}`,
-            });
-          }
-          changesToSave.push({ towerKey: uKey, shiftKey: sKey, validation: check });
-        }
-      }
-    }
-
-    if (changesToSave.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No unlocked tower shifts with valid new or modified data were found to save.',
-      });
-    }
-
-    // If an individual tower is selected, enforce single-shift saving
-    if (targetTower && targetTower !== 'all' && changesToSave.length > 1) {
-      const distinctShifts = [...new Set(changesToSave.map(c => c.shiftKey))];
-      if (distinctShifts.length > 1) {
+      if (shiftsWithDiff.length > 1) {
         return res.status(400).json({
           success: false,
           message: 'Shift-wise input locking enforced: Only one shift can be entered and saved at a time for this tower.',
         });
       }
-    }
 
-    // Build the merged units data
-    const mergedUnits = JSON.parse(JSON.stringify(existingUnits));
-    TOWERS.forEach((uKey) => {
-      if (!mergedUnits[uKey]) mergedUnits[uKey] = {};
-      SHIFTS.forEach((sKey) => {
-        if (!mergedUnits[uKey][sKey]) mergedUnits[uKey][sKey] = {};
-        PARAM_KEYS.forEach((pKey) => {
-          if (!mergedUnits[uKey][sKey][pKey]) mergedUnits[uKey][sKey][pKey] = '';
-        });
-      });
-    });
-
-    const nowIso = new Date().toISOString();
-    const saveEventId = `t401_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    // Apply changes and update tower-wise sequential lock flags
-    for (const { towerKey: uKey, shiftKey: sKey, validation } of changesToSave) {
-      if (!lockedShifts[uKey]) {
-        lockedShifts[uKey] = getInitialLockState({ type: 'shift', items: SHIFTS });
-      }
-      const uLocks = lockedShifts[uKey];
-
-      if (!editedFields[uKey]) editedFields[uKey] = {};
-      if (!editedFields[uKey][sKey]) editedFields[uKey][sKey] = {};
-
-      const oldShiftValues = (existingUnits[uKey] && (existingUnits[uKey][sKey] || existingUnits[uKey][`shift${sKey.slice(1)}`])) || {};
-      const newShiftValues = (units[uKey] && (units[uKey][sKey] || units[uKey][`shift${sKey.slice(1)}`])) || {};
-
-      // Audit and field-level tracking
-      PARAM_KEYS.forEach((pKey) => {
-        const oVal = oldShiftValues[pKey];
-        const nVal = newShiftValues[pKey];
-        if (nVal !== undefined) {
-          mergedUnits[uKey][sKey][pKey] = nVal;
+      if (shiftsWithDiff.length === 0) {
+        if (explicitUnitKey) {
+          if (!towerLockedSlots[explicitUnitKey]?.isSaved && isUnitEmpty(targetTowerClean[explicitUnitKey])) {
+            return res.status(400).json({
+              success: false,
+              message: `Cannot save empty slot ${explicitUnitKey}. At least one non-empty value is required.`,
+            });
+          }
         }
-
-        // Only track EDITED badge if shift was previously saved
-        const wasPreviouslySaved =
-          (sKey === 's1' && uLocks.s1Saved) ||
-          (sKey === 's2' && uLocks.s2Saved) ||
-          (sKey === 's3' && uLocks.s3Saved);
-
-        if (wasPreviouslySaved && isParamDiff(oVal, nVal)) {
-          editedFields[uKey][sKey][pKey] = true;
-          editAuditHistory.push({
-            date: payload.date,
-            tower: uKey,
-            towerName: TOWER_DISPLAY_NAMES[uKey],
-            shift: sKey,
-            shiftName: SHIFT_DISPLAY_NAMES[sKey],
-            field: pKey,
-            oldValue: oVal,
-            newValue: nVal,
-            editor: req.user?.name || payload.submittedBy || 'Plant Operator',
-            timestamp: nowIso,
-            saveEventId,
+        const hasAnySaved = SHIFTS.some((s) => towerLockedSlots[s]?.isSaved);
+        if (!hasAnySaved) {
+          return res.status(400).json({
+            success: false,
+            message: 'At least one shift measurement value is required for this tower.',
           });
         }
-      });
-
-      // Update sequential locking status for this specific tower via universal locking engine
-      lockedShifts[uKey] = applySequentialSaveTransition({
-        lockState: lockedShifts[uKey],
-        targetItem: sKey,
-        itemsOrder: SHIFTS,
-        isCorrection: validation?.isCorrection || false,
-        type: 'shift',
-      });
-    }
-
-    // Determine primary shift label for display
-    const savedShiftsSet = [...new Set(changesToSave.map(c => SHIFT_DISPLAY_NAMES[c.shiftKey]))];
-    const shiftDisplayLabel = savedShiftsSet.join(', ');
-    const savedTowersSet = [...new Set(changesToSave.map(c => TOWER_DISPLAY_NAMES[c.towerKey]))];
-    const towerDisplayLabel = savedTowersSet.length === 6 ? 'All Options (A–F)' : savedTowersSet.join(', ');
-
-    // Structure record data
-    const recordPayload = {
-      id: existingDoc?._id ? existingDoc._id.toString() : `t401_${Date.now()}`,
-      date: payload.date,
-      plant: 'SA',
-      plantCode: 'SA',
-      analysisType: 'T 401 Analysis',
-      tower: 'T 401',
-      towerOption: towerDisplayLabel,
-      units: mergedUnits,
-      towers: mergedUnits,
-      shifts: mergedUnits,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id,
-      submittedAt: nowIso,
-      company: req.user?.company?._id || req.user?.company || null,
-      saveEventId,
-    };
-
-    // 4. Atomic Database Persistence
-    let savedRecordDoc = null;
-    try {
-      savedRecordDoc = await PlantAnalysisRecord.findOneAndUpdate(
-        {
-          plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-          analysisType: { $in: ['T 401 Analysis', 'T401 Analysis'] },
-          date: payload.date,
-        },
-        {
-          plantName: 'SA Plant',
-          plantCode: 'SA',
-          analysisType: 'T 401 Analysis',
-          unit: 'T 401 (Options A–F)',
-          date: payload.date,
-          shift: shiftDisplayLabel,
-          data: recordPayload,
-          submittedBy: recordPayload.submittedBy,
-          submittedById: recordPayload.submittedById,
-          company: recordPayload.company,
-          status: 'completed',
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } catch (dbErr) {
-      console.error('[T 401 Save] Database persistence failure:', dbErr);
-      return res.status(500).json({
-        success: false,
-        message: 'Database persistence failed: ' + dbErr.message,
-      });
-    }
-
-    // Keep in-memory cache synchronized
-    const cachedIdx = t401Records.findIndex((r) => r.date === payload.date);
-    if (cachedIdx >= 0) {
-      t401Records[cachedIdx] = recordPayload;
-    } else {
-      t401Records.unshift(recordPayload);
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: 'T 401 Analysis saved successfully in MongoDB ✓',
-      data: {
-        ...recordPayload,
-        _id: savedRecordDoc._id,
-        id: savedRecordDoc._id,
-      },
-      recordId: savedRecordDoc._id,
-      analysis: {
-        _id: savedRecordDoc._id,
-        recordSummary: {
-          date: payload.date,
-          units: mergedUnits,
-          lockedShifts,
-          editedFields,
-          editAuditHistory,
-        },
-      },
-      lockedShifts,
-      editedFields,
-      emailStatus: 'disabled',
-      emailSent: false,
-      emailDeliveryStatus: 'disabled',
-      emailRecipient: null,
-      saveEventId,
-    });
-  } catch (error) {
-    console.error('[T 401 API] Unexpected error saving data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while processing T 401 analysis: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retrieve T 401 Analysis records
- * @route   GET /api/t-401-analysis
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date, startDate, endDate } = req.query;
-    const { getPlantAssignedUser } = require('../services/plantNotificationService');
-
-    let assignedOperatorEmail = null;
-    try {
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA');
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (uErr) {}
-
-    if (date) {
-      const query = {
-        date,
-        plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-        analysisType: { $in: ['T 401 Analysis', 'T401 Analysis'] },
-      };
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company }, { company: null }];
-      }
-
-      const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-
-      if (doc && doc.data) {
-        const docData = doc.data || {};
-        const resolvedLocks = docData.lockedShifts
-          ? hydrateTowerLocks(docData.lockedShifts)
-          : getInitialTowerLocks();
-        const enrichedData = {
-          ...docData,
-          _id: doc._id,
-          id: doc._id,
-          recordId: doc._id,
-          units: docData.units || docData.towers || {},
-          lockedShifts: resolvedLocks,
-          editedFields: docData.editedFields || {},
-        };
         return res.status(200).json({
           success: true,
-          data: [enrichedData],
-          record: enrichedData,
-          recordId: doc._id,
-          lockedShifts: resolvedLocks,
-          editedFields: docData.editedFields || {},
-          assignedOperatorEmail,
-          emailStatus: doc.emailStatus || 'pending',
-          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+          noChange: true,
+          message: 'No changes detected. Record remains unchanged.',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentLockedShifts,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
         });
       }
-    }
 
-    const initialLocks = getInitialTowerLocks();
+      const targetShift = shiftsWithDiff[0];
+      const targetIncoming = targetTowerClean[targetShift] || {};
+      const targetExisting = existingTowerData[targetShift] || {};
+
+      const incomingTowerShifts = {};
+      for (const s of SHIFTS) {
+        if (s === targetShift) {
+          incomingTowerShifts[s] = targetIncoming;
+        } else if (towerLockedSlots[s]?.isSaved) {
+          incomingTowerShifts[s] = existingTowerData[s];
+        }
+      }
+
+      // Transition for this tower
+      const transitionResult = computeSlotTransition({
+        unitsOrder: SHIFTS,
+        lockedSlots: towerLockedSlots,
+        storedRows: existingTowerData,
+        incomingRows: incomingTowerShifts,
+        now,
+      });
+
+      if (!transitionResult.allowed && !transitionResult.ok) {
+        return res.status(transitionResult.statusCode || transitionResult.status || 400).json({
+          success: false,
+          message: `${TOWER_DISPLAY_NAMES[targetTower]}: ${transitionResult.message}`,
+        });
+      }
+
+      if (transitionResult.noChange) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes detected. Record remains unchanged.',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentLockedShifts,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      const isCorrection = transitionResult.isCorrection;
+      const updatedTowerSlots = JSON.parse(JSON.stringify(towerLockedSlots));
+
+      if (!isCorrection) {
+        updatedTowerSlots[targetShift] = { isSaved: true, isLocked: false, correctionUsed: false };
+        const tIdx = SHIFTS.indexOf(targetShift);
+        for (let p = 0; p < tIdx; p++) {
+          updatedTowerSlots[SHIFTS[p]].isLocked = true;
+        }
+        if (tIdx + 1 < SHIFTS.length) {
+          updatedTowerSlots[SHIFTS[tIdx + 1]].isLocked = false;
+        }
+      } else {
+        updatedTowerSlots[targetShift] = { isSaved: true, isLocked: true, correctionUsed: true };
+      }
+
+      const allTowerLocked = SHIFTS.every((sk) => updatedTowerSlots[sk]?.isLocked);
+
+      const updatedTowerFlatLocks = {
+        s1Saved: updatedTowerSlots.s1.isSaved,
+        s2Saved: updatedTowerSlots.s2.isSaved,
+        s3Saved: updatedTowerSlots.s3.isSaved,
+        s1Locked: updatedTowerSlots.s1.isLocked,
+        s2Locked: updatedTowerSlots.s2.isLocked,
+        s3Locked: updatedTowerSlots.s3.isLocked,
+        s1Edits: updatedTowerSlots.s1.correctionUsed ? 1 : 0,
+        s2Edits: updatedTowerSlots.s2.correctionUsed ? 1 : 0,
+        s3Edits: updatedTowerSlots.s3.correctionUsed ? 1 : 0,
+        s1: updatedTowerSlots.s1.isLocked,
+        s2: updatedTowerSlots.s2.isLocked,
+        s3: updatedTowerSlots.s3.isLocked,
+        allPermanentlyLocked: allTowerLocked,
+        slots: updatedTowerSlots,
+      };
+
+      const nextAllLockedSlots = {
+        ...currentLockedSlots,
+        [targetTower]: updatedTowerSlots,
+      };
+      const nextAllLockedShifts = {
+        ...currentLockedShifts,
+        [targetTower]: updatedTowerFlatLocks,
+      };
+
+      const nowIso = now.toISOString();
+      const saveEventId = `t401_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const existingEditedFields = existingData.editedFields || {};
+      const newEditedFields = JSON.parse(JSON.stringify(existingEditedFields));
+      const editAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      if (isCorrection) {
+        PARAM_KEYS.forEach((pk) => {
+          const ov = targetExisting[pk];
+          const nv = targetIncoming[pk];
+          const oNum = ov !== '' && ov !== null && ov !== undefined ? Number(ov) : null;
+          const nNum = nv !== '' && nv !== null && nv !== undefined ? Number(nv) : null;
+          const changed = oNum !== null && nNum !== null ? oNum !== nNum : String(ov ?? '') !== String(nv ?? '');
+          if (changed) {
+            if (!newEditedFields[targetTower]) newEditedFields[targetTower] = {};
+            if (!newEditedFields[targetTower][targetShift]) newEditedFields[targetTower][targetShift] = {};
+            newEditedFields[targetTower][targetShift][pk] = true;
+
+            editAuditHistory.push({
+              date: payload.date,
+              tower: targetTower,
+              towerName: TOWER_DISPLAY_NAMES[targetTower],
+              shift: targetShift,
+              shiftName: SHIFT_DISPLAY_NAMES[targetShift],
+              field: pk,
+              oldValue: ov,
+              newValue: nv,
+              editor: req.user?.name || payload.submittedBy || 'Plant Operator',
+              timestamp: nowIso,
+              saveEventId,
+            });
+          }
+        });
+      }
+
+      // Merge units
+      const mergedUnits = JSON.parse(JSON.stringify(existingUnits));
+      TOWERS.forEach((t) => {
+        if (!mergedUnits[t]) mergedUnits[t] = {};
+        SHIFTS.forEach((sk) => {
+          if (!mergedUnits[t][sk]) mergedUnits[t][sk] = {};
+          PARAM_KEYS.forEach((pk) => {
+            if (mergedUnits[t][sk][pk] === undefined) mergedUnits[t][sk][pk] = '';
+          });
+        });
+      });
+
+      PARAM_KEYS.forEach((pk) => {
+        mergedUnits[targetTower][targetShift][pk] =
+          targetIncoming[pk] !== undefined && targetIncoming[pk] !== null ? targetIncoming[pk] : '';
+      });
+
+      const docUpdatePayload = {
+        'data.units': mergedUnits,
+        'data.towers': mergedUnits,
+        'data.shifts': mergedUnits,
+        'data.lockedSlots': nextAllLockedSlots,
+        'data.lockedShifts': nextAllLockedShifts,
+        'data.editedFields': newEditedFields,
+        'data.editAuditHistory': editAuditHistory,
+        'data.submittedBy': req.user?.name || payload.submittedBy || 'Plant Operator',
+        'data.submittedById': req.user?._id || null,
+        'data.submittedAt': nowIso,
+        'data.saveEventId': saveEventId,
+        'data.unit': 'T 401 (Options A–F)',
+        'data.analysisType': CANONICAL_ANALYSIS_TYPE,
+        'data.plant': 'SA',
+        'data.plantCode': 'SA',
+        submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+        submittedById: req.user?._id || null,
+        status: 'completed',
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      };
+
+      let savedDoc = null;
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+                [`data.lockedSlots.${targetTower}.${targetShift}.isSaved`]: true,
+                [`data.lockedSlots.${targetTower}.${targetShift}.correctionUsed`]: false,
+                [`data.lockedSlots.${targetTower}.${targetShift}.isLocked`]: false,
+              }
+            : {
+                $or: [
+                  { [`data.lockedSlots.${targetTower}.${targetShift}.isSaved`]: { $ne: true } },
+                  { [`data.lockedSlots.${targetTower}.${targetShift}`]: { $exists: false } },
+                  { [`data.lockedSlots`]: { $exists: false } },
+                ],
+              }),
+        };
+
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This tower shift was locked or updated concurrently by another user.',
+          });
+        }
+        savedDoc = await PlantAnalysisRecord.findById(existingDoc._id).lean();
+      } else {
+        try {
+          const insertDoc = {
+            plantName: 'SA Plant',
+            plantCode: 'SA',
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            unit: 'T 401 (Options A–F)',
+            date: payload.date,
+            shift: 'All Shifts',
+            status: 'completed',
+            submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+            submittedById: req.user?._id || null,
+            company: companyVal,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+            data: {
+              id: `t401_${Date.now()}`,
+              date: payload.date,
+              plant: 'SA',
+              plantCode: 'SA',
+              tower: 'T 401',
+              unit: 'T 401 (Options A–F)',
+              analysisType: CANONICAL_ANALYSIS_TYPE,
+              units: mergedUnits,
+              towers: mergedUnits,
+              shifts: mergedUnits,
+              lockedSlots: nextAllLockedSlots,
+              lockedShifts: nextAllLockedShifts,
+              editedFields: newEditedFields,
+              editAuditHistory,
+              submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+              submittedById: req.user?._id || null,
+              submittedAt: nowIso,
+              company: companyVal,
+              saveEventId,
+            },
+          };
+          const created = await PlantAnalysisRecord.create(insertDoc);
+          savedDoc = created.toObject();
+        } catch (insertErr) {
+          if (insertErr.code === 11000) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently.',
+            });
+          }
+          throw insertErr;
+        }
+      }
+
+      const finalRecordData = {
+        ...savedDoc.data,
+        _id: savedDoc._id,
+        id: savedDoc._id.toString(),
+        recordId: savedDoc._id,
+        units: mergedUnits,
+        towers: mergedUnits,
+        shifts: mergedUnits,
+        lockedSlots: nextAllLockedSlots,
+        lockedShifts: nextAllLockedShifts,
+        editedFields: newEditedFields,
+        editAuditHistory,
+      };
+
+      return res.status(200).json({
+        success: true,
+        message: 'T 401 Analysis saved successfully in MongoDB ✓',
+        data: finalRecordData,
+        record: finalRecordData,
+        recordId: savedDoc._id,
+        units: mergedUnits,
+        towers: mergedUnits,
+        shifts: mergedUnits,
+        lockedSlots: nextAllLockedSlots,
+        lockedShifts: nextAllLockedShifts,
+        editedFields: newEditedFields,
+        editAuditHistory,
+        emailStatus: 'disabled',
+        emailDeliveryStatus: 'disabled',
+        emailSent: false,
+        emailRecipient: null,
+        saveEventId,
+      });
+    } catch (err) {
+      console.error('[T 401 POST] Error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while processing T 401 analysis: ' + err.message,
+      });
+    }
+  });
+
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      data: [],
-      record: null,
-      recordId: null,
-      lockedShifts: initialLocks,
-      editedFields: {},
-      assignedOperatorEmail,
-      emailStatus: 'failed',
-      emailRecipient: assignedOperatorEmail,
+      emailSent: false,
+      emailStatus: 'disabled',
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('[T 401 GET] Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while retrieving T 401 analysis records.',
-    });
-  }
-});
-
-/**
- * @desc    Retry sending email for an existing saved T 401 analysis record
- * @route   POST /api/t-401-analysis/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-module.exports = router;
+  return router;
+}
+
+const defaultRouter = createT401AnalysisRouter();
+defaultRouter.createRouter = createT401AnalysisRouter;
+module.exports = defaultRouter;
