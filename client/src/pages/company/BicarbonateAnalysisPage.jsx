@@ -5,37 +5,33 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
-  AlertCircle,
-  Calendar,
   Save,
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
-  Clock,
   FlaskConical,
-  Filter as FilterIcon,
-  TrendingUp,
   RefreshCw,
-  Mail,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
-// Default initial readings matching the standard 12 time slots
+const BICARB_SLOTS = [
+  'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12'
+];
+
 const DEFAULT_READINGS = [
-  { id: '1', time: '06:30', filter: 'F-1', naclNa2co3: '' },
-  { id: '2', time: '08:30', filter: 'F-1', naclNa2co3: '' },
-  { id: '3', time: '10:30', filter: '', naclNa2co3: '' },
-  { id: '4', time: '12:30', filter: 'F-2', naclNa2co3: '' },
-  { id: '5', time: '14:30', filter: 'F-2', naclNa2co3: '' },
-  { id: '6', time: '16:30', filter: 'F-3', naclNa2co3: '' },
-  { id: '7', time: '18:30', filter: 'F-3', naclNa2co3: '' },
-  { id: '8', time: '20:30', filter: 'F-4', naclNa2co3: '' },
-  { id: '9', time: '22:30', filter: 'F-4', naclNa2co3: '' },
-  { id: '10', time: '00:30', filter: 'F-5', naclNa2co3: '' },
-  { id: '11', time: '02:30', filter: 'F-5', naclNa2co3: '' },
-  { id: '12', time: '04:30', filter: '', naclNa2co3: '' },
+  { id: 'r1',  time: '06:30', filter: 'F-1', naclNa2co3: '', isDefault: true },
+  { id: 'r2',  time: '08:30', filter: 'F-1', naclNa2co3: '', isDefault: true },
+  { id: 'r3',  time: '10:30', filter: '',    naclNa2co3: '', isDefault: true },
+  { id: 'r4',  time: '12:30', filter: 'F-2', naclNa2co3: '', isDefault: true },
+  { id: 'r5',  time: '14:30', filter: 'F-2', naclNa2co3: '', isDefault: true },
+  { id: 'r6',  time: '16:30', filter: 'F-3', naclNa2co3: '', isDefault: true },
+  { id: 'r7',  time: '18:30', filter: 'F-3', naclNa2co3: '', isDefault: true },
+  { id: 'r8',  time: '20:30', filter: 'F-4', naclNa2co3: '', isDefault: true },
+  { id: 'r9',  time: '22:30', filter: 'F-4', naclNa2co3: '', isDefault: true },
+  { id: 'r10', time: '00:30', filter: 'F-5', naclNa2co3: '', isDefault: true },
+  { id: 'r11', time: '02:30', filter: 'F-5', naclNa2co3: '', isDefault: true },
+  { id: 'r12', time: '04:30', filter: '',    naclNa2co3: '', isDefault: true },
 ];
 
 const FILTER_OPTIONS = [
@@ -51,24 +47,17 @@ const FILTER_OPTIONS = [
   { value: 'All', label: 'All Filters' },
 ];
 
-const getTodayAsiaKolkata = () => {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-};
-
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
+const isValDiff = (o, n) => {
+  if (o === undefined || o === null || o === '') o = null;
+  if (n === undefined || n === null || n === '') n = null;
+  if (o === null && n === null) return false;
+  if (o === null || n === null) return true;
+  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
+    return Number(o) !== Number(n);
   }
+  return String(o) !== String(n);
 };
 
 const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
@@ -79,28 +68,82 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Strict Current-Date Restriction) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── States (Strict Operating Date) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [readings, setReadings]                     = useState(DEFAULT_READINGS);
   const [originalReadings, setOriginalReadings]     = useState(null);
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [lastSaved, setLastSaved]                   = useState(null);
 
-  // Email & Persistence states
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
+  // Persistence & Locking states
+  const [savePhase, setSavePhase]                   = useState('idle');
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
-  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
   const [editedFields, setEditedFields]             = useState({});
-  const [retryingEmail, setRetryingEmail]           = useState(false);
+  const [lockedSlots, setLockedSlots]               = useState({});
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
   const [confirmData, setConfirmData]               = useState(null);
 
-  // Fetch existing data when mounted or date changes
+  const getSlotKey = useCallback((row) => {
+    if (!row) return null;
+    const idStr = String(row.id || '').trim();
+    if (BICARB_SLOTS.includes(idStr)) return idStr;
+    if (/^\d+$/.test(idStr)) {
+      const num = parseInt(idStr, 10);
+      if (num >= 1 && num <= 12) return `r${num}`;
+    }
+    const t = String(row.time || '').trim();
+    if (t === '06:30') return 'r1';
+    if (t === '08:30') return 'r2';
+    if (t === '10:00' || t === '10:30') return 'r3';
+    if (t === '12:00' || t === '12:30') return 'r4';
+    if (t === '14:30') return 'r5';
+    if (t === '16:00' || t === '16:30') return 'r6';
+    if (t === '18:00' || t === '18:30') return 'r7';
+    if (t === '20:00' || t === '20:30') return 'r8';
+    if (t === '22:30') return 'r9';
+    if (t === '00:30') return 'r10';
+    if (t === '02:00' || t === '02:30') return 'r11';
+    if (t === '04:00' || t === '04:30') return 'r12';
+    return null;
+  }, []);
+
+  const getSlotStatus = useCallback((slotKey) => {
+    if (!slotKey || !BICARB_SLOTS.includes(slotKey)) return 'LOCKED';
+    const s = lockedSlots[slotKey] || {};
+    const idx = BICARB_SLOTS.indexOf(slotKey);
+
+    if (idx === 0) {
+      if (s.isLocked) return 'LOCKED';
+      const nextKey = BICARB_SLOTS[1];
+      if (lockedSlots[nextKey]?.isSaved) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'NEW';
+    }
+
+    const prevKey = BICARB_SLOTS[idx - 1];
+    if (!lockedSlots[prevKey]?.isSaved) return 'WAITING';
+
+    if (s.isLocked) return 'LOCKED';
+    if (idx < BICARB_SLOTS.length - 1) {
+      const nextKey = BICARB_SLOTS[idx + 1];
+      if (lockedSlots[nextKey]?.isSaved) return 'LOCKED';
+    }
+    if (s.isSaved) return 'EDITABLE';
+    return 'OPEN';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
+    if (isViewOnly) return true;
+    const status = getSlotStatus(slotKey);
+    return status === 'LOCKED' || status === 'WAITING';
+  }, [isViewOnly, getSlotStatus]);
+
+  // Fetch existing data for operating day
   useEffect(() => {
     let active = true;
     const fetchExistingData = async () => {
@@ -110,17 +153,12 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
 
         if (response.data && response.data.success) {
           const rec = response.data.record || (Array.isArray(response.data.data) ? response.data.data[0] : response.data.data);
+          const returnedSlots = response.data.lockedSlots || rec?.lockedSlots || rec?.data?.lockedSlots || {};
+          setLockedSlots(returnedSlots);
+
           if (rec) {
             setRecordId(rec._id || response.data.recordId || null);
             setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || '');
-
-            if (rec.emailStatus === 'sent') {
-              setSavePhase('completed');
-              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
-            } else if (rec.emailStatus === 'failed') {
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
-            }
 
             const fetchedReadings = rec.readings || rec.data?.readings;
             if (Array.isArray(fetchedReadings) && fetchedReadings.length > 0) {
@@ -131,7 +169,7 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
               setOriginalReadings(null);
             }
 
-            setEditedFields(rec.editedFields || response.data.editedFields || {});
+            setEditedFields(rec.editedFields || rec.data?.editedFields || response.data.editedFields || {});
           } else {
             setReadings(DEFAULT_READINGS);
             setOriginalReadings(null);
@@ -150,7 +188,28 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
     return () => { active = false; };
   }, [date]);
 
-  // ── Handle reading cell change ──
+  const stats = useMemo(() => {
+    const validVals = readings
+      .map((r) => parseFloat(r.naclNa2co3))
+      .filter((v) => !isNaN(v));
+
+    if (validVals.length === 0) {
+      return { count: 0, avg: null, min: null, max: null };
+    }
+
+    const sum = validVals.reduce((acc, val) => acc + val, 0);
+    const avg = sum / validVals.length;
+    const min = Math.min(...validVals);
+    const max = Math.max(...validVals);
+
+    return {
+      count: validVals.length,
+      avg: avg.toFixed(2),
+      min: min.toFixed(2),
+      max: max.toFixed(2),
+    };
+  }, [readings]);
+
   const handleCellChange = useCallback((id, field, value) => {
     if (isViewOnly) return;
     if (field === 'naclNa2co3' && !isValidDecimal(value)) return;
@@ -159,101 +218,80 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
     );
 
-    // Clear error
-    setErrors((prev) => {
-      const copy = { ...prev };
-      delete copy[`${id}_${field}`];
-      return copy;
-    });
-  }, [isViewOnly]);
-
-  // ── Add new reading row ──
-  const handleAddRow = () => {
-    if (isViewOnly) return;
-    const nextId = String(Date.now());
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        time: '06:00',
-        filter: '',
-        naclNa2co3: '',
-      },
-    ]);
-  };
-
-  // ── Remove reading row ──
-  const handleRemoveRow = (id) => {
-    if (isViewOnly) return;
-    if (readings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
+    if (errors[`${id}_${field}`]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`${id}_${field}`];
+        return next;
+      });
     }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-  };
+  }, [errors, isViewOnly]);
 
-  // ── Reset ──
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
+    if (isViewOnly) return;
     if (originalReadings) {
       setReadings(JSON.parse(JSON.stringify(originalReadings)));
-      showToast?.('Restored readings to last persisted state.', 'info');
+      showToast?.('Restored values to last saved state.', 'info');
     } else {
       setReadings(DEFAULT_READINGS);
-      showToast?.('Values reset to defaults.', 'info');
+      showToast?.('Bi Carbonate analysis form cleared to defaults.', 'info');
     }
     setErrors({});
-  };
-
-  // ── Summary Calculations ──
-  const stats = useMemo(() => {
-    const validValues = readings
-      .map((r) => parseFloat(r.naclNa2co3))
-      .filter((v) => !isNaN(v));
-
-    if (validValues.length === 0) {
-      return { count: 0, avg: '—', min: '—', max: '—' };
-    }
-
-    const sum = validValues.reduce((acc, curr) => acc + curr, 0);
-    const avg = (sum / validValues.length).toFixed(2);
-    const min = Math.min(...validValues).toFixed(2);
-    const max = Math.max(...validValues).toFixed(2);
-
-    return {
-      count: validValues.length,
-      avg,
-      min,
-      max,
-    };
-  }, [readings]);
+  }, [originalReadings, showToast, isViewOnly]);
 
   // ── Pre-Save Prompt & Validation ──
   const handleSaveClick = () => {
     if (isViewOnly) return;
     const newErrors = {};
-
-    readings.forEach((r) => {
+    readings.forEach((r, idx) => {
       if (r.naclNa2co3 !== '' && isNaN(Number(r.naclNa2co3))) {
-        newErrors[`${r.id}_naclNa2co3`] = 'Invalid';
+        newErrors[`${r.id}_naclNa2co3`] = 'Invalid number';
       }
     });
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      showToast?.('Please check and fix highlighted cell errors.', 'error');
+      showToast?.('Please fix invalid numeric values before saving.', 'error');
       return;
     }
 
-    const filledRows = readings.filter(r => r.naclNa2co3 !== '' || r.filter !== '');
-    if (filledRows.length === 0) {
-      showToast?.('Please enter at least one measurement value before saving.', 'warning');
+    // Determine changed slots
+    const baseline = originalReadings || DEFAULT_READINGS;
+    const changedSlotKeys = [];
+
+    BICARB_SLOTS.forEach((sk) => {
+      const curRow = readings.find(r => getSlotKey(r) === sk);
+      const baseRow = baseline.find(r => getSlotKey(r) === sk);
+      const hasDiff = isValDiff(baseRow?.filter, curRow?.filter) || isValDiff(baseRow?.naclNa2co3, curRow?.naclNa2co3);
+      if (hasDiff) {
+        changedSlotKeys.push(sk);
+      }
+    });
+
+    if (changedSlotKeys.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (changedSlotKeys.length > 1) {
+      showToast?.('Please save one slot at a time.', 'warning');
+      return;
+    }
+
+    const targetSlot = changedSlotKeys[0];
+    const targetRow = readings.find(r => getSlotKey(r) === targetSlot);
+    const isEmpty = (!targetRow?.filter || String(targetRow.filter).trim() === '') &&
+                    (targetRow?.naclNa2co3 === undefined || targetRow?.naclNa2co3 === null || String(targetRow.naclNa2co3).trim() === '');
+    if (isEmpty) {
+      showToast?.(`Cannot save empty slot ${targetSlot}. At least one measurement is required.`, 'warning');
       return;
     }
 
     setConfirmData({
       date,
-      readings: filledRows,
-      totalCount: readings.length,
+      targetSlot,
+      targetRow,
+      average: stats.avg,
     });
     setShowConfirmModal(true);
   };
@@ -270,11 +308,19 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
         date,
         plant: 'SA',
         unit: 'Bi carbonate',
+        targetSlot: confirmData?.targetSlot,
         readings,
         submittedBy: user?.name || 'Shift Chemist',
       };
 
       const res = await api.post('/api/bicarbonate-analysis', payload);
+
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
 
       if (!res.data?.success) {
         showToast?.(res.data?.message || 'Failed to save Bi Carbonate Analysis.', 'error');
@@ -286,33 +332,23 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
       setOriginalReadings(JSON.parse(JSON.stringify(readings)));
       setLastSaved(new Date().toLocaleTimeString());
 
-      const returnedDoc = res.data?.data || res.data?.analysis || {};
+      const returnedDoc = res.data?.data || res.data?.record || {};
       const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
       const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
 
       setEditedFields(newEdited);
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
       if (newRecordId) setRecordId(newRecordId);
 
-      const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
-      const recipient = res.data?.emailRecipient;
-      if (recipient) setRecipientEmail(recipient);
-
-      if (deliveryStatus === 'sent') {
+      const statusFromApi = res.data?.emailStatus || res.data?.emailDeliveryStatus;
+      if (statusFromApi === 'disabled') {
         setSavePhase('completed');
-        setEmailStatusDetail(`Notification email delivered successfully to ${recipient || ''}.`);
-        showToast?.(`Bi Carbonate Analysis saved & notification sent to ${recipient || ''}!`, 'success');
-      } else if (deliveryStatus === 'failed') {
-        setSavePhase('email_failed');
-        const smtpErr = res.data?.emailError || res.data?.message || 'SMTP delivery rejected';
-        if (smtpErr.toLowerCase().includes('550') || smtpErr.toLowerCase().includes('access denied')) {
-          setIsPermanentMailError(true);
-        }
-        setEmailStatusDetail(`Database save succeeded. Email failed: ${smtpErr}`);
-        showToast?.('Data saved, but notification email delivery failed.', 'warning');
+        setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+        showToast?.('Saved ✓', 'success');
       } else {
-        setSavePhase('idle');
-        setEmailStatusDetail('Saved — Email notification queued.');
-        showToast?.('Bi Carbonate Analysis saved successfully!', 'success');
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved successfully.');
+        showToast?.('Saved ✓', 'success');
       }
     } catch (err) {
       console.error('[Bi Carbonate Save] Error:', err);
@@ -324,41 +360,10 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
     }
   };
 
-  // ── Retry Email Handler ──
-  const handleRetryEmail = async () => {
-    if (!recordId || retryingEmail) return;
-    setRetryingEmail(true);
-
-    try {
-      const response = await api.post(`/bicarbonate-analysis/${recordId}/retry-email`);
-      if (response.data && response.data.emailSent) {
-        setSavePhase('completed');
-        setIsPermanentMailError(false);
-        setEmailStatusDetail(`Notification email delivered successfully to ${response.data.emailRecipient || recipientEmail}.`);
-        showToast?.(`Notification email delivered to ${response.data.emailRecipient || recipientEmail}!`, 'success');
-      } else {
-        setSavePhase('email_failed');
-        const errDetail = response.data?.emailError || response.data?.message || 'SMTP delivery failed';
-        if (errDetail.toLowerCase().includes('550') || errDetail.toLowerCase().includes('access denied')) {
-          setIsPermanentMailError(true);
-        }
-        setEmailStatusDetail(`Retry failed: ${errDetail}`);
-        showToast?.(`Email retry failed: ${errDetail}`, 'error');
-      }
-    } catch (err) {
-      console.error('[Bi Carbonate Retry Email] Error:', err);
-      const msg = err.response?.data?.message || err.message || 'Failed to retry email delivery.';
-      setEmailStatusDetail(`Retry failed: ${msg}`);
-      showToast?.(msg, 'error');
-    } finally {
-      setRetryingEmail(false);
-    }
-  };
-
   return (
-    <div className="space-y-4 animate-fadeIn">
-      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+    <div className="space-y-6 animate-fadeIn">
+      {/* ── TOP HEADER BAR ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(`${basePath}/plants/${plantId}`)}
@@ -370,27 +375,22 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                SA Plant
-              </span>
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Soda Ash Plant</span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Soda Ash Production
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
-                Bi Carbonate
+              <span className="text-xs font-semibold text-emerald-600">Bi Carbonate</span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: 2-Hourly
               </span>
             </div>
-            <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <FlaskConical className="w-5 h-5 text-teal-600" />
-              BI CARBONATE NaCl/Na₂CO₃ ANALYSIS
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <FlaskConical className="w-6 h-6 text-emerald-600 inline" />
+              BI CARBONATE ANALYSIS
             </h1>
           </div>
         </div>
 
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
           {lastSaved && (
             <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -398,169 +398,122 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
             </span>
           )}
 
-          {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
-          )}
+          {/* Locked Operating Date Display */}
+          <LockedDateDisplay
+            date={date}
+            id="bicarbonate-date-display"
+            badgeText="Operating Day"
+          />
 
-          {!isViewOnly && (
-            <StatusSaveButton
-              id="btn-bicarbonate-save"
-              saving={saving}
-              savePhase={savePhase}
-              onClick={handleSaveClick}
-              defaultLabel="Save Bi Carbonate Data"
-              title="Save Bi Carbonate observations"
-            />
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {!isViewOnly && (
+              <button
+                onClick={handleReset}
+                id="btn-bicarbonate-reset"
+                disabled={saving}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 active:scale-95 transition shadow-xs disabled:opacity-50 cursor-pointer"
+                title="Reset fields to last saved state"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Reset
+              </button>
+            )}
+
+            {!isViewOnly && (
+              <StatusSaveButton
+                id="btn-bicarbonate-save"
+                saving={saving}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                defaultLabel="Save Analysis"
+                title="Save Bi Carbonate data"
+                alwaysShowSaveText
+              />
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Status Banners (Email Sent / Pending / Failed) ── */}
+      {/* ── Status Banner ── */}
       <SaveStatusBanner
-        id="bicarb-success-banner"
-        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        id="bicarbonate-success-banner"
+        saveSuccess={savePhase === 'completed'}
         savePhase={savePhase}
         date={date}
-        analysisName="Bi Carbonate Analysis"
+        analysisName="Bi Carbonate NaCl/Na2CO3 Analysis"
         recipientEmail={recipientEmail}
         emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => setSavePhase('idle')}
-        saving={saving || retryingEmail}
+        saving={saving}
       />
 
-      {/* ── MAIN ANALYSIS TABLE ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner with Integrated Strict Date Selector */}
-        <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-800">
-                BI CARBONATE NaCl/Na₂CO₃ Readings
-              </span>
-            </div>
-
-            {/* Strict Current Date Display (Asia/Kolkata) */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1">
-                <span>Date:</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-teal-900 bg-teal-50/80 border border-teal-200 rounded-lg">
-                <Calendar className="w-3.5 h-3.5 text-teal-600" />
-                <span>{formatDateDisplay(date)}</span>
-                <span className="text-[9.5px] font-semibold text-teal-700 bg-teal-100/80 px-1 py-0.2 rounded">
-                  Today (Asia/Kolkata)
-                </span>
-              </span>
-            </div>
-          </div>
-
-          {!isViewOnly && (
-            <button
-              onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100/80 border border-teal-200 px-3 py-1.5 rounded-lg transition shadow-2xs cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Time Slot
-            </button>
-          )}
-        </div>
-
-        {/* Data Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <th className="py-3 px-4 w-12 text-center border-r border-slate-800">
-                  #
+      {/* ── Table Container ── */}
+      <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
+        <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
+          <table className="w-full text-left border-collapse" id="bicarbonate-table">
+            <thead className="sticky top-0 bg-slate-900 text-white z-10 select-none shadow-sm">
+              <tr>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center w-14 border-r border-slate-800">#</th>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase w-32 border-r border-slate-800">Time</th>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center w-28 border-r border-slate-800">Status</th>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase border-r border-slate-800">
+                  Filter Selection
                 </th>
-                <th className="py-3 px-4 w-36 border-r border-slate-800">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-teal-400" />
-                    <span>Time</span>
-                  </div>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center border-r border-slate-800">
+                  NaCl / Na₂CO₃ (%)
                 </th>
-                <th className="py-3 px-4 w-48 border-r border-slate-800">
-                  <div className="flex items-center gap-1.5">
-                    <FilterIcon className="w-3.5 h-3.5 text-teal-400" />
-                    <span>Filter</span>
-                  </div>
-                </th>
-                <th className="py-3 px-4 text-center border-r border-slate-800">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <FlaskConical className="w-3.5 h-3.5 text-teal-400" />
-                    <span>NaCl / Na₂CO₃ (%)</span>
-                  </div>
-                </th>
-                {!isViewOnly && (
-                  <th className="py-3 px-4 w-20 text-center">
-                    Action
-                  </th>
-                )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+            <tbody className="divide-y divide-slate-200/80">
               {readings.map((reading, index) => {
-                const hasError = errors[`${reading.id}_naclNa2co3`];
+                const slotKey = getSlotKey(reading);
+                const disabled = isSlotDisabled(slotKey);
+                const slotStatus = getSlotStatus(slotKey);
                 const rowKey = reading.id || `time_${reading.time}`;
-                const isValEdited = Boolean(editedFields[rowKey]?.naclNa2co3);
-                const isFilterEdited = Boolean(editedFields[rowKey]?.filter);
+                const rowEdits = editedFields[slotKey] || editedFields[rowKey] || {};
+                const hasVal = reading.naclNa2co3 !== '' || reading.filter !== '';
 
                 return (
-                  <tr
-                    key={reading.id}
-                    className="hover:bg-teal-50/20 transition-colors group"
-                  >
-                    {/* Index */}
-                    <td className="py-2.5 px-4 text-center font-bold text-slate-400 border-r border-slate-100">
-                      {index + 1}
-                    </td>
-
-                    {/* Time Input */}
-                    <td className="py-2.5 px-4 border-r border-slate-100">
+                  <tr key={reading.id} className={`transition-colors ${disabled ? 'bg-slate-50/60' : hasVal ? 'bg-emerald-50/20 hover:bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
+                    <td className="px-3 py-2 text-center text-xs font-bold text-slate-400 border-r border-slate-100">{index + 1}</td>
+                    
+                    {/* Time (Read-only) */}
+                    <td className="px-3 py-1.5 border-r border-slate-100">
                       <div className="relative">
                         <input
                           type="text"
                           value={reading.time}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(reading.id, 'time', e.target.value)
-                          }
+                          readOnly
+                          disabled
                           placeholder="HH:MM"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition disabled:opacity-75"
+                          className="w-full max-w-[130px] px-2.5 py-1 text-xs font-bold font-mono text-slate-800 bg-slate-100 border border-slate-300 rounded outline-none transition text-center cursor-not-allowed"
+                          id={`bicarbonate-time-${index}`}
                         />
                       </div>
                     </td>
 
-                    {/* Filter Selector */}
-                    <td className="py-2.5 px-4 border-r border-slate-100">
-                      <div className="relative">
+                    {/* Status Badge */}
+                    <td className="px-3 py-2 text-center border-r border-slate-100">
+                      <RecordStatusBadge status={slotStatus} />
+                    </td>
+
+                    {/* Filter Selection */}
+                    <td className="px-4 py-2 border-r border-slate-100">
+                      <div className="relative max-w-[220px]">
                         <select
+                          disabled={disabled}
                           value={reading.filter}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(reading.id, 'filter', e.target.value)
-                          }
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition disabled:opacity-75"
+                          onChange={(e) => handleCellChange(reading.id, 'filter', e.target.value)}
+                          className="w-full px-3 py-1 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded focus:border-emerald-600 focus:ring-1 focus:ring-emerald-200 outline-none transition disabled:bg-slate-100 disabled:text-slate-400"
+                          id={`bicarbonate-filter-${index}`}
                         >
                           {FILTER_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
-                        {isFilterEdited && (
+                        {rowEdits.filter && (
                           <span
-                            className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[7px] font-black px-1 rounded shadow-2xs pointer-events-none uppercase"
-                            title="Filter modified after save"
+                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                            title="Field previously edited"
                           >
                             EDITED
                           </span>
@@ -568,113 +521,121 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
                       </div>
                     </td>
 
-                    {/* NaCl / Na2CO3 Value Input */}
-                    <td className="py-2.5 px-4 text-center border-r border-slate-100">
-                      <div className="relative max-w-[200px] mx-auto">
-                        <input
-                          type="text"
-                          value={reading.naclNa2co3}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(
-                              reading.id,
-                              'naclNa2co3',
-                              e.target.value
-                            )
-                          }
-                          placeholder="0.00"
-                          className={`w-full text-center font-mono text-xs font-bold py-1.5 px-3 rounded-lg border transition ${
-                            hasError
-                              ? 'border-rose-400 bg-rose-50 text-rose-800 ring-2 ring-rose-200'
-                              : reading.naclNa2co3 !== ''
-                              ? 'border-teal-300 bg-teal-50/50 text-teal-900 font-extrabold focus:bg-white'
-                              : 'border-slate-200 bg-white text-slate-700'
-                          } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 disabled:opacity-75`}
-                        />
-                        {isValEdited && (
-                          <span
-                            className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[7px] font-black px-1 rounded shadow-2xs pointer-events-none uppercase"
-                            title="Value modified after save"
-                          >
-                            EDITED
-                          </span>
-                        )}
+                    {/* NaCl / Na₂CO₃ (%) */}
+                    <td className="px-4 py-2 border-r border-slate-100">
+                      <div className="flex flex-col items-center justify-center max-w-[200px] mx-auto gap-1">
+                        <div className="relative w-full">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={disabled}
+                            value={reading.naclNa2co3}
+                            placeholder="0.00"
+                            onChange={(e) => handleCellChange(reading.id, 'naclNa2co3', e.target.value)}
+                            id={`bicarbonate-nacl-${index}`}
+                            className="w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border border-slate-300 transition outline-none focus:ring-2 focus:border-emerald-600 focus:ring-emerald-200 disabled:bg-slate-100 disabled:text-slate-400"
+                          />
+                          {rowEdits.naclNa2co3 && (
+                            <span
+                              className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
+                              title="Field previously edited"
+                            >
+                              EDITED
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
-
-                    {/* Delete Row Button */}
-                    {!isViewOnly && (
-                      <td className="py-2.5 px-4 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(reading.id)}
-                          disabled={readings.length <= 1}
-                          className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                          title="Delete row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
             </tbody>
+            <tfoot className="bg-slate-100/80 border-t-2 border-slate-300 sticky bottom-0 z-10 font-bold text-xs">
+              <tr>
+                <td colSpan={4} className="px-4 py-2.5 text-right text-slate-700 uppercase tracking-wider font-extrabold border-r border-slate-300">
+                  Average NaCl / Na₂CO₃ (%):
+                </td>
+                <td className="px-4 py-2.5 text-center text-emerald-700 font-black text-sm">
+                  {stats.avg !== null ? `${stats.avg}%` : '—'}
+                </td>
+              </tr>
+            </tfoot>
           </table>
+        </div>
+        <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
+          <div>Values for <strong>Bi Carbonate NaCl/Na2CO3</strong>. Numeric decimal values only. Leave blank if not sampled.</div>
+          <div>One correction allowed after first save; saving the next slot locks the previous one.</div>
         </div>
       </div>
 
-      {/* ── Pre-Save Confirmation Modal ── */}
-      {showConfirmModal && confirmData && (
+      {/* ── SAVE CONFIRMATION MODAL ── */}
+      {showConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden transform transition-all">
-            <div className="px-5 py-3.5 bg-gradient-to-r from-slate-900 to-teal-950 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Save className="w-4 h-4 text-teal-400" />
-                <h3 className="font-extrabold text-sm tracking-wide">Confirm Bi Carbonate Save</h3>
-              </div>
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-white transition cursor-pointer text-base leading-none"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="text-xs text-slate-600">
-                Are you sure you want to save <strong>{confirmData.readings.length}</strong> entered reading(s) for <strong>{formatDateDisplay(confirmData.date)}</strong>?
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-56 overflow-y-auto space-y-1.5">
-                {confirmData.readings.map((r, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-white px-3 py-1.5 rounded border border-slate-200 text-xs font-mono">
-                    <span className="font-bold text-slate-700">{r.time} ({r.filter || 'No Filter'})</span>
-                    <span className="font-black text-teal-700">{r.naclNa2co3 || '—'}%</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-[11px] text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Persisting will record all readings in MongoDB and dispatch notifications to the assigned SA Plant user.
-                </span>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
+                  <Save className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
+                  <p className="text-xs text-slate-500">Soda Ash Plant — Bi Carbonate Analysis</p>
+                </div>
               </div>
             </div>
 
-            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+            <div className="p-5 space-y-3.5 text-xs text-slate-600">
+              <p>
+                You are about to persist readings for slot <strong>{confirmData?.targetSlot}</strong> ({confirmData?.targetRow?.time || 'Scheduled Time'}):
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Operating Date:</span>
+                  <span className="font-bold text-slate-800">{date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Target Slot:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetSlot} ({confirmData?.targetRow?.time})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Filter:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.filter || '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">NaCl / Na₂CO₃ (%):</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.naclNa2co3 || '—'}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Saving will securely store this slot in MongoDB.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
               <button
+                type="button"
                 onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-300 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleConfirmSave}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 active:bg-teal-800 rounded-lg transition shadow-xs cursor-pointer"
+                disabled={saving}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Confirm & Save</span>
+                {saving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm & Save</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
