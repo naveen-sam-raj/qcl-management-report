@@ -10,33 +10,18 @@ import {
 import {
   ArrowLeft,
   AlertCircle,
-  Calendar,
   Save,
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   Droplets,
   Layers,
   TrendingUp,
-  RefreshCw,
-  Mail,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
-// ─── SA Plant Bi Carbonate Moisture Parameters & Validation Limits ───────────
-// Plant: SA Plant ONLY (Bi Carbonate Section)
-// Parameter: Moisture
-// Options: A, B, C (Separate options under M 404)
-// Frequency: Once in 4 Hours
-//
-// Moisture:
-// - Reference Value: 20%
-// - Tolerance: ±2.0%
-// - Valid Range: 18% – 22%
-// Applied independently to Options A, B, and C
 export const BICARBONATE_MOISTURE_LIMITS = {
   m404_a: {
     key: 'm404_a',
@@ -88,63 +73,12 @@ export const BICARBONATE_MOISTURE_LIMITS = {
   },
 };
 
-// Default initial readings matching the 5 required row types
 const DEFAULT_READINGS = [
-  {
-    id: '1',
-    shift: 'I SHIFT',
-    time: '07:00',
-    m404_a: '',
-    m404_b: '',
-    m404_c: '',
-    m405_outlet: '',
-    sb_turb1: '',
-    sb_turb2: '',
-  },
-  {
-    id: '2',
-    shift: 'II SHIFT',
-    time: '15:00',
-    m404_a: '',
-    m404_b: '',
-    m404_c: '',
-    m405_outlet: '',
-    sb_turb1: '',
-    sb_turb2: '',
-  },
-  {
-    id: '3',
-    shift: 'III SHIFT',
-    time: '23:00',
-    m404_a: '',
-    m404_b: '',
-    m404_c: '',
-    m405_outlet: '',
-    sb_turb1: '',
-    sb_turb2: '',
-  },
-  {
-    id: '4',
-    shift: 'ADDL SAPL1',
-    time: '11:00',
-    m404_a: '',
-    m404_b: '',
-    m404_c: '',
-    m405_outlet: '',
-    sb_turb1: '',
-    sb_turb2: '',
-  },
-  {
-    id: '5',
-    shift: 'SAMPLE',
-    time: '',
-    m404_a: '',
-    m404_b: '',
-    m404_c: '',
-    m405_outlet: '',
-    sb_turb1: '',
-    sb_turb2: '',
-  },
+  { id: '1', shift: 'I SHIFT', time: '06:00', m404_a: '', m404_b: '', m404_c: '', m405_outlet: '', sb_turb1: '', sb_turb2: '' },
+  { id: '2', shift: 'II SHIFT', time: '14:00', m404_a: '', m404_b: '', m404_c: '', m405_outlet: '', sb_turb1: '', sb_turb2: '' },
+  { id: '3', shift: 'III SHIFT', time: '22:00', m404_a: '', m404_b: '', m404_c: '', m405_outlet: '', sb_turb1: '', sb_turb2: '' },
+  { id: '4', shift: 'ADDL SAPL1', time: '10:00', m404_a: '', m404_b: '', m404_c: '', m405_outlet: '', sb_turb1: '', sb_turb2: '' },
+  { id: '5', shift: 'SAMPLE', time: '18:00', m404_a: '', m404_b: '', m404_c: '', m405_outlet: '', sb_turb1: '', sb_turb2: '' },
 ];
 
 const NUMERIC_FIELDS = [
@@ -156,25 +90,7 @@ const NUMERIC_FIELDS = [
   'sb_turb2',
 ];
 
-const getTodayAsiaKolkata = () => {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-};
-
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
-
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
-  }
-};
 
 const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
   const navigate = useNavigate();
@@ -184,28 +100,76 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Strict Current-Date Restriction) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [readings, setReadings]                     = useState(DEFAULT_READINGS);
   const [originalReadings, setOriginalReadings]     = useState(null);
   const [errors, setErrors]                         = useState({});
   const [saving, setSaving]                         = useState(false);
   const [lastSaved, setLastSaved]                   = useState(null);
 
-  // Email & Persistence states
-  const [savePhase, setSavePhase]                   = useState('idle'); // 'idle' | 'saving'  | 'completed' | 'email_failed'
+  const [savePhase, setSavePhase]                   = useState('idle');
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
-  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
   const [editedFields, setEditedFields]             = useState({});
-  const [retryingEmail, setRetryingEmail]           = useState(false);
+  const [lockedShifts, setLockedShifts]             = useState({});
+  const [lockedSlots, setLockedSlots]               = useState({
+    shift1: { isSaved: false, isLocked: false, correctionUsed: false },
+    shift2: { isSaved: false, isLocked: false, correctionUsed: false },
+    shift3: { isSaved: false, isLocked: false, correctionUsed: false },
+    addl:   { isSaved: false, isLocked: false, correctionUsed: false },
+    sample: { isSaved: false, isLocked: false, correctionUsed: false },
+  });
 
-  // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
   const [confirmData, setConfirmData]               = useState(null);
 
-  // Fetch existing data when mounted or date changes
+  const getSlotKey = useCallback((reading) => {
+    if (!reading) return null;
+    const idStr = String(reading.id || '').trim();
+    const shiftStr = String(reading.shift || '').trim().toUpperCase();
+    if (idStr === '3' || shiftStr.includes('III SHIFT') || shiftStr === 'III' || shiftStr === '3') return 'shift3';
+    if (idStr === '2' || shiftStr.includes('II SHIFT') || shiftStr === 'II' || shiftStr === '2') return 'shift2';
+    if (idStr === '1' || shiftStr.includes('I SHIFT') || shiftStr === 'I' || shiftStr === '1') return 'shift1';
+    if (idStr === '4' || shiftStr.includes('ADDL') || shiftStr.includes('SAPL1') || shiftStr === '4') return 'addl';
+    if (idStr === '5' || shiftStr.includes('SAMPLE') || shiftStr === '5') return 'sample';
+    return null;
+  }, []);
+
+  const getSlotStatus = useCallback((slotKey) => {
+    if (!slotKey) return 'LOCKED';
+    const s = lockedSlots[slotKey] || {};
+    if (slotKey === 'shift1') {
+      if (s.isLocked || lockedSlots.shift2?.isSaved) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift2') {
+      if (!lockedSlots.shift1?.isSaved) return 'WAITING';
+      if (s.isLocked || lockedSlots.shift3?.isSaved) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift3') {
+      if (!lockedSlots.shift2?.isSaved) return 'WAITING';
+      if (s.isLocked) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'addl' || slotKey === 'sample') {
+      if (s.isLocked) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    return 'LOCKED';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
+    if (isViewOnly) return true;
+    const st = getSlotStatus(slotKey);
+    return st === 'LOCKED' || st === 'WAITING';
+  }, [isViewOnly, getSlotStatus]);
+
   useEffect(() => {
     let active = true;
     const fetchExistingData = async () => {
@@ -219,14 +183,6 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
             setRecordId(rec._id || response.data.recordId || null);
             setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || '');
 
-            if (rec.emailStatus === 'sent') {
-              setSavePhase('completed');
-              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
-            } else if (rec.emailStatus === 'failed') {
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
-            }
-
             const fetchedReadings = rec.readings || rec.data?.readings;
             if (Array.isArray(fetchedReadings) && fetchedReadings.length > 0) {
               setReadings(fetchedReadings);
@@ -237,6 +193,14 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
             }
 
             setEditedFields(rec.editedFields || response.data.editedFields || {});
+            setLockedShifts(rec.lockedShifts || response.data.lockedShifts || {});
+            setLockedSlots(rec.lockedSlots || response.data.lockedSlots || {
+              shift1: { isSaved: false, isLocked: false, correctionUsed: false },
+              shift2: { isSaved: false, isLocked: false, correctionUsed: false },
+              shift3: { isSaved: false, isLocked: false, correctionUsed: false },
+              addl:   { isSaved: false, isLocked: false, correctionUsed: false },
+              sample: { isSaved: false, isLocked: false, correctionUsed: false },
+            });
           } else {
             setReadings(DEFAULT_READINGS);
             setOriginalReadings(null);
@@ -255,7 +219,6 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
     return () => { active = false; };
   }, [date]);
 
-  // ── Handle reading cell change ──
   const handleCellChange = useCallback((id, field, value) => {
     if (isViewOnly) return;
     if (NUMERIC_FIELDS.includes(field) && !isValidDecimal(value)) return;
@@ -264,7 +227,6 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
     );
 
-    // Clear error
     setErrors((prev) => {
       const copy = { ...prev };
       delete copy[`${id}_${field}`];
@@ -272,39 +234,9 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
     });
   }, [isViewOnly]);
 
-  // ── Add new reading row ──
-  const handleAddRow = () => {
-    if (isViewOnly) return;
-    const nextId = String(Date.now());
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        shift: `EXTRA #${prev.length + 1}`,
-        time: '',
-        m404_a: '',
-        m404_b: '',
-        m404_c: '',
-        m405_outlet: '',
-        sb_turb1: '',
-        sb_turb2: '',
-      },
-    ]);
-  };
-
-  // ── Remove reading row ──
-  const handleRemoveRow = (id) => {
-    if (isViewOnly) return;
-    if (readings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
-    }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-  };
-
-  // ── Reset ──
   const handleReset = () => {
-    if (originalReadings) {
+    if (isViewOnly) return;
+    if (originalReadings && Array.isArray(originalReadings)) {
       setReadings(JSON.parse(JSON.stringify(originalReadings)));
       showToast?.('Restored readings to last persisted state.', 'info');
     } else {
@@ -314,41 +246,22 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
     setErrors({});
   };
 
-  // ── Summary Calculations ──
-  const stats = useMemo(() => {
-    const m404Vals = [];
-    const turbVals = [];
-
-    readings.forEach((r) => {
-      ['m404_a', 'm404_b', 'm404_c'].forEach((f) => {
-        const n = parseFloat(r[f]);
-        if (!isNaN(n)) m404Vals.push(n);
+  const getModifiedSlots = useCallback(() => {
+    const origList = originalReadings || DEFAULT_READINGS;
+    const changed = [];
+    ['shift1', 'shift2', 'shift3', 'addl', 'sample'].forEach((sk) => {
+      const curR = readings.find((r) => getSlotKey(r) === sk) || {};
+      const origR = origList.find((r) => getSlotKey(r) === sk) || {};
+      const hasDiff = NUMERIC_FIELDS.some((f) => {
+        const cv = curR[f] === undefined || curR[f] === null ? '' : String(curR[f]).trim();
+        const ov = origR[f] === undefined || origR[f] === null ? '' : String(origR[f]).trim();
+        return cv !== ov;
       });
-      ['sb_turb1', 'sb_turb2'].forEach((f) => {
-        const n = parseFloat(r[f]);
-        if (!isNaN(n)) turbVals.push(n);
-      });
+      if (hasDiff) changed.push(sk);
     });
+    return changed;
+  }, [readings, originalReadings, getSlotKey]);
 
-    const m404Avg =
-      m404Vals.length > 0
-        ? (m404Vals.reduce((a, b) => a + b, 0) / m404Vals.length).toFixed(2)
-        : '—';
-
-    const turbAvg =
-      turbVals.length > 0
-        ? (turbVals.reduce((a, b) => a + b, 0) / turbVals.length).toFixed(1)
-        : '—';
-
-    return {
-      m404Count: m404Vals.length,
-      m404Avg,
-      turbCount: turbVals.length,
-      turbAvg,
-    };
-  }, [readings]);
-
-  // ── Pre-Save Prompt & Validation ──
   const handleSaveClick = () => {
     if (isViewOnly) return;
     const newErrors = {};
@@ -367,24 +280,34 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
       return;
     }
 
-    const filledRows = readings.filter(r =>
-      NUMERIC_FIELDS.some(f => r[f] !== '' && r[f] !== null && r[f] !== undefined)
-    );
+    const modified = getModifiedSlots();
+    if (modified.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
 
-    if (filledRows.length === 0) {
-      showToast?.('Please enter at least one measurement value before saving.', 'warning');
+    if (modified.length > 1) {
+      showToast?.('Only one shift or slot can be entered and saved at a time.', 'warning');
+      return;
+    }
+
+    const targetSlot = modified[0];
+    const targetReading = readings.find((r) => getSlotKey(r) === targetSlot);
+    const hasAnyValue = NUMERIC_FIELDS.some((f) => targetReading && targetReading[f] !== '' && targetReading[f] !== null && targetReading[f] !== undefined);
+
+    if (!hasAnyValue && !lockedSlots[targetSlot]?.isSaved) {
+      showToast?.('Cannot save an empty slot. At least one measurement is required.', 'warning');
       return;
     }
 
     setConfirmData({
       date,
-      readings: filledRows,
-      totalCount: readings.length,
+      targetSlot,
+      reading: targetReading,
     });
     setShowConfirmModal(true);
   };
 
-  // ── Save Handler ──
   const handleConfirmSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -402,6 +325,13 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
 
       const res = await api.post('/api/bicarbonate-moisture', payload);
 
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       if (!res.data?.success) {
         showToast?.(res.data?.message || 'Failed to save Bicarbonate Moisture Analysis.', 'error');
         setSavePhase('idle');
@@ -412,77 +342,48 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
       setOriginalReadings(JSON.parse(JSON.stringify(readings)));
       setLastSaved(new Date().toLocaleTimeString());
 
-      const returnedDoc = res.data?.data || res.data?.analysis || {};
+      const returnedDoc = res.data?.data || res.data?.record || {};
       const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
       const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
 
       setEditedFields(newEdited);
+      setLockedShifts(returnedDoc.lockedShifts || res.data?.lockedShifts || {});
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
       if (newRecordId) setRecordId(newRecordId);
 
-      const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
-      const recipient = res.data?.emailRecipient;
-      if (recipient) setRecipientEmail(recipient);
-
-      if (deliveryStatus === 'sent') {
-        setSavePhase('completed');
-        setEmailStatusDetail(`Email sent to ${recipient || 'plant operator'}`);
-        showToast?.('Saved & Email Sent Successfully!', 'success');
-      } else if (deliveryStatus === 'failed') {
-        setSavePhase('email_failed');
-        const errDetail = res.data?.message || 'SMTP delivery rejected';
-        setEmailStatusDetail(errDetail);
-        if (errDetail.includes('550') || errDetail.includes('Access denied')) {
-          setIsPermanentMailError(true);
-        }
-        showToast?.('Analysis Saved, but notification email delivery failed.', 'warning');
-      } else {
-        setSavePhase('completed');
-        setEmailStatusDetail('Saved successfully. Email notification is processing in background.');
-        showToast?.('Analysis Saved successfully!', 'success');
-      }
+      setSavePhase('completed');
+      setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+      showToast?.('Saved ✓', 'success');
     } catch (err) {
-      console.error('Save error:', err);
-      const errMsg = err.response?.data?.message || err.message || 'Error occurred while saving.';
-      showToast?.(errMsg, 'error');
+      console.error('Error saving Bicarbonate Moisture data:', err);
+      const msg = err?.response?.data?.message || 'Failed to save Bicarbonate Moisture Analysis data.';
+      showToast?.(msg, 'error');
       setSavePhase('idle');
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Retry Email Handler ──
-  const handleRetryEmail = async () => {
-    if (!recordId || retryingEmail) return;
-    setRetryingEmail(true);
-
-    try {
-      const res = await api.post(`/api/bicarbonate-moisture/${recordId}/retry-email`);
-      if (res.data?.success && res.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail(`Notification email re-sent to ${res.data.emailRecipient || recipientEmail}`);
-        showToast?.('Email successfully re-sent!', 'success');
+  const averages = useMemo(() => {
+    const res = {};
+    NUMERIC_FIELDS.forEach((f) => {
+      const nums = readings
+        .map((r) => r[f])
+        .filter((v) => v !== '' && v !== null && v !== undefined && !isNaN(Number(v)))
+        .map(Number);
+      if (nums.length > 0) {
+        const sum = nums.reduce((a, b) => a + b, 0);
+        res[f] = (sum / nums.length).toFixed(2);
       } else {
-        setSavePhase('email_failed');
-        const errMsg = res.data?.emailError || res.data?.message || 'Retry failed';
-        setEmailStatusDetail(`Retry failed: ${errMsg}`);
-        if (errMsg.includes('550') || errMsg.includes('Access denied')) {
-          setIsPermanentMailError(true);
-        }
-        showToast?.('Email retry failed.', 'error');
+        res[f] = '—';
       }
-    } catch (err) {
-      console.error('Retry email error:', err);
-      const msg = err.response?.data?.message || err.message || 'Retry failed';
-      setEmailStatusDetail(`Retry failed: ${msg}`);
-      showToast?.('Email retry failed.', 'error');
-    } finally {
-      setRetryingEmail(false);
-    }
-  };
+    });
+    return res;
+  }, [readings]);
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── TOP HEADER BAR ── */}
+      {/* TOP HEADER BAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <button
@@ -539,34 +440,34 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
 
           {!isViewOnly && (
             <StatusSaveButton
-              id="btn-bicarb-moisture-save"
+              id="btn-bicarbonate-moisture-save"
               saving={saving}
               savePhase={savePhase}
+              saveSuccess={savePhase === 'completed'}
               onClick={handleSaveClick}
-              defaultLabel="Save Moisture Data"
+              alwaysShowSaveText
+              defaultLabel="Save / Submit"
               title="Save Bicarbonate Moisture data"
             />
           )}
         </div>
       </div>
 
-      {/* ── Status Banner (Email / Save Status) ── */}
       <SaveStatusBanner
         id="bicarb-moisture-status-banner"
-        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        saveSuccess={savePhase === 'completed'}
         savePhase={savePhase}
         date={date}
         analysisName="Bicarbonate Moisture Analysis"
         recipientEmail={recipientEmail}
         emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => setSavePhase('idle')}
-        saving={saving || retryingEmail}
+        saving={saving}
       />
 
-      {/* ── MAIN ANALYSIS TABLE ── */}
+      {/* MAIN ANALYSIS TABLE */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table top title banner with Date Locked to Today */}
+        {/* Table top title banner with LockedDateDisplay */}
         <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
@@ -579,49 +480,18 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
               </span>
             </div>
 
-            {/* Date Input inside Table Header - Locked to Today */}
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="moisture-date-input"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="moisture-date-input"
-                  type="date"
-                  value={date}
-                  readOnly
-                  disabled
-                  className="pl-2.5 pr-2 py-1 text-xs font-bold border border-slate-300 rounded-lg text-slate-800 bg-slate-100 cursor-not-allowed select-none"
-                  title="Date is automatically locked to today (Asia/Kolkata timezone)"
-                />
-              </div>
-              <span className="inline-flex items-center gap-1 text-[11px] text-cyan-800 font-bold bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-md">
-                <Calendar className="w-3 h-3 text-cyan-600" />
-                {formatDateDisplay(date)} (Today)
-              </span>
-            </div>
+            <LockedDateDisplay
+              date={date}
+              id="bicarbonate-moisture-date-display"
+              badgeText="Operating Day"
+            />
           </div>
-
-          {!isViewOnly && (
-            <button
-              onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-700 bg-cyan-50 hover:bg-cyan-100/80 border border-cyan-200 px-3 py-1.5 rounded-lg transition shadow-2xs cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Slot
-            </button>
-          )}
         </div>
 
         {/* Data Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              {/* Row 1: Group Headers */}
               <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
                 <th
                   rowSpan={2}
@@ -631,7 +501,7 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                 </th>
                 <th
                   rowSpan={2}
-                  className="py-3 px-4 w-32 border-r border-b border-slate-800"
+                  className="py-3 px-4 w-48 border-r border-b border-slate-800"
                 >
                   <div className="flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-cyan-400" />
@@ -640,9 +510,9 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                 </th>
                 <th
                   rowSpan={2}
-                  className="py-3 px-3 w-28 border-r border-b border-slate-800"
+                  className="py-3 px-3 w-28 border-r border-b border-slate-800 text-center"
                 >
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Time</span>
                   </div>
@@ -664,20 +534,11 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                 </th>
                 <th
                   colSpan={2}
-                  className="py-2 px-3 text-center border-r border-b border-slate-800 bg-slate-800/90 text-cyan-300 font-extrabold"
+                  className="py-2 px-3 text-center border-b border-slate-800 bg-slate-800/90 text-cyan-300 font-extrabold"
                 >
-                  SB
+                  SB TURBIDITY
                 </th>
-                {!isViewOnly && (
-                  <th
-                    rowSpan={2}
-                    className="py-3 px-3 w-14 text-center border-b border-slate-800"
-                  >
-                    Action
-                  </th>
-                )}
               </tr>
-              {/* Row 2: Sub-columns */}
               <tr className="bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider text-center">
                 <th className="py-2 px-2 border-r border-slate-700 min-w-[96px] text-center">
                   <div className="font-extrabold text-cyan-200">A</div>
@@ -691,627 +552,240 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
                   <div className="font-extrabold text-cyan-200">C</div>
                   <div className="text-[9px] text-slate-300 font-medium normal-case">18% – 22%</div>
                 </th>
-                <th className="py-2 px-3 border-r border-slate-700 w-24">TURB</th>
-                <th className="py-2 px-3 border-r border-slate-700 w-24">TURB</th>
+                <th className="py-2 px-3 border-r border-slate-700 w-24">TURB 1</th>
+                <th className="py-2 px-3 border-slate-700 w-24">TURB 2</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((reading, index) => {
+                const slotKey = getSlotKey(reading);
+                const slotStatus = getSlotStatus(slotKey);
+                const disabled = isSlotDisabled(slotKey);
                 const rowKey = reading.id || `shift_${reading.shift}`;
                 const rowEdits = editedFields[rowKey] || {};
 
                 return (
                   <tr
-                    key={reading.id}
-                    className="hover:bg-cyan-50/20 transition-colors group"
+                    key={reading.id || index}
+                    className={`transition-colors group ${disabled ? 'bg-slate-50/60' : 'hover:bg-cyan-50/20'}`}
                   >
-                    {/* Index */}
                     <td className="py-2 px-3 text-center font-bold text-slate-400 border-r border-slate-100">
                       {index + 1}
                     </td>
 
-                    {/* Shift Label / Input */}
                     <td className="py-2 px-3 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.shift}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(reading.id, 'shift', e.target.value)
-                          }
-                          placeholder="Shift name"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1 text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-cyan-500 transition disabled:bg-slate-100"
-                        />
-                        {rowEdits.shift && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-black text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-300">
+                          {reading.shift}
+                        </span>
+                        <RecordStatusBadge status={slotStatus} />
                       </div>
                     </td>
 
-                    {/* Time Input */}
-                    <td className="py-2 px-3 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.time}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(reading.id, 'time', e.target.value)
-                          }
-                          placeholder="HH:MM"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-cyan-500 transition disabled:bg-slate-100"
-                        />
-                        {rowEdits.time && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
-                      </div>
+                    <td className="py-2 px-3 border-r border-slate-100 text-center">
+                      <span className="font-mono text-xs font-semibold text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-200">
+                        {reading.time}
+                      </span>
                     </td>
 
-                    {/* M 404 A */}
-                    <td className="py-2 px-2 border-r border-slate-100 align-top">
-                      {(() => {
-                        const cellVal = reading.m404_a;
-                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
-                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_a') || BICARBONATE_MOISTURE_LIMITS.m404_a;
-                        const validation = validateCellValue(cellVal, limit);
-                        const isOutOfLimit = validation.isOutOfLimit;
-                        const isNormal = validation.isNormal;
-                        const isFormatError = !!errors[`${reading.id}_m404_a`];
-                        const isEdited = !!rowEdits.m404_a;
-
-                        return (
-                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
-                            <div className="relative w-full">
-                              <input
-                                id={`moisture-input-${reading.id}-a`}
-                                type="text"
-                                inputMode="decimal"
-                                disabled={isViewOnly}
-                                value={cellVal}
-                                onChange={(e) =>
-                                  handleCellChange(reading.id, 'm404_a', e.target.value)
-                                }
-                                placeholder="—"
-                                title={
-                                  limit
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : hasValue
-                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : `Allowed range: ${limit.formattedRange}`
-                                    : 'Option A'
-                                }
-                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
-                                  isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
-                                    : isFormatError
-                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
-                                    : hasValue && isNormal && limit
-                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
-                                    : hasValue
-                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
-                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
-                                }`}
-                              />
-                              {isEdited && (
-                                <span
-                                  className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                                  title="Field previously edited"
-                                >
-                                  EDITED
-                                </span>
-                              )}
-                              {isOutOfLimit && (
-                                <span
-                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
-                                  title="Out of limit"
-                                >
-                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Error / Validation Status & Range */}
-                            {isFormatError ? (
-                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
-                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                                <span>Invalid</span>
-                              </div>
-                            ) : (
-                              <div className="mt-1 flex flex-col items-center justify-center">
-                                {hasValue && isNormal && limit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-a`}
-                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
-                                    title={`NORMAL: within ${limit.formattedRange}`}
-                                  >
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                    <span>NORMAL</span>
-                                  </span>
-                                )}
-                                {hasValue && isOutOfLimit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-a`}
-                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
-                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
-                                  >
-                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
-                                    <span>OUT OF LIMIT</span>
-                                  </span>
-                                )}
-                                <span
-                                  id={`moisture-range-${reading.id}-a`}
-                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
-                                    isOutOfLimit
-                                      ? 'text-rose-700 font-bold'
-                                      : hasValue
-                                      ? 'text-slate-600 font-bold'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  {limit?.formattedRange || '18% – 22%'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
+                    {/* M 404 Option A */}
+                    <td className="py-2 px-2 border-r border-slate-100 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.m404_a ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'm404_a', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_m404_a`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.m404_a && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
 
-                    {/* M 404 B */}
-                    <td className="py-2 px-2 border-r border-slate-100 align-top">
-                      {(() => {
-                        const cellVal = reading.m404_b;
-                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
-                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_b') || BICARBONATE_MOISTURE_LIMITS.m404_b;
-                        const validation = validateCellValue(cellVal, limit);
-                        const isOutOfLimit = validation.isOutOfLimit;
-                        const isNormal = validation.isNormal;
-                        const isFormatError = !!errors[`${reading.id}_m404_b`];
-                        const isEdited = !!rowEdits.m404_b;
-
-                        return (
-                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
-                            <div className="relative w-full">
-                              <input
-                                id={`moisture-input-${reading.id}-b`}
-                                type="text"
-                                inputMode="decimal"
-                                disabled={isViewOnly}
-                                value={cellVal}
-                                onChange={(e) =>
-                                  handleCellChange(reading.id, 'm404_b', e.target.value)
-                                }
-                                placeholder="—"
-                                title={
-                                  limit
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : hasValue
-                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : `Allowed range: ${limit.formattedRange}`
-                                    : 'Option B'
-                                }
-                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
-                                  isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
-                                    : isFormatError
-                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
-                                    : hasValue && isNormal && limit
-                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
-                                    : hasValue
-                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
-                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
-                                }`}
-                              />
-                              {isEdited && (
-                                <span
-                                  className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                                  title="Field previously edited"
-                                >
-                                  EDITED
-                                </span>
-                              )}
-                              {isOutOfLimit && (
-                                <span
-                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
-                                  title="Out of limit"
-                                >
-                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Error / Validation Status & Range */}
-                            {isFormatError ? (
-                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
-                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                                <span>Invalid</span>
-                              </div>
-                            ) : (
-                              <div className="mt-1 flex flex-col items-center justify-center">
-                                {hasValue && isNormal && limit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-b`}
-                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
-                                    title={`NORMAL: within ${limit.formattedRange}`}
-                                  >
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                    <span>NORMAL</span>
-                                  </span>
-                                )}
-                                {hasValue && isOutOfLimit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-b`}
-                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
-                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
-                                  >
-                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
-                                    <span>OUT OF LIMIT</span>
-                                  </span>
-                                )}
-                                <span
-                                  id={`moisture-range-${reading.id}-b`}
-                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
-                                    isOutOfLimit
-                                      ? 'text-rose-700 font-bold'
-                                      : hasValue
-                                      ? 'text-slate-600 font-bold'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  {limit?.formattedRange || '18% – 22%'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
+                    {/* M 404 Option B */}
+                    <td className="py-2 px-2 border-r border-slate-100 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.m404_b ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'm404_b', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_m404_b`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.m404_b && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
 
-                    {/* M 404 C */}
-                    <td className="py-2 px-2 border-r border-slate-100 align-top">
-                      {(() => {
-                        const cellVal = reading.m404_c;
-                        const hasValue = cellVal !== '' && cellVal !== null && cellVal !== undefined;
-                        const limit = getCellLimit('sa', 'bicarbonate-moisture', reading.shift, 'm404_c') || BICARBONATE_MOISTURE_LIMITS.m404_c;
-                        const validation = validateCellValue(cellVal, limit);
-                        const isOutOfLimit = validation.isOutOfLimit;
-                        const isNormal = validation.isNormal;
-                        const isFormatError = !!errors[`${reading.id}_m404_c`];
-                        const isEdited = !!rowEdits.m404_c;
-
-                        return (
-                          <div className="flex flex-col items-center justify-start min-h-[58px] min-w-[92px] mx-auto">
-                            <div className="relative w-full">
-                              <input
-                                id={`moisture-input-${reading.id}-c`}
-                                type="text"
-                                inputMode="decimal"
-                                disabled={isViewOnly}
-                                value={cellVal}
-                                onChange={(e) =>
-                                  handleCellChange(reading.id, 'm404_c', e.target.value)
-                                }
-                                placeholder="—"
-                                title={
-                                  limit
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : hasValue
-                                      ? `NORMAL: ${cellVal}% (Allowed: ${limit.formattedRange})`
-                                      : `Allowed range: ${limit.formattedRange}`
-                                    : 'Option C'
-                                }
-                                className={`w-full text-center font-mono text-xs font-bold py-1.5 px-2 rounded-md border-2 transition focus:outline-none ${
-                                  isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
-                                    : isFormatError
-                                    ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
-                                    : hasValue && isNormal && limit
-                                    ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-200'
-                                    : hasValue
-                                    ? 'border-2 border-cyan-500 bg-cyan-50/50 text-cyan-900 font-extrabold focus:ring-2 focus:ring-cyan-200'
-                                    : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
-                                }`}
-                              />
-                              {isEdited && (
-                                <span
-                                  className="absolute -top-2 -left-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                                  title="Field previously edited"
-                                >
-                                  EDITED
-                                </span>
-                              )}
-                              {isOutOfLimit && (
-                                <span
-                                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-4 h-4 shadow-xs flex items-center justify-center pointer-events-none"
-                                  title="Out of limit"
-                                >
-                                  <AlertCircle className="w-2.5 h-2.5 text-white" />
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Error / Validation Status & Range */}
-                            {isFormatError ? (
-                              <div className="text-[9px] text-red-600 font-extrabold leading-tight mt-1 flex items-center gap-0.5">
-                                <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                                <span>Invalid</span>
-                              </div>
-                            ) : (
-                              <div className="mt-1 flex flex-col items-center justify-center">
-                                {hasValue && isNormal && limit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-c`}
-                                    className="text-[10px] text-emerald-700 font-black tracking-tight flex items-center justify-center gap-0.5 animate-fadeIn"
-                                    title={`NORMAL: within ${limit.formattedRange}`}
-                                  >
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                    <span>NORMAL</span>
-                                  </span>
-                                )}
-                                {hasValue && isOutOfLimit && (
-                                  <span
-                                    id={`moisture-status-${reading.id}-c`}
-                                    className="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[9.5px] font-black tracking-tight whitespace-nowrap animate-fadeIn flex items-center justify-center gap-0.5 shadow-2xs"
-                                    title={`OUT OF LIMIT: ${cellVal}% (Allowed: ${limit.formattedRange})`}
-                                  >
-                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
-                                    <span>OUT OF LIMIT</span>
-                                  </span>
-                                )}
-                                <span
-                                  id={`moisture-range-${reading.id}-c`}
-                                  className={`text-[9.5px] font-semibold mt-0.5 tracking-tight ${
-                                    isOutOfLimit
-                                      ? 'text-rose-700 font-bold'
-                                      : hasValue
-                                      ? 'text-slate-600 font-bold'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  {limit?.formattedRange || '18% – 22%'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
+                    {/* M 404 Option C */}
+                    <td className="py-2 px-2 border-r border-slate-100 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.m404_c ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'm404_c', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_m404_c`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.m404_c && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
 
-                    {/* M 405 OUTLET */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.m405_outlet}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(
-                              reading.id,
-                              'm405_outlet',
-                              e.target.value
-                            )
-                          }
-                          placeholder="—"
-                          className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                            errors[`${reading.id}_m405_outlet`]
-                              ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                              : reading.m405_outlet !== ''
-                              ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                              : 'border-slate-200 bg-white text-slate-700'
-                          } focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:bg-slate-100`}
-                        />
-                        {rowEdits.m405_outlet && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
-                      </div>
+                    {/* M 405 Outlet */}
+                    <td className="py-2 px-2 border-r border-slate-100 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.m405_outlet ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'm405_outlet', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_m405_outlet`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.m405_outlet && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
 
-                    {/* SB TURB 1 */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.sb_turb1}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(
-                              reading.id,
-                              'sb_turb1',
-                              e.target.value
-                            )
-                          }
-                          placeholder="—"
-                          className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                            errors[`${reading.id}_sb_turb1`]
-                              ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                              : reading.sb_turb1 !== ''
-                              ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                              : 'border-slate-200 bg-white text-slate-700'
-                          } focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:bg-slate-100`}
-                        />
-                        {rowEdits.sb_turb1 && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
-                      </div>
+                    {/* SB Turbidity 1 */}
+                    <td className="py-2 px-2 border-r border-slate-100 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.sb_turb1 ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'sb_turb1', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_sb_turb1`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.sb_turb1 && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
 
-                    {/* SB TURB 2 */}
-                    <td className="py-2 px-2 border-r border-slate-100">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={reading.sb_turb2}
-                          disabled={isViewOnly}
-                          onChange={(e) =>
-                            handleCellChange(
-                              reading.id,
-                              'sb_turb2',
-                              e.target.value
-                            )
-                          }
-                          placeholder="—"
-                          className={`w-full text-center font-mono text-xs font-bold py-1 px-2 rounded-md border transition ${
-                            errors[`${reading.id}_sb_turb2`]
-                              ? 'border-rose-400 bg-rose-50 text-rose-800 ring-1 ring-rose-200'
-                              : reading.sb_turb2 !== ''
-                              ? 'border-cyan-300 bg-cyan-50/50 text-cyan-900 font-extrabold focus:bg-white'
-                              : 'border-slate-200 bg-white text-slate-700'
-                          } focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:bg-slate-100`}
-                        />
-                        {rowEdits.sb_turb2 && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
-                      </div>
+                    {/* SB Turbidity 2 */}
+                    <td className="py-2 px-2 text-center relative">
+                      <input
+                        type="text"
+                        value={reading.sb_turb2 ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => handleCellChange(reading.id, 'sb_turb2', e.target.value)}
+                        placeholder="—"
+                        className={`w-full text-center px-2 py-1 rounded border text-xs transition ${
+                          errors[`${reading.id}_sb_turb2`] ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white text-slate-800'
+                        } disabled:bg-slate-100 disabled:text-slate-400`}
+                      />
+                      {rowEdits.sb_turb2 && (
+                        <span className="absolute -top-1.5 -right-1 bg-amber-500 text-white text-[9px] font-black px-1 rounded shadow-2xs" title="Field edited">
+                          E
+                        </span>
+                      )}
                     </td>
-
-                    {/* Delete Row Button */}
-                    {!isViewOnly && (
-                      <td className="py-2 px-2 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(reading.id)}
-                          disabled={readings.length <= 1}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 cursor-pointer"
-                          title="Delete slot"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
             </tbody>
+            {/* Averages Row */}
+            <tfoot>
+              <tr className="bg-slate-100/80 font-bold text-slate-800 text-xs border-t-2 border-slate-300">
+                <td colSpan={3} className="py-2.5 px-4 text-right border-r border-slate-200 font-extrabold uppercase">
+                  <div className="flex items-center justify-end gap-1.5 text-cyan-900">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Average:</span>
+                  </div>
+                </td>
+                <td className="py-2.5 px-2 text-center border-r border-slate-200 font-mono text-cyan-900 font-black">
+                  {averages.m404_a}
+                </td>
+                <td className="py-2.5 px-2 text-center border-r border-slate-200 font-mono text-cyan-900 font-black">
+                  {averages.m404_b}
+                </td>
+                <td className="py-2.5 px-2 text-center border-r border-slate-200 font-mono text-cyan-900 font-black">
+                  {averages.m404_c}
+                </td>
+                <td className="py-2.5 px-2 text-center border-r border-slate-200 font-mono text-cyan-900 font-black">
+                  {averages.m405_outlet}
+                </td>
+                <td className="py-2.5 px-2 text-center border-r border-slate-200 font-mono text-cyan-900 font-black">
+                  {averages.sb_turb1}
+                </td>
+                <td className="py-2.5 px-2 text-center font-mono text-cyan-900 font-black">
+                  {averages.sb_turb2}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 
-        {/* ── Table Summary Footer ── */}
-        <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-4 text-slate-600">
-            <span className="flex items-center gap-1.5">
-              <TrendingUp className="w-4 h-4 text-cyan-600" />
-              <span className="font-medium">M 404 Avg Moisture:</span>{' '}
-              <strong className="text-slate-900 font-mono">
-                {stats.m404Avg !== '—' ? `${stats.m404Avg} %` : '—'}
-              </strong>
-            </span>
-            <span className="hidden sm:inline text-slate-300">|</span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-medium">SB Avg Turb:</span>{' '}
-              <strong className="text-slate-900 font-mono">
-                {stats.turbAvg !== '—' ? stats.turbAvg : '—'}
-              </strong>
-            </span>
-          </div>
-
+        {/* Table Footer with Lock Rules Note */}
+        <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 text-xs text-slate-600 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
-              Active Shift Entries:
-            </span>
-            <span className="px-3 py-1 bg-cyan-100 text-cyan-800 font-mono font-extrabold rounded-md border border-cyan-300">
-              {readings.length} Rows
-            </span>
+            <span className="font-semibold text-slate-700">Notice:</span>
+            <span>One correction allowed after first save; saving the next slot locks the previous one. Additional Sample and Sample are independent.</span>
           </div>
+          <span className="text-[11px] font-semibold text-slate-500">
+            Total Slots: {readings.length}
+          </span>
         </div>
       </div>
 
-      {/* ── SAVE CONFIRMATION MODAL ── */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-cyan-50/50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-cyan-100 text-cyan-700 rounded-lg">
-                  <Save className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
-                  <p className="text-xs text-slate-500">SA Plant — Bicarbonate Moisture Analysis</p>
-                </div>
+      {/* Confirmation Modal */}
+      {showConfirmModal && confirmData && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-scaleUp">
+            <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <AlertCircle className="w-4 h-4 text-cyan-400" />
+                <span>Confirm Analysis Submission</span>
               </div>
-            </div>
-
-            <div className="p-5 space-y-3.5 text-xs text-slate-600">
-              <p>
-                You are about to persist readings for <strong>{confirmData?.readings?.length || 0}</strong> active entries for today:
-              </p>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Date:</span>
-                  <span className="font-bold text-slate-800">{date}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">M 404 Avg Moisture:</span>
-                  <span className="font-bold text-cyan-700">{stats.m404Avg !== '—' ? `${stats.m404Avg}%` : '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">SB Avg Turbidity:</span>
-                  <span className="font-bold text-slate-800">{stats.turbAvg !== '—' ? stats.turbAvg : '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Recipient Operator:</span>
-                  <span className="font-bold text-slate-800">{recipientEmail || ''}</span>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Saving will securely store all rows to MongoDB and dispatch an official notification email with an Excel report.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
               <button
-                type="button"
                 onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
+                className="text-slate-400 hover:text-white transition"
               >
-                Cancel
+                ✕
               </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
-                )}
-              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                You are about to save data for <strong>{confirmData.reading?.shift}</strong>. Saving this slot allows exactly one correction until the subsequent slot is saved.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSave}
+                  disabled={saving}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Confirm & Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
