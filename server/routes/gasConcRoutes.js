@@ -1,42 +1,24 @@
 const express = require('express');
-const router = express.Router();
 const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const {
-  hydrateLockState,
-  getInitialLockState,
-  validateSequentialSave,
-  applySequentialSaveTransition,
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isValueDifferent,
 } = require('../services/analysisLockEngine');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 const { generateGasConcExcel } = require('../services/excelService');
 const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
 
-/**
- * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-};
-
-/**
- * Compares two values for differences, preserving decimal precision
- */
-const isValDiff = (o, n) => {
-  if (o === undefined || o === null || o === '') o = null;
-  if (n === undefined || n === null || n === '') n = null;
-  if (o === null && n === null) return false;
-  if (o === null || n === null) return true;
-  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-    return Number(o) !== Number(n);
-  }
-  return String(o) !== String(n);
-};
+const CANONICAL_ANALYSIS_TYPE = 'Gas Conc. Analysis';
+const ANALYSIS_TYPES = [
+  'Gas Conc. Analysis',
+  'Gas Conc Analysis',
+  'Gas Conc',
+];
+const PLANT_CODES = ['SA', 'SA Plant', 'SA PLANT'];
+const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
 
 /**
  * Determines which shift a time slot belongs to:
@@ -67,583 +49,845 @@ const PARAM_DISPLAY_NAMES = {
   bottomGas: 'BOTTOM GAS %',
 };
 
-// Seed/reference initial rows provided by user specifications
-const SEED_ROWS = [
-  // 26.05.2022 block
-  { id: 'gc-1', date: '2022-05-26', displayDate: '26.05.2022', time: '10:00', seal: 'NOT OK', recoveryCo2Con: '46',   cleaningGas: '5',    bottomGas: '63' },
-  { id: 'gc-2', date: '2022-05-26', displayDate: '',           time: '12:00', seal: 'NOT OK', recoveryCo2Con: '37.5', cleaningGas: '8',    bottomGas: '' },
-  { id: 'gc-3', date: '2022-05-26', displayDate: '',           time: '16:00', seal: 'NOT OK', recoveryCo2Con: '38',   cleaningGas: '12',   bottomGas: '75' },
-  { id: 'gc-4', date: '2022-05-26', displayDate: '',           time: '18:00', seal: 'NOT OK', recoveryCo2Con: '42',   cleaningGas: '11.5', bottomGas: '62' },
-  { id: 'gc-5', date: '2022-05-26', displayDate: '',           time: '20:00', seal: 'NOT OK', recoveryCo2Con: '41',   cleaningGas: '11',   bottomGas: '69' },
+function deriveGasConcLocks(doc) {
+  const data = doc?.data || doc || {};
+  const storedSlots = data.lockedSlots || {};
+  const storedShifts = data.lockedShifts || {};
 
-  // 27-05-2022 block
-  { id: 'gc-6', date: '2022-05-27', displayDate: '27-05-2022', time: '06:30', seal: 'NOT OK', recoveryCo2Con: '50.5', cleaningGas: '10',   bottomGas: '67.5' },
-  { id: 'gc-7', date: '2022-05-27', displayDate: '',           time: '10:00', seal: 'NOT OK', recoveryCo2Con: '51.5', cleaningGas: '23',   bottomGas: '69' },
-  { id: 'gc-8', date: '2022-05-27', displayDate: '',           time: '15:30', seal: 'NOT OK', recoveryCo2Con: '49.5', cleaningGas: '20.5', bottomGas: '64.5' },
-  { id: 'gc-9', date: '2022-05-27', displayDate: '',           time: '21:00', seal: 'NOT OK', recoveryCo2Con: '48',   cleaningGas: '17.5', bottomGas: '60.5' },
-];
-
-// In-memory fallback cache
-const gasConcRecords = [];
-
-// Apply auth middleware
-router.use(protect);
-
-/**
- * @desc    Get Gas Conc. Analysis records
- * @route   GET /api/gas-conc
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date, plant } = req.query;
-
-    // Resolve assigned SA Plant operator email
-    let assignedOperatorEmail = null;
-    try {
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA');
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (recipErr) {
-      console.warn('[GasConc] Operator email resolution note:', recipErr.message);
-      assignedOperatorEmail = null;
-    }
-
-    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
-    const defaultLocks = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
-
-    if (date) {
-      // Find document for this exact date
-      const query = {
-        date,
-        plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-        analysisType: { $in: ['Gas Conc. Analysis', 'Gas Conc Analysis', 'Gas Conc'] },
+  const slots = {};
+  for (const sk of SHIFT_KEYS) {
+    if (storedSlots[sk]) {
+      slots[sk] = {
+        isSaved: Boolean(storedSlots[sk].isSaved),
+        isLocked: Boolean(storedSlots[sk].isLocked),
+        correctionUsed: Boolean(storedSlots[sk].correctionUsed),
       };
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company }, { company: null }];
+    } else {
+      const isSaved = Boolean(storedShifts[`${sk}Saved`] || storedShifts[`s${sk.slice(5)}Saved`]);
+      const isLocked = Boolean(storedShifts[`${sk}Locked`] || storedShifts[`s${sk.slice(5)}Locked`]);
+      const edits = Number(storedShifts[`${sk}Edits`] || storedShifts[`s${sk.slice(5)}Edits`] || 0);
+      slots[sk] = {
+        isSaved,
+        isLocked,
+        correctionUsed: edits > 0 || (isSaved && isLocked),
+      };
+    }
+  }
+
+  // Sequential progression:
+  if (!slots.shift1.isSaved) {
+    slots.shift1.isLocked = false;
+    slots.shift2.isLocked = true;
+    slots.shift3.isLocked = true;
+  } else {
+    if (!slots.shift2.isSaved) {
+      slots.shift2.isLocked = false;
+      slots.shift3.isLocked = true;
+    } else {
+      slots.shift1.isLocked = true;
+      if (!slots.shift3.isSaved) {
+        slots.shift3.isLocked = false;
+      } else {
+        slots.shift2.isLocked = true;
+      }
+    }
+  }
+
+  const allPermanentlyLocked =
+    slots.shift1.isLocked && slots.shift2.isLocked && slots.shift3.isLocked;
+
+  const flatShifts = {
+    shift1Saved: slots.shift1.isSaved,
+    shift1Locked: slots.shift1.isLocked,
+    shift1Edits: slots.shift1.correctionUsed ? 1 : 0,
+    shift1: slots.shift1.isLocked,
+    s1Saved: slots.shift1.isSaved,
+    s1Locked: slots.shift1.isLocked,
+    s1Edits: slots.shift1.correctionUsed ? 1 : 0,
+    s1: slots.shift1.isLocked,
+
+    shift2Saved: slots.shift2.isSaved,
+    shift2Locked: slots.shift2.isLocked,
+    shift2Edits: slots.shift2.correctionUsed ? 1 : 0,
+    shift2: slots.shift2.isLocked,
+    s2Saved: slots.shift2.isSaved,
+    s2Locked: slots.shift2.isLocked,
+    s2Edits: slots.shift2.correctionUsed ? 1 : 0,
+    s2: slots.shift2.isLocked,
+
+    shift3Saved: slots.shift3.isSaved,
+    shift3Locked: slots.shift3.isLocked,
+    shift3Edits: slots.shift3.correctionUsed ? 1 : 0,
+    shift3: slots.shift3.isLocked,
+    s3Saved: slots.shift3.isSaved,
+    s3Locked: slots.shift3.isLocked,
+    s3Edits: slots.shift3.correctionUsed ? 1 : 0,
+    s3: slots.shift3.isLocked,
+
+    allPermanentlyLocked,
+  };
+
+  return { lockedSlots: slots, lockedShifts: flatShifts };
+}
+
+function createGasConcRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+  router.use(protect);
+
+  router.get('/', async (req, res) => {
+    try {
+      const { date } = req.query;
+
+      let assignedOperatorEmail = null;
+      try {
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA');
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (recipErr) {
+        console.warn('[GasConc] Operator email resolution note:', recipErr.message);
+        assignedOperatorEmail = null;
       }
 
-      let doc = null;
+      const defaultLocks = deriveGasConcLocks(null);
+
+      if (date) {
+        const companyVal = req.user?.company?._id || req.user?.company || null;
+        const query = {
+          date,
+          plantCode: { $in: PLANT_CODES },
+          analysisType: { $in: ANALYSIS_TYPES },
+        };
+        if (companyVal) {
+          query.$or = [{ company: companyVal }, { company: null }];
+        }
+
+        let matchingDocs = [];
+        try {
+          if (PlantAnalysisRecord && typeof PlantAnalysisRecord.find === 'function') {
+            matchingDocs = await PlantAnalysisRecord.find(query).lean();
+          }
+        } catch (e) {
+          console.warn('[GasConc] Mongo lookup fallback:', e.message);
+        }
+
+        const doc = pickCanonicalDoc(matchingDocs);
+
+        if (doc) {
+          const payloadData = doc.data || {};
+          const rows = Array.isArray(payloadData.rows) ? payloadData.rows : [];
+          const { lockedSlots, lockedShifts } = deriveGasConcLocks(doc);
+          const editedFields = payloadData.editedFields || {};
+          const editAuditHistory = payloadData.editAuditHistory || [];
+
+          return res.status(200).json({
+            success: true,
+            data: {
+              ...payloadData,
+              _id: doc._id,
+              id: doc._id.toString(),
+              date: doc.date,
+              plant: doc.plantCode || 'SA',
+              unit: doc.unit || 'Gas Conc.',
+              analysisType: doc.analysisType,
+              rows,
+              lockedSlots,
+              lockedShifts,
+              editedFields,
+              editAuditHistory,
+              assignedOperatorEmail,
+              emailStatus: doc.emailStatus || 'disabled',
+              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+              submittedBy: doc.submittedBy,
+              submittedAt: doc.updatedAt || doc.createdAt,
+            },
+            record: doc,
+            recordId: doc._id,
+            rows,
+            lockedSlots,
+            lockedShifts,
+            editedFields,
+            editAuditHistory,
+            assignedOperatorEmail,
+            emailStatus: doc.emailStatus || 'disabled',
+            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: null,
+          record: null,
+          rows: [],
+          lockedSlots: defaultLocks.lockedSlots,
+          lockedShifts: defaultLocks.lockedShifts,
+          editedFields: {},
+          editAuditHistory: [],
+          assignedOperatorEmail,
+          emailStatus: 'disabled',
+          emailRecipient: assignedOperatorEmail,
+        });
+      }
+
+      let mongoRecords = [];
       try {
-        if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findOne === 'function') {
-          doc = await PlantAnalysisRecord.findOne(query).sort({ updatedAt: -1 }).lean();
+        if (PlantAnalysisRecord && typeof PlantAnalysisRecord.find === 'function') {
+          const query = {
+            plantCode: { $in: PLANT_CODES },
+            analysisType: { $in: ANALYSIS_TYPES },
+          };
+          mongoRecords = await PlantAnalysisRecord.find(query).sort({ date: -1, createdAt: -1 }).limit(30).lean();
         }
       } catch (e) {
         console.warn('[GasConc] Mongo lookup fallback:', e.message);
       }
 
-      if (doc) {
-        const payloadData = doc.data || {};
-        const rows = Array.isArray(payloadData.rows) ? payloadData.rows : [];
-        const resolvedLocks = payloadData.lockedShifts
-          ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-          : defaultLocks;
-        const editedFields = payloadData.editedFields || {};
-        const editAuditHistory = payloadData.editAuditHistory || [];
-
-        return res.status(200).json({
-          success: true,
-          data: {
-            ...payloadData,
-            _id: doc._id,
-            id: doc._id.toString(),
-            date: doc.date,
-            plant: doc.plantCode || 'SA',
-            unit: doc.unit || 'Gas Conc.',
-            analysisType: doc.analysisType,
-            rows,
-            lockedShifts: resolvedLocks,
-            editedFields,
-            editAuditHistory,
-            assignedOperatorEmail,
-            emailStatus: doc.emailStatus || 'pending',
-            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            submittedBy: doc.submittedBy,
-            submittedAt: doc.updatedAt || doc.createdAt,
-          },
-          record: doc,
-          recordId: doc._id,
-          rows,
-          lockedShifts,
-          editedFields,
-          editAuditHistory,
-          assignedOperatorEmail,
-          emailStatus: doc.emailStatus || 'pending',
-          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-        });
-      }
-
-      // Check in-memory cache
-      const cached = gasConcRecords.find((r) => r.date === date);
-      if (cached) {
-        return res.status(200).json({
-          success: true,
-          data: cached,
-          record: cached,
-          recordId: cached.id,
-          rows: cached.rows || [],
-          lockedShifts: cached.lockedShifts || defaultLocks,
-          editedFields: cached.editedFields || {},
-          editAuditHistory: cached.editAuditHistory || [],
-          assignedOperatorEmail,
-          emailStatus: 'failed',
-          emailRecipient: assignedOperatorEmail,
-        });
-      }
-
-      // No record found for this date
-      return res.status(200).json({
-        success: true,
-        data: null,
-        record: null,
-        rows: [],
-        lockedShifts: defaultLocks,
-        editedFields: {},
-        editAuditHistory: [],
-        assignedOperatorEmail,
-        emailStatus: null,
-        emailRecipient: assignedOperatorEmail,
-      });
-    }
-
-    // No date parameter: return recent records
-    let mongoRecords = [];
-    try {
-      if (PlantAnalysisRecord && typeof PlantAnalysisRecord.find === 'function') {
-        const query = {
-          plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-          analysisType: { $in: ['Gas Conc. Analysis', 'Gas Conc Analysis', 'Gas Conc'] },
-        };
-        mongoRecords = await PlantAnalysisRecord.find(query).sort({ date: -1, createdAt: -1 }).limit(30).lean();
-      }
-    } catch (e) {
-      console.warn('[GasConc] Mongo lookup fallback:', e.message);
-    }
-
-    if (mongoRecords && mongoRecords.length > 0) {
       return res.status(200).json({
         success: true,
         count: mongoRecords.length,
-        data: mongoRecords.map((r) => ({
-          id: r._id,
-          _id: r._id,
-          date: r.date,
-          plant: r.plantCode || 'SA',
-          unit: r.unit || 'Gas Conc.',
-          analysisType: r.analysisType,
-          rows: r.data?.rows || [],
-          lockedShifts: r.data?.lockedShifts || defaultLocks,
-          editedFields: r.data?.editedFields || {},
-          editAuditHistory: r.data?.editAuditHistory || [],
-          submittedBy: r.submittedBy,
-          submittedAt: r.createdAt || r.updatedAt,
-          emailStatus: r.emailStatus,
-          emailRecipient: r.emailRecipient || assignedOperatorEmail,
-          assignedOperatorEmail,
-        })),
+        data: mongoRecords.map((r) => {
+          const derived = deriveGasConcLocks(r);
+          return {
+            id: r._id,
+            _id: r._id,
+            date: r.date,
+            plant: r.plantCode || 'SA',
+            unit: r.unit || 'Gas Conc.',
+            analysisType: r.analysisType,
+            rows: r.data?.rows || [],
+            lockedSlots: derived.lockedSlots,
+            lockedShifts: derived.lockedShifts,
+            editedFields: r.data?.editedFields || {},
+            editAuditHistory: r.data?.editAuditHistory || [],
+            submittedBy: r.submittedBy,
+            submittedAt: r.createdAt || r.updatedAt,
+            emailStatus: 'disabled',
+            emailRecipient: r.emailRecipient || assignedOperatorEmail,
+            assignedOperatorEmail,
+          };
+        }),
         assignedOperatorEmail,
       });
-    }
-
-    return res.status(200).json({
-      success: true,
-      count: gasConcRecords.length,
-      data: gasConcRecords,
-      assignedOperatorEmail,
-    });
-  } catch (error) {
-    console.error('[GasConc] Error fetching data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while fetching Gas Conc. Analysis data.',
-      error: error.message,
-    });
-  }
-});
-
-/**
- * @desc    Save Gas Conc. Analysis records with sequential shift-wise locking
- * @route   POST /api/gas-conc
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body;
-
-    if (!payload) {
-      return res.status(400).json({
+    } catch (error) {
+      console.error('[GasConc] Error fetching data:', error);
+      return res.status(500).json({
         success: false,
-        message: 'Payload is required.',
+        message: 'Server error while fetching Gas Conc. Analysis data.',
+        error: error.message,
       });
     }
+  });
 
-    // 1. Mandatory Date Check & Strict Current-Date Restriction (Asia/Kolkata)
-    const todayKolkata = getTodayKolkata();
-    const submissionDate = payload.date ? String(payload.date).trim() : '';
-
-    if (!submissionDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis Date is required to save Gas Conc. Analysis.',
-      });
-    }
-
-    if (submissionDate !== todayKolkata) {
-      return res.status(400).json({
-        success: false,
-        message: `Date restriction enforced: Submissions are only permitted for the current date (${todayKolkata} in Asia/Kolkata timezone). Past and future dates cannot be submitted.`,
-      });
-    }
-
-    const rawRows = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload.readings) ? payload.readings : []);
-    if (rawRows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one row of Gas Conc. readings is required.',
-      });
-    }
-
-    // 2. Validate Rows, Resolve Inherited Dates, Detect Shifts, and Check Duplicate Times
-    const errors = [];
-    let lastValidDate = submissionDate;
-    const seenTimesByDate = new Map();
-
-    const validatedRows = rawRows.map((r, idx) => {
-      const rowNum = idx + 1;
-      let rowDate = (r.date || '').trim();
-
-      if (rowDate) {
-        lastValidDate = rowDate;
-      } else if (lastValidDate) {
-        rowDate = lastValidDate; // inherit from previous row
-      }
-
-      // Check sampling time
-      const timeStr = (r.time || '').trim();
-      if (!timeStr) {
-        errors.push(`Row ${rowNum}: Time is required.`);
-      } else {
-        if (!seenTimesByDate.has(rowDate)) {
-          seenTimesByDate.set(rowDate, new Set());
-        }
-        const timesSet = seenTimesByDate.get(rowDate);
-        if (timesSet.has(timeStr)) {
-          errors.push(`Duplicate time slot '${timeStr}' detected for date '${rowDate}'.`);
-        }
-        timesSet.add(timeStr);
-      }
-
-      const shiftKey = getShiftFromTime(timeStr);
-      const shiftName = shiftKey === 'shift1' ? 'Shift 1' : shiftKey === 'shift2' ? 'Shift 2' : 'Shift 3';
-
-      // Numeric validations (Recovery CO2, Cleaning Gas, Bottom Gas)
-      ['recoveryCo2Con', 'cleaningGas', 'bottomGas'].forEach((field) => {
-        const val = r[field];
-        if (val !== '' && val !== null && val !== undefined) {
-          const num = Number(val);
-          if (isNaN(num)) {
-            errors.push(`Row ${rowNum}: ${field} must be a valid number.`);
-          }
-        }
-      });
-
-      // SEAL validation (OK or NOT OK)
-      let seal = (r.seal || '').trim().toUpperCase();
-      if (seal && seal !== 'OK' && seal !== 'NOT OK') {
-        errors.push(`Row ${rowNum}: SEAL must be either OK or NOT OK.`);
-      }
-      if (!seal) seal = 'NOT OK';
-
-      return {
-        id: r.id || `gc_${Date.now()}_${idx}`,
-        date: r.date ? r.date.trim() : '', // preserve empty if inherited
-        resolvedDate: rowDate,
-        displayDate: r.displayDate || (r.date ? r.date.trim() : ''),
-        time: timeStr,
-        shift: shiftName,
-        shiftKey,
-        seal,
-        recoveryCo2Con: r.recoveryCo2Con !== '' && r.recoveryCo2Con !== null && r.recoveryCo2Con !== undefined ? String(r.recoveryCo2Con) : '',
-        cleaningGas: r.cleaningGas !== '' && r.cleaningGas !== null && r.cleaningGas !== undefined ? String(r.cleaningGas) : '',
-        bottomGas: r.bottomGas !== '' && r.bottomGas !== null && r.bottomGas !== undefined ? String(r.bottomGas) : '',
-      };
-    });
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: errors[0],
-        errors,
-      });
-    }
-
-    // 3. Query existing record in MongoDB for today's date
-    const query = {
-      date: submissionDate,
-      plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-      analysisType: { $in: ['Gas Conc. Analysis', 'Gas Conc Analysis', 'Gas Conc'] },
-    };
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company }, { company: null }];
-    }
-
-    let existingDoc = null;
+  router.post('/', async (req, res) => {
     try {
-      if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findOne === 'function') {
-        existingDoc = await PlantAnalysisRecord.findOne(query);
-      }
-    } catch (e) {
-      console.warn('[GasConc] MongoDB existing lookup warning:', e.message);
-    }
-
-    const existingData = existingDoc?.data || gasConcRecords.find((r) => r.date === submissionDate) || {};
-    const existingRows = Array.isArray(existingData.rows) ? existingData.rows : [];
-
-    let editedFields = { ...(existingData.editedFields || {}) };
-    let editAuditHistory = [...(existingData.editAuditHistory || [])];
-
-    // 4. Extract and initialize Sequential Shift-Locking State
-    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
-    let lockedShifts = existingData.lockedShifts
-      ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-      : getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
-
-    const targetShift = payload.targetShift ? String(payload.targetShift).toLowerCase().replace(/\s+/g, '') : 'all';
-
-    // Group incoming rows by shift
-    const rowsByShift = {
-      shift1: validatedRows.filter((r) => r.shiftKey === 'shift1'),
-      shift2: validatedRows.filter((r) => r.shiftKey === 'shift2'),
-      shift3: validatedRows.filter((r) => r.shiftKey === 'shift3'),
-    };
-
-    // Determine which shifts are being submitted/modified
-    const shiftsToSave = targetShift !== 'all' && SHIFT_KEYS.includes(targetShift)
-      ? [targetShift]
-      : SHIFT_KEYS.filter((sKey) => rowsByShift[sKey].length > 0);
-
-    // 5. Enforce Sequential Shift Locking
-    for (const sKey of shiftsToSave) {
-      const valRes = validateSequentialSave({
-        lockState: lockedShifts,
-        targetItem: sKey,
-        itemsOrder: SHIFT_KEYS,
-        isDiff: true,
-        type: 'shift',
-      });
-      if (!valRes.allowed) {
-        return res.status(valRes.statusCode || 400).json({
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
           success: false,
-          message: valRes.message,
+          message: 'Forbidden: Gas Conc. data entry and modification is restricted to Company Admins.',
         });
       }
-    }
 
-    // 6. Track Field-Level Edit History & Generate Save Event ID
-    const nowIso = new Date().toISOString();
-    const saveEventId = payload.saveEventId || `gc_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const editor = req.user?.name || payload.submittedBy || 'Plant Operator';
+      const payload = req.body;
+      if (!payload || !payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save Gas Conc. Analysis.',
+        });
+      }
 
-    validatedRows.forEach((newRow) => {
-      const oldRow = existingRows.find((r) => r.id === newRow.id || (r.time === newRow.time && r.resolvedDate === newRow.resolvedDate));
-      if (oldRow) {
-        ['seal', 'recoveryCo2Con', 'cleaningGas', 'bottomGas'].forEach((field) => {
-          const oldVal = oldRow[field];
-          const newVal = newRow[field];
-          if (isValDiff(oldVal, newVal) && oldVal !== undefined && oldVal !== null && oldVal !== '') {
-            if (!editedFields[newRow.id]) editedFields[newRow.id] = {};
-            editedFields[newRow.id][field] = true;
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
+      const submissionDate = String(payload.date).trim();
 
-            editAuditHistory.push({
-              date: submissionDate,
-              rowId: newRow.id,
-              time: newRow.time,
-              shift: newRow.shift,
-              field,
-              fieldName: PARAM_DISPLAY_NAMES[field] || field,
-              oldValue: oldVal,
-              newValue: newVal,
-              editor,
-              timestamp: nowIso,
-              saveEventId,
+      if (submissionDate !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: Submissions are only permitted for the current operating date (${operatingDate}). Past and future dates cannot be submitted.`,
+        });
+      }
+
+      const rawRows = Array.isArray(payload.rows)
+        ? payload.rows
+        : Array.isArray(payload.readings)
+        ? payload.readings
+        : [];
+      if (rawRows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one row of Gas Conc. readings is required.',
+        });
+      }
+
+      const errors = [];
+      let lastValidDate = submissionDate;
+      const seenTimesByDate = new Map();
+
+      const validatedRows = rawRows.map((r, idx) => {
+        const rowNum = idx + 1;
+        let rowDate = (r.date || '').trim();
+
+        if (rowDate) {
+          lastValidDate = rowDate;
+        } else if (lastValidDate) {
+          rowDate = lastValidDate;
+        }
+
+        const timeStr = (r.time || '').trim();
+        if (!timeStr) {
+          errors.push(`Row ${rowNum}: Time is required.`);
+        } else {
+          if (!seenTimesByDate.has(rowDate)) {
+            seenTimesByDate.set(rowDate, new Set());
+          }
+          const timesSet = seenTimesByDate.get(rowDate);
+          if (timesSet.has(timeStr)) {
+            errors.push(`Duplicate time slot '${timeStr}' detected for date '${rowDate}'.`);
+          }
+          timesSet.add(timeStr);
+        }
+
+        const shiftKey = getShiftFromTime(timeStr);
+        const shiftName =
+          shiftKey === 'shift1' ? 'Shift 1' : shiftKey === 'shift2' ? 'Shift 2' : 'Shift 3';
+
+        ['recoveryCo2Con', 'cleaningGas', 'bottomGas'].forEach((field) => {
+          const val = r[field];
+          if (val !== '' && val !== null && val !== undefined) {
+            const num = Number(val);
+            if (isNaN(num)) {
+              errors.push(`Row ${rowNum}: ${field} must be a valid number.`);
+            }
+          }
+        });
+
+        let seal = (r.seal || '').trim().toUpperCase();
+        if (seal && seal !== 'OK' && seal !== 'NOT OK') {
+          errors.push(`Row ${rowNum}: SEAL must be either OK or NOT OK.`);
+        }
+        if (!seal) seal = 'NOT OK';
+
+        return {
+          id: r.id || `gc_${Date.now()}_${idx}`,
+          date: r.date ? String(r.date).trim() : '',
+          resolvedDate: rowDate,
+          displayDate: r.displayDate || (r.date ? String(r.date).trim() : ''),
+          time: timeStr,
+          shift: shiftName,
+          shiftKey,
+          seal,
+          recoveryCo2Con:
+            r.recoveryCo2Con !== '' && r.recoveryCo2Con !== null && r.recoveryCo2Con !== undefined
+              ? String(r.recoveryCo2Con)
+              : '',
+          cleaningGas:
+            r.cleaningGas !== '' && r.cleaningGas !== null && r.cleaningGas !== undefined
+              ? String(r.cleaningGas)
+              : '',
+          bottomGas:
+            r.bottomGas !== '' && r.bottomGas !== null && r.bottomGas !== undefined
+              ? String(r.bottomGas)
+              : '',
+        };
+      });
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: errors[0],
+          errors,
+        });
+      }
+
+      // Query canonical doc
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: submissionDate,
+        plantCode: { $in: PLANT_CODES },
+        analysisType: { $in: ANALYSIS_TYPES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      let matchingDocs = [];
+      try {
+        if (PlantAnalysisRecord && typeof PlantAnalysisRecord.find === 'function') {
+          matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        }
+      } catch (e) {
+        console.warn('[GasConc] MongoDB query warning:', e.message);
+      }
+
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+      const existingRows = Array.isArray(existingData.rows) ? existingData.rows : [];
+
+      const { lockedSlots: currentLockedSlots, lockedShifts: currentFlatLocks } =
+        deriveGasConcLocks(existingDoc);
+
+      // Group rows by shift
+      const existingByShift = { shift1: [], shift2: [], shift3: [] };
+      const existingExtraRows = [];
+      existingRows.forEach((r) => {
+        const sk = getShiftFromTime(r.time);
+        if (existingByShift[sk]) {
+          existingByShift[sk].push(r);
+        } else {
+          existingExtraRows.push(r);
+        }
+      });
+
+      const incomingByShift = { shift1: [], shift2: [], shift3: [] };
+      const incomingExtraRows = [];
+      validatedRows.forEach((r) => {
+        const sk = getShiftFromTime(r.time);
+        if (incomingByShift[sk]) {
+          incomingByShift[sk].push(r);
+        } else {
+          incomingExtraRows.push(r);
+        }
+      });
+
+      // Saved row constraints: cannot delete or change time/date on saved rows
+      for (const sk of SHIFT_KEYS) {
+        if (currentLockedSlots[sk]?.isSaved) {
+          const extRows = existingByShift[sk];
+          const incRows = incomingByShift[sk];
+          for (const er of extRows) {
+            const ir = incRows.find((r) => r.id === er.id);
+            if (!ir) {
+              return res.status(400).json({
+                success: false,
+                message: `Cannot delete row '${er.id}' from saved shift ${sk}.`,
+              });
+            }
+            if (String(ir.time).trim() !== String(er.time).trim()) {
+              return res.status(400).json({
+                success: false,
+                message: `Sampling time cannot be modified on saved row (${er.id}).`,
+              });
+            }
+            if (String(ir.date || '').trim() !== String(er.date || '').trim()) {
+              return res.status(400).json({
+                success: false,
+                message: `Sampling date cannot be modified on saved row (${er.id}).`,
+              });
+            }
+          }
+        }
+      }
+
+      // Detect differences per shift
+      const changedShifts = [];
+      for (const sk of SHIFT_KEYS) {
+        const extRows = existingByShift[sk];
+        const incRows = incomingByShift[sk];
+
+        let hasDiff = false;
+        if (extRows.length !== incRows.length) {
+          hasDiff = true;
+        } else {
+          for (const ir of incRows) {
+            const er = extRows.find((r) => r.id === ir.id);
+            if (!er) {
+              hasDiff = true;
+              break;
+            }
+            if (
+              isValueDifferent(er.seal, ir.seal) ||
+              isValueDifferent(er.recoveryCo2Con, ir.recoveryCo2Con) ||
+              isValueDifferent(er.cleaningGas, ir.cleaningGas) ||
+              isValueDifferent(er.bottomGas, ir.bottomGas)
+            ) {
+              hasDiff = true;
+              break;
+            }
+          }
+        }
+
+        if (hasDiff) {
+          changedShifts.push(sk);
+        }
+      }
+
+      // Handle identical re-save
+      if (changedShifts.length === 0) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          rows: existingRows,
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentFlatLocks,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      // Enforce single-shift save
+      if (changedShifts.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: `Only one shift can be entered or edited per save. Detected changes in: ${changedShifts.join(', ')}`,
+        });
+      }
+
+      const targetShift = changedShifts[0];
+      const incTargetRows = incomingByShift[targetShift] || [];
+
+      // Empty shift check
+      const isShiftEmpty =
+        incTargetRows.length === 0 ||
+        incTargetRows.every((r) => {
+          const recEmpty = r.recoveryCo2Con === '' || r.recoveryCo2Con === null || r.recoveryCo2Con === undefined;
+          const clnEmpty = r.cleaningGas === '' || r.cleaningGas === null || r.cleaningGas === undefined;
+          const botEmpty = r.bottomGas === '' || r.bottomGas === null || r.bottomGas === undefined;
+          return recEmpty && clnEmpty && botEmpty;
+        });
+
+      if (isShiftEmpty) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot save empty shift ${targetShift}. At least one observation parameter value is required.`,
+        });
+      }
+
+      // Prepare unit objects for computeSlotTransition
+      const storedUnits = {};
+      const incomingUnits = {};
+      for (const sk of SHIFT_KEYS) {
+        const eRows = existingByShift[sk] || [];
+        const iRows = incomingByShift[sk] || [];
+
+        storedUnits[sk] = {};
+        eRows.forEach((r, idx) => {
+          const prefix = r.id || `row_${idx}`;
+          storedUnits[sk][`${prefix}_rec`] = r.recoveryCo2Con;
+          storedUnits[sk][`${prefix}_cln`] = r.cleaningGas;
+          storedUnits[sk][`${prefix}_bot`] = r.bottomGas;
+          storedUnits[sk][`${prefix}_seal`] = r.seal;
+        });
+
+        incomingUnits[sk] = {};
+        iRows.forEach((r, idx) => {
+          const prefix = r.id || `row_${idx}`;
+          incomingUnits[sk][`${prefix}_rec`] = r.recoveryCo2Con;
+          incomingUnits[sk][`${prefix}_cln`] = r.cleaningGas;
+          incomingUnits[sk][`${prefix}_bot`] = r.bottomGas;
+          incomingUnits[sk][`${prefix}_seal`] = r.seal;
+        });
+      }
+
+      const transition = computeSlotTransition({
+        unitsOrder: SHIFT_KEYS,
+        lockedSlots: currentLockedSlots,
+        storedRows: storedUnits,
+        incomingRows: incomingUnits,
+        now,
+      });
+
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
+
+      const isCorrection = transition.isCorrection;
+      const editorName = req.user?.name || payload.submittedBy || 'Shift Chemist';
+      const editorId = req.user?._id || null;
+      const nowIso = now.toISOString();
+      const saveEventId = `gc_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      // Update lockedSlots
+      const updatedLockedSlots = JSON.parse(JSON.stringify(currentLockedSlots));
+      if (!isCorrection) {
+        updatedLockedSlots[targetShift] = {
+          isSaved: true,
+          isLocked: false,
+          correctionUsed: false,
+        };
+        const targetIdx = SHIFT_KEYS.indexOf(targetShift);
+        for (let p = 0; p < targetIdx; p++) {
+          updatedLockedSlots[SHIFT_KEYS[p]].isLocked = true;
+        }
+        if (targetIdx + 1 < SHIFT_KEYS.length) {
+          updatedLockedSlots[SHIFT_KEYS[targetIdx + 1]].isLocked = false;
+        }
+      } else {
+        updatedLockedSlots[targetShift] = {
+          isSaved: true,
+          isLocked: true,
+          correctionUsed: true,
+        };
+      }
+
+      const allPermanentlyLocked =
+        updatedLockedSlots.shift1.isLocked &&
+        updatedLockedSlots.shift2.isLocked &&
+        updatedLockedSlots.shift3.isLocked;
+
+      const updatedLockedShifts = {
+        shift1Saved: updatedLockedSlots.shift1.isSaved,
+        shift1Locked: updatedLockedSlots.shift1.isLocked,
+        shift1Edits: updatedLockedSlots.shift1.correctionUsed ? 1 : 0,
+        shift1: updatedLockedSlots.shift1.isLocked,
+        s1Saved: updatedLockedSlots.shift1.isSaved,
+        s1Locked: updatedLockedSlots.shift1.isLocked,
+        s1Edits: updatedLockedSlots.shift1.correctionUsed ? 1 : 0,
+        s1: updatedLockedSlots.shift1.isLocked,
+
+        shift2Saved: updatedLockedSlots.shift2.isSaved,
+        shift2Locked: updatedLockedSlots.shift2.isLocked,
+        shift2Edits: updatedLockedSlots.shift2.correctionUsed ? 1 : 0,
+        shift2: updatedLockedSlots.shift2.isLocked,
+        s2Saved: updatedLockedSlots.shift2.isSaved,
+        s2Locked: updatedLockedSlots.shift2.isLocked,
+        s2Edits: updatedLockedSlots.shift2.correctionUsed ? 1 : 0,
+        s2: updatedLockedSlots.shift2.isLocked,
+
+        shift3Saved: updatedLockedSlots.shift3.isSaved,
+        shift3Locked: updatedLockedSlots.shift3.isLocked,
+        shift3Edits: updatedLockedSlots.shift3.correctionUsed ? 1 : 0,
+        shift3: updatedLockedSlots.shift3.isLocked,
+        s3Saved: updatedLockedSlots.shift3.isSaved,
+        s3Locked: updatedLockedSlots.shift3.isLocked,
+        s3Edits: updatedLockedSlots.shift3.correctionUsed ? 1 : 0,
+        s3: updatedLockedSlots.shift3.isLocked,
+
+        allPermanentlyLocked,
+      };
+
+      // Field edit audit history
+      const updatedEditedFields = JSON.parse(JSON.stringify(existingData.editedFields || {}));
+      const updatedAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      if (isCorrection) {
+        const extRows = existingByShift[targetShift] || [];
+        const incRows = incomingByShift[targetShift] || [];
+
+        incRows.forEach((newRow) => {
+          const oldRow = extRows.find((r) => r.id === newRow.id);
+          if (oldRow) {
+            ['seal', 'recoveryCo2Con', 'cleaningGas', 'bottomGas'].forEach((field) => {
+              const ov = oldRow[field];
+              const nv = newRow[field];
+              if (isValueDifferent(ov, nv) && ov !== undefined && ov !== null && ov !== '') {
+                if (!updatedEditedFields[newRow.id]) updatedEditedFields[newRow.id] = {};
+                updatedEditedFields[newRow.id][field] = true;
+
+                updatedAuditHistory.push({
+                  date: submissionDate,
+                  rowId: newRow.id,
+                  time: newRow.time,
+                  shift: newRow.shift,
+                  field,
+                  fieldName: PARAM_DISPLAY_NAMES[field] || field,
+                  oldValue: ov,
+                  newValue: nv,
+                  editor: editorName,
+                  timestamp: nowIso,
+                  saveEventId,
+                });
+              }
             });
           }
         });
       }
-    });
 
-    // 7. Advance Shift Locking State Machine via Universal Engine
-    for (const sKey of shiftsToSave) {
-      const isCorrection = (sKey === 'shift1' && lockedShifts.shift1Saved) ||
-                           (sKey === 'shift2' && lockedShifts.shift2Saved) ||
-                           (sKey === 'shift3' && lockedShifts.shift3Saved);
-      lockedShifts = applySequentialSaveTransition({
-        lockState: lockedShifts,
-        targetItem: sKey,
-        itemsOrder: SHIFT_KEYS,
-        isCorrection,
-        type: 'shift',
+      // Rebuild updated rows
+      const updatedRows = [];
+      for (const sk of SHIFT_KEYS) {
+        if (sk === targetShift) {
+          (incomingByShift[sk] || []).forEach((r) => updatedRows.push(r));
+        } else {
+          (existingByShift[sk] || []).forEach((r) => updatedRows.push(r));
+        }
+      }
+      existingExtraRows.forEach((r) => {
+        if (!updatedRows.some((u) => u.id === r.id)) {
+          updatedRows.push(r);
+        }
       });
-    }
-    const updatedLockedShifts = lockedShifts;
 
-    const recordPayload = {
-      id: existingDoc?._id ? existingDoc._id.toString() : `gas_conc_${Date.now()}`,
-      date: submissionDate,
-      plant: 'SA',
-      plantName: 'Soda Ash Plant',
-      plantCode: 'SA',
-      unit: 'Gas Conc.',
-      analysisType: 'Gas Conc. Analysis',
-      rows: validatedRows,
-      lockedShifts: updatedLockedShifts,
-      editedFields,
-      editAuditHistory,
-      submittedBy: editor,
-      submittedById: req.user?._id || null,
-      submittedAt: nowIso,
-      company: req.user?.company?._id || req.user?.company || null,
-      saveEventId,
-    };
+      const docUpdatePayload = {
+        'data.rows': updatedRows,
+        'data.lockedSlots': updatedLockedSlots,
+        'data.lockedShifts': updatedLockedShifts,
+        'data.editedFields': updatedEditedFields,
+        'data.editAuditHistory': updatedAuditHistory,
+        'data.submittedBy': editorName,
+        'data.submittedAt': nowIso,
+        'data.saveEventId': saveEventId,
+        'data.unit': 'Gas Conc.',
+        'data.analysisType': CANONICAL_ANALYSIS_TYPE,
+        'data.plant': 'SA',
+        'data.plantCode': 'SA',
+        'data.plantName': 'Soda Ash Plant',
+        submittedBy: editorName,
+        submittedById: editorId,
+        status: 'completed',
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      };
 
-    // 8. Atomic Database Persistence via PlantAnalysisRecord
-    let savedRecordDoc = null;
-    try {
-      if (PlantAnalysisRecord && typeof PlantAnalysisRecord.findOneAndUpdate === 'function') {
-        savedRecordDoc = await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-            analysisType: { $in: ['Gas Conc. Analysis', 'Gas Conc Analysis', 'Gas Conc'] },
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+                [`data.lockedSlots.${targetShift}.isSaved`]: true,
+                [`data.lockedSlots.${targetShift}.correctionUsed`]: false,
+                [`data.lockedSlots.${targetShift}.isLocked`]: false,
+              }
+            : {
+                $or: [
+                  { [`data.lockedSlots.${targetShift}.isSaved`]: { $ne: true } },
+                  { [`data.lockedSlots.${targetShift}`]: { $exists: false } },
+                  { [`data.lockedSlots`]: { $exists: false } },
+                ],
+              }),
+        };
+
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This shift was locked or updated concurrently by another user.',
+          });
+        }
+      } else {
+        await PlantAnalysisRecord.create({
+          plantName: 'Soda Ash Plant',
+          plantCode: 'SA',
+          analysisType: CANONICAL_ANALYSIS_TYPE,
+          unit: 'Gas Conc.',
+          date: submissionDate,
+          shift: 'All Shifts',
+          status: 'completed',
+          submittedBy: editorName,
+          submittedById: editorId,
+          company: companyVal,
+          emailStatus: 'disabled',
+          emailRecipient: null,
+          data: {
+            id: `gas_conc_${Date.now()}`,
             date: submissionDate,
-          },
-          {
+            plant: 'SA',
             plantName: 'Soda Ash Plant',
             plantCode: 'SA',
-            analysisType: 'Gas Conc. Analysis',
             unit: 'Gas Conc.',
-            date: submissionDate,
-            shift: targetShift !== 'all' ? SHIFT_DISPLAY_NAMES[targetShift] || targetShift : 'All Shifts',
-            data: recordPayload,
-            submittedBy: recordPayload.submittedBy,
-            submittedById: recordPayload.submittedById,
-            company: recordPayload.company,
-            status: 'completed',
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            rows: updatedRows,
+            lockedSlots: updatedLockedSlots,
+            lockedShifts: updatedLockedShifts,
+            editedFields: updatedEditedFields,
+            editAuditHistory: updatedAuditHistory,
+            submittedBy: editorName,
+            submittedById: editorId,
+            submittedAt: nowIso,
+            company: companyVal,
+            saveEventId,
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
-    } catch (dbErr) {
-      console.error('[GasConc] Database persistence failure:', dbErr);
-      return res.status(500).json({
-        success: false,
-        message: 'Database persistence failed: ' + dbErr.message,
-      });
-    }
-
-    // 9. Cache in memory
-    const existingIdx = gasConcRecords.findIndex((r) => r.date === submissionDate);
-    if (existingIdx >= 0) {
-      gasConcRecords[existingIdx] = recordPayload;
-    } else {
-      gasConcRecords.unshift(recordPayload);
-    }
-
-    // 10. Audit Activity Log
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'GAS_CONC_SAVED',
-          user: req.user?._id,
-          userName: editor,
-          details: `Gas Conc. Analysis saved for date: ${submissionDate} (${validatedRows.length} observations). Target: ${targetShift}.`,
-          timestamp: new Date(),
         });
       }
-    } catch (logErr) {
-      console.warn('[GasConc] Activity log warning:', logErr.message);
-    }
 
+      return res.status(200).json({
+        success: true,
+        message: isCorrection
+          ? `Shift ${targetShift} corrected successfully. Slot is now permanently locked.`
+          : `Shift ${targetShift} saved successfully.`,
+        data: {
+          date: submissionDate,
+          rows: updatedRows,
+          lockedSlots: updatedLockedSlots,
+          lockedShifts: updatedLockedShifts,
+          editedFields: updatedEditedFields,
+          editAuditHistory: updatedAuditHistory,
+        },
+        record: {
+          date: submissionDate,
+          rows: updatedRows,
+          lockedSlots: updatedLockedSlots,
+          lockedShifts: updatedLockedShifts,
+          editedFields: updatedEditedFields,
+          editAuditHistory: updatedAuditHistory,
+        },
+        rows: updatedRows,
+        lockedSlots: updatedLockedSlots,
+        lockedShifts: updatedLockedShifts,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        statusFromApi: 'disabled',
+        emailStatus: 'disabled',
+        emailSent: false,
+        saveEventId,
+      });
+    } catch (error) {
+      console.error('[GasConc Save] Error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while saving Gas Conc. Analysis data: ' + error.message,
+        error: error.message,
+      });
+    }
+  });
+
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      message: 'Gas Conc. Analysis saved successfully in MongoDB ✓',
-      data: recordPayload,
-      record: recordPayload,
-      recordId: savedRecordDoc?._id || recordPayload.id,
-      lockedShifts: updatedLockedShifts,
-      editedFields,
-      editAuditHistory,
+      emailSent: false,
       emailStatus: 'disabled',
-      emailDeliveryStatus: 'disabled',
-      emailRecipient: null,
-      saveEventId,
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('[GasConc] Error saving data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while saving Gas Conc. Analysis: ' + error.message,
-      error: error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retry sending email for an existing saved Gas Conc. Analysis record
- * @route   POST /api/gas-conc/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-/**
- * @desc    Export Gas Conc. Analysis to Excel (.xlsx) file download
- * @route   GET /api/gas-conc/export
- * @access  Private
- */
-router.get('/export', async (req, res) => {
-  try {
-    const { date } = req.query;
-
-    let targetRows = [];
-    if (date) {
-      const doc = await PlantAnalysisRecord.findOne({
-        plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-        analysisType: { $in: ['Gas Conc. Analysis', 'Gas Conc Analysis', 'Gas Conc'] },
-        date,
-      }).lean();
-      if (doc && doc.data?.rows) {
-        targetRows = doc.data.rows;
-      } else {
-        const found = gasConcRecords.find((r) => r.date === date);
-        if (found && found.rows) targetRows = found.rows;
+  router.get('/export', async (req, res) => {
+    try {
+      const { date } = req.query;
+      if (!date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date is required for export.',
+        });
       }
-    } else if (gasConcRecords.length > 0) {
-      targetRows = gasConcRecords[0]?.rows || [];
+
+      const query = {
+        date,
+        plantCode: { $in: PLANT_CODES },
+        analysisType: { $in: ANALYSIS_TYPES },
+      };
+      const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+      const doc = pickCanonicalDoc(matchingDocs);
+
+      const rows = doc?.data?.rows || [];
+      const excelResult = await generateGasConcExcel({
+        date,
+        rows,
+        submittedBy: doc?.submittedBy || 'Shift Chemist',
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=${excelResult.filename || `Gas_Conc_Analysis_${date}.xlsx`}`);
+      return res.send(excelResult.buffer);
+    } catch (err) {
+      console.error('[GasConc Export] Error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to export Gas Conc. Analysis report: ' + err.message,
+      });
     }
+  });
 
-    const excelResult = await generateGasConcExcel({
-      date: date || '2022-05-26',
-      plant: 'SA',
-      submittedBy: req.user?.name || 'Shift Chemist',
-      rows: targetRows,
-    });
+  return router;
+}
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${excelResult.filename}"`);
-    return res.send(excelResult.buffer);
-  } catch (err) {
-    console.error('[GasConc] Export download error:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to generate Excel export file.',
-      error: err.message,
-    });
-  }
-});
-
-module.exports = router;
+const defaultRouter = createGasConcRouter();
+defaultRouter.createRouter = createGasConcRouter;
+module.exports = defaultRouter;

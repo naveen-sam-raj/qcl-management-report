@@ -29,6 +29,7 @@ import {
   validateCellValue,
   SA_GAS_CONC_LIMITS,
 } from '../../services/analysisValidation';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
 // ─── Gas Conc. Limit References ─────────────────────────────────────────────
 const RECOVERY_LIMIT = SA_GAS_CONC_LIMITS.recoveryGas; // 75%–85%
@@ -36,18 +37,6 @@ const BOTTOM_LIMIT = SA_GAS_CONC_LIMITS.bottomGas;     // 80%–90%
 const CLEANING_LIMIT = SA_GAS_CONC_LIMITS.cleaningGas; // 9%–11%
 
 const NUMERIC_FIELDS = ['recoveryCo2Con', 'cleaningGas', 'bottomGas'];
-
-/**
- * Returns current date string formatted as YYYY-MM-DD in Asia/Kolkata timezone
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-};
 
 /**
  * Determines which shift a time slot belongs to:
@@ -66,25 +55,24 @@ const getShiftFromTime = (timeStr) => {
 };
 
 const SHIFT_INFO = {
-  shift1: { key: 'shift1', name: 'SHIFT 1', time: '06:00–14:00', defaultTime: '08:00' },
-  shift2: { key: 'shift2', name: 'SHIFT 2', time: '14:00–22:00', defaultTime: '16:00' },
-  shift3: { key: 'shift3', name: 'SHIFT 3', time: '22:00–06:00', defaultTime: '23:00' },
+  shift1: { key: 'shift1', name: 'SHIFT 1', time: '06:00-14:00', defaultTime: '08:00' },
+  shift2: { key: 'shift2', name: 'SHIFT 2', time: '14:00-22:00', defaultTime: '16:00' },
+  shift3: { key: 'shift3', name: 'SHIFT 3', time: '22:00-06:00', defaultTime: '23:00' },
 };
 
-const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
+const isValidDecimal = (val) => {
+  if (val === '' || val === null || val === undefined) return true;
+  return /^-?\d*(\.\d*)?$/.test(String(val).trim());
+};
 
 const formatDateDisplay = (isoDate) => {
   if (!isoDate) return '—';
   try {
-    const parts = isoDate.split('-');
-    if (parts.length === 3) {
-      return `${parts[2]}.${parts[1]}.${parts[0]}`;
-    }
     return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-    });
+    }).replace(/\//g, '.');
   } catch {
     return isoDate;
   }
@@ -101,16 +89,16 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
   const { showToast } = useToast();
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
-  const todayKolkata = useMemo(() => getTodayKolkata(), []);
+  const [selectedDate] = useState(() => getOperatingDateIST());
 
   // ── States ──
-  const [selectedDate, setSelectedDate] = useState(todayKolkata);
   const [rows, setRows] = useState([]);
+  const [lastSavedRows, setLastSavedRows] = useState([]);
   const [recordId, setRecordId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savePhase, setSavePhase] = useState('idle');
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [retryingEmail, setRetryingEmail] = useState(false);
   const [errors, setErrors] = useState({});
   const [lastSavedTime, setLastSavedTime] = useState(null);
 
@@ -122,6 +110,8 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
     shift1Locked: false,
     shift2Locked: false,
     shift3Locked: false,
+    shift1Edits: 0,
+    shift2Edits: 0,
     shift3Edits: 0,
   });
 
@@ -130,28 +120,29 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
   const [editAuditHistory, setEditAuditHistory] = useState([]);
   const [showAuditModal, setShowAuditModal] = useState(false);
 
-  // Email state
-  const [emailStatus, setEmailStatus] = useState(null); // 'sent' | 'pending' | 'failed' | null
+  // Email state (kept for banner compatibility)
+  const [emailStatus, setEmailStatus] = useState(null);
   const [emailRecipient, setEmailRecipient] = useState('');
   const [emailMessage, setEmailMessage] = useState('');
 
   // Save confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingTargetShift, setPendingTargetShift] = useState(null);
 
   // ── Calculate Resolved/Inherited Dates & Shifts for each row ──
   const rowsWithResolvedDates = useMemo(() => {
-    let lastDate = selectedDate || todayKolkata;
+    let lastDate = selectedDate;
     return rows.map((r, idx) => {
-      const isExplicit = Boolean(r.date && r.date.trim());
+      const isExplicit = Boolean(r.date && String(r.date).trim());
       if (isExplicit) {
-        lastDate = r.date.trim();
+        lastDate = String(r.date).trim();
       }
       const shiftKey = getShiftFromTime(r.time);
       const shiftName = shiftKey === 'shift1' ? 'Shift 1' : shiftKey === 'shift2' ? 'Shift 2' : 'Shift 3';
 
       return {
         ...r,
-        resolvedDate: isExplicit ? r.date.trim() : lastDate,
+        resolvedDate: isExplicit ? String(r.date).trim() : lastDate,
         isInherited: !isExplicit,
         inheritedFrom: isExplicit ? null : lastDate,
         isGroupStart: isExplicit || idx === 0,
@@ -159,19 +150,27 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         shiftName,
       };
     });
-  }, [rows, selectedDate, todayKolkata]);
+  }, [rows, selectedDate]);
 
   // ── Compute Shift Statuses based on sequential locking state ──
   const shiftStatuses = useMemo(() => {
-    const { shift1Saved, shift2Saved, shift3Saved, shift1Locked, shift2Locked, shift3Locked, shift3Edits = 0 } = lockedShifts;
+    const { shift1Saved, shift2Saved, shift3Saved, shift1Locked, shift2Locked, shift3Locked, shift1Edits = 0, shift2Edits = 0, shift3Edits = 0 } = lockedShifts;
 
-    const s1 = (shift1Locked || shift2Saved) ? 'LOCKED' : (shift1Saved ? 'EDITABLE' : 'NEW');
-    const s2 = !shift1Saved ? 'WAITING' : ((shift2Locked || shift3Saved) ? 'LOCKED' : (shift2Saved ? 'EDITABLE' : 'NEW'));
-    const s3 = !shift2Saved ? 'WAITING' : (
-      (shift3Locked || (shift3Saved && shift3Edits >= 1))
-        ? 'LOCKED'
-        : (shift3Saved && shift3Edits === 0 ? 'FINAL EDIT' : (shift3Saved ? 'EDITABLE' : 'NEW'))
-    );
+    const s1 = (shift1Locked || shift2Saved || shift1Edits > 0)
+      ? 'LOCKED'
+      : (shift1Saved ? 'EDITABLE' : 'NEW');
+
+    const s2 = !shift1Saved
+      ? 'WAITING'
+      : ((shift2Locked || shift3Saved || shift2Edits > 0)
+          ? 'LOCKED'
+          : (shift2Saved ? 'EDITABLE' : 'NEW'));
+
+    const s3 = !shift2Saved
+      ? 'WAITING'
+      : ((shift3Locked || shift3Edits > 0)
+          ? 'LOCKED'
+          : (shift3Saved ? 'EDITABLE' : 'NEW'));
 
     return {
       shift1: s1,
@@ -180,7 +179,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
     };
   }, [lockedShifts]);
 
-  // ── Helper to check if a row is disabled by shift lock ──
+  // ── Helper to check if a shift/row is disabled by lock ──
   const isRowDisabled = useCallback((shiftKey) => {
     const status = shiftStatuses[shiftKey];
     return status === 'LOCKED' || status === 'WAITING';
@@ -193,8 +192,10 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       const res = await api.get(`/api/gas-conc?date=${dateToLoad}`);
       if (res.data?.success && res.data.data) {
         const d = res.data.data;
+        const initialRows = Array.isArray(d.rows) && d.rows.length > 0 ? d.rows : DEFAULT_ROWS_TEMPLATE(dateToLoad);
         setRecordId(d._id || d.id || null);
-        setRows(Array.isArray(d.rows) && d.rows.length > 0 ? d.rows : DEFAULT_ROWS_TEMPLATE(dateToLoad));
+        setRows(initialRows);
+        setLastSavedRows(JSON.parse(JSON.stringify(initialRows)));
         setLockedShifts(d.lockedShifts || {
           shift1Saved: false,
           shift2Saved: false,
@@ -202,6 +203,8 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
           shift1Locked: false,
           shift2Locked: false,
           shift3Locked: false,
+          shift1Edits: 0,
+          shift2Edits: 0,
           shift3Edits: 0,
         });
         setEditedFields(d.editedFields || {});
@@ -209,9 +212,10 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         setEmailStatus(d.emailStatus || null);
         setEmailRecipient(d.emailRecipient || res.data.assignedOperatorEmail || '');
       } else {
-        // Initialize clean record for today
+        const initialRows = DEFAULT_ROWS_TEMPLATE(dateToLoad);
         setRecordId(null);
-        setRows(DEFAULT_ROWS_TEMPLATE(dateToLoad));
+        setRows(initialRows);
+        setLastSavedRows([]);
         setLockedShifts({
           shift1Saved: false,
           shift2Saved: false,
@@ -219,6 +223,8 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
           shift1Locked: false,
           shift2Locked: false,
           shift3Locked: false,
+          shift1Edits: 0,
+          shift2Edits: 0,
           shift3Edits: 0,
         });
         setEditedFields({});
@@ -228,8 +234,10 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       }
     } catch (err) {
       console.warn('[GasConc] Fetch warning:', err.message);
+      const initialRows = DEFAULT_ROWS_TEMPLATE(dateToLoad);
       setRecordId(null);
-      setRows(DEFAULT_ROWS_TEMPLATE(dateToLoad));
+      setRows(initialRows);
+      setLastSavedRows([]);
       setLockedShifts({
         shift1Saved: false,
         shift2Saved: false,
@@ -237,6 +245,8 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         shift1Locked: false,
         shift2Locked: false,
         shift3Locked: false,
+        shift1Edits: 0,
+        shift2Edits: 0,
         shift3Edits: 0,
       });
       setEditedFields({});
@@ -260,24 +270,37 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
     );
 
-    // Clear field-level error
     setErrors((prev) => {
       const copy = { ...prev };
       delete copy[`${id}_${field}`];
       return copy;
     });
-  }, []);
+
+    if (savePhase !== 'idle') {
+      setSavePhase('idle');
+    }
+  }, [savePhase]);
 
   // ── Add Row Handler ──
   const handleAddRow = (inheritPreviousDate = true) => {
-    // Find first editable shift to set reasonable default time
+    // Find the current editable or open shift to set reasonable default time
     let defaultTime = '08:00';
+    let targetShiftKey = null;
+
     if (shiftStatuses.shift1 === 'NEW' || shiftStatuses.shift1 === 'EDITABLE') {
       defaultTime = '08:00';
+      targetShiftKey = 'shift1';
     } else if (shiftStatuses.shift2 === 'NEW' || shiftStatuses.shift2 === 'EDITABLE') {
       defaultTime = '16:00';
-    } else if (shiftStatuses.shift3 === 'NEW' || shiftStatuses.shift3 === 'EDITABLE' || shiftStatuses.shift3 === 'FINAL EDIT') {
+      targetShiftKey = 'shift2';
+    } else if (shiftStatuses.shift3 === 'NEW' || shiftStatuses.shift3 === 'EDITABLE') {
       defaultTime = '23:00';
+      targetShiftKey = 'shift3';
+    }
+
+    if (!targetShiftKey) {
+      showToast?.('All shifts are currently locked for this date. No new observations can be added.', 'warning');
+      return;
     }
 
     const newId = `gc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -294,16 +317,21 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
     };
 
     setRows((prev) => [...prev, newRow]);
+    if (savePhase !== 'idle') setSavePhase('idle');
     showToast?.(
       inheritPreviousDate
-        ? `Added new row inheriting date (${formatDateDisplay(resolvedLastDate)})`
-        : 'Added new row with independent date',
+        ? `Added new row inheriting date (${formatDateDisplay(resolvedLastDate)}) for ${SHIFT_INFO[targetShiftKey].name}`
+        : `Added new row with independent date for ${SHIFT_INFO[targetShiftKey].name}`,
       'info'
     );
   };
 
   // ── Delete Row Handler ──
   const handleDeleteRow = (id, shiftKey) => {
+    if (lockedShifts[`${shiftKey}Saved`]) {
+      showToast?.(`Cannot delete row: ${SHIFT_INFO[shiftKey]?.name} is already saved.`, 'error');
+      return;
+    }
     if (isRowDisabled(shiftKey)) {
       showToast?.(`Cannot delete row: ${SHIFT_INFO[shiftKey]?.name} is ${shiftStatuses[shiftKey]}.`, 'error');
       return;
@@ -313,6 +341,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       return;
     }
     setRows((prev) => prev.filter((r) => r.id !== id));
+    if (savePhase !== 'idle') setSavePhase('idle');
     showToast?.('Row removed.', 'info');
   };
 
@@ -320,16 +349,16 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
   const handleReset = () => {
     loadRecordForDate(selectedDate);
     setErrors({});
+    setSavePhase('idle');
     showToast?.('Gas Conc. table reloaded from saved database record.', 'info');
   };
 
-  // ── Open Save Confirmation ──
+  // ── Detect Changes & Initiate Save ──
   const handleInitiateSave = () => {
     const newErrors = {};
     const seenTimes = new Set();
 
-    rowsWithResolvedDates.forEach((r, idx) => {
-      const rowNum = idx + 1;
+    rowsWithResolvedDates.forEach((r) => {
       NUMERIC_FIELDS.forEach((f) => {
         if (r[f] !== '' && isNaN(Number(r[f]))) {
           newErrors[`${r.id}_${f}`] = 'Invalid number';
@@ -352,20 +381,92 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       return;
     }
 
-    // Verify sequential shift rules on frontend
-    const hasS1 = rowsWithResolvedDates.some((r) => r.shiftKey === 'shift1');
-    const hasS2 = rowsWithResolvedDates.some((r) => r.shiftKey === 'shift2');
-    const hasS3 = rowsWithResolvedDates.some((r) => r.shiftKey === 'shift3');
+    // Compare current rows against lastSavedRows by shift
+    const existingByShift = { shift1: [], shift2: [], shift3: [] };
+    lastSavedRows.forEach((r) => {
+      const sk = getShiftFromTime(r.time);
+      if (existingByShift[sk]) existingByShift[sk].push(r);
+    });
 
-    if (hasS2 && !lockedShifts.shift1Saved) {
+    const currentByShift = { shift1: [], shift2: [], shift3: [] };
+    rowsWithResolvedDates.forEach((r) => {
+      const sk = getShiftFromTime(r.time);
+      if (currentByShift[sk]) currentByShift[sk].push(r);
+    });
+
+    const changedShifts = [];
+    for (const sk of ['shift1', 'shift2', 'shift3']) {
+      const extRows = existingByShift[sk];
+      const curRows = currentByShift[sk];
+
+      let hasDiff = false;
+      if (extRows.length !== curRows.length) {
+        hasDiff = true;
+      } else {
+        for (const cr of curRows) {
+          const er = extRows.find((r) => r.id === cr.id);
+          if (!er) {
+            hasDiff = true;
+            break;
+          }
+          if (
+            cr.seal !== er.seal ||
+            cr.recoveryCo2Con !== er.recoveryCo2Con ||
+            cr.cleaningGas !== er.cleaningGas ||
+            cr.bottomGas !== er.bottomGas ||
+            cr.time !== er.time ||
+            cr.date !== er.date
+          ) {
+            hasDiff = true;
+            break;
+          }
+        }
+      }
+
+      if (hasDiff) {
+        changedShifts.push(sk);
+      }
+    }
+
+    if (changedShifts.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (changedShifts.length > 1) {
+      showToast?.('Cannot save changes across multiple shifts simultaneously. Please save one shift at a time.', 'error');
+      return;
+    }
+
+    const targetShift = changedShifts[0];
+
+    // Check empty shift
+    const targetRows = currentByShift[targetShift] || [];
+    const isShiftEmpty =
+      targetRows.length === 0 ||
+      targetRows.every((r) => {
+        const recEmpty = r.recoveryCo2Con === '' || r.recoveryCo2Con === null || r.recoveryCo2Con === undefined;
+        const clnEmpty = r.cleaningGas === '' || r.cleaningGas === null || r.cleaningGas === undefined;
+        const botEmpty = r.bottomGas === '' || r.bottomGas === null || r.bottomGas === undefined;
+        return recEmpty && clnEmpty && botEmpty;
+      });
+
+    if (isShiftEmpty) {
+      showToast?.(`Cannot save empty shift ${SHIFT_INFO[targetShift].name}. At least one observation value is required.`, 'warning');
+      return;
+    }
+
+    // Verify sequential rules on client
+    if (targetShift === 'shift2' && !lockedShifts.shift1Saved) {
       showToast?.('Cannot save SHIFT 2 before SHIFT 1 is saved.', 'error');
       return;
     }
-    if (hasS3 && !lockedShifts.shift2Saved) {
+    if (targetShift === 'shift3' && !lockedShifts.shift2Saved) {
       showToast?.('Cannot save SHIFT 3 before SHIFT 2 is saved.', 'error');
       return;
     }
 
+    setPendingTargetShift(targetShift);
     setShowConfirmModal(true);
   };
 
@@ -375,17 +476,18 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
     setSaving(true);
 
     try {
-      const primaryDate = rowsWithResolvedDates[0]?.resolvedDate || selectedDate || todayKolkata;
+      const targetShift = pendingTargetShift;
       const saveEventId = `gc_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
       const payload = {
-        date: primaryDate,
+        date: selectedDate,
         plant: 'SA',
         unit: 'Gas Conc.',
         analysisType: 'Gas Conc. Analysis',
+        targetShift,
         rows: rowsWithResolvedDates.map((r) => ({
           id: r.id,
-          date: r.date, // preserves blank if inherited
+          date: r.date,
           resolvedDate: r.resolvedDate,
           displayDate: r.date ? formatDateDisplay(r.date) : '',
           time: r.time,
@@ -396,19 +498,30 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
           cleaningGas: r.cleaningGas,
           bottomGas: r.bottomGas,
         })),
-        saveType: 'all',
-        targetShift: 'all',
         saveEventId,
         submittedBy: user?.name || 'Shift Chemist',
       };
 
       const res = await api.post('/api/gas-conc', payload);
 
-      if (res.data?.success) {
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
+      if (res.data?.statusFromApi === 'disabled' || res.data?.success) {
+        setSaving(false);
+        setSavePhase('completed');
+        setSaveSuccess(true);
+        showToast?.('Saved ✓', 'success');
+
         const savedData = res.data.data || res.data.record;
-        setRecordId(res.data.recordId || savedData?.id || null);
+        setRecordId(res.data.recordId || savedData?.id || recordId);
         if (savedData?.rows) {
           setRows(savedData.rows);
+          setLastSavedRows(JSON.parse(JSON.stringify(savedData.rows)));
         }
         if (res.data.lockedShifts) {
           setLockedShifts(res.data.lockedShifts);
@@ -419,91 +532,18 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
         if (res.data.editAuditHistory) {
           setEditAuditHistory(res.data.editAuditHistory);
         }
-
-        setEmailStatus(res.data.emailDeliveryStatus || res.data.emailStatus || 'sent');
-        setEmailRecipient(res.data.emailRecipient || '');
-        setEmailMessage(res.data.message || 'Gas Conc. Analysis saved successfully!');
         setLastSavedTime(new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }));
-
-        showToast?.('Gas Conc. Analysis saved successfully!', 'success');
       } else {
+        setSaving(false);
         showToast?.(res.data?.message || 'Save completed with notes.', 'warning');
       }
     } catch (err) {
       console.error('[GasConc] Save error:', err);
+      setSaving(false);
       setSaveSuccess(false);
+      setSavePhase('idle');
       const errMsg = err.response?.data?.message || err.message || 'Failed to save analysis.';
       showToast?.(errMsg, 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ── Retry Email Handler ──
-  const handleRetryEmail = async () => {
-    if (!recordId) {
-      showToast?.('No saved record ID found to retry email.', 'error');
-      return;
-    }
-
-    setRetryingEmail(true);
-    try {
-      const res = await api.post(`/api/gas-conc/${recordId}/retry-email`);
-      if (res.data?.success && res.data.emailSent) {
-        setEmailStatus('sent');
-        setEmailRecipient(res.data.emailRecipient || emailRecipient);
-        setEmailMessage(res.data.message || `Notification re-sent successfully to ${res.data.emailRecipient}`);
-        showToast?.(res.data.message || 'Email re-sent successfully!', 'success');
-      } else {
-        setEmailStatus('failed');
-        setEmailMessage(res.data?.message || 'SMTP delivery rejected.');
-        showToast?.(res.data?.message || 'Email retry failed.', 'error');
-      }
-    } catch (err) {
-      console.error('[GasConc] Retry email error:', err);
-      setEmailStatus('failed');
-      const msg = err.response?.data?.message || err.message || 'Failed to re-send email.';
-      setEmailMessage(msg);
-      showToast?.(msg, 'error');
-    } finally {
-      setRetryingEmail(false);
-    }
-  };
-
-  // Status Badge Helper
-  const renderStatusBadge = (status) => {
-    switch (status) {
-      case 'LOCKED':
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
-            <Lock className="w-2.5 h-2.5 text-rose-600" /> LOCKED
-          </span>
-        );
-      case 'WAITING':
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-            <Clock className="w-2.5 h-2.5 text-amber-600" /> WAITING
-          </span>
-        );
-      case 'FINAL EDIT':
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 animate-pulse">
-            <AlertTriangle className="w-2.5 h-2.5 text-purple-600" /> FINAL EDIT
-          </span>
-        );
-      case 'EDITABLE':
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
-            <Unlock className="w-2.5 h-2.5 text-blue-600" /> EDITABLE
-          </span>
-        );
-      case 'NEW':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-            <Plus className="w-2.5 h-2.5 text-emerald-600" /> NEW
-          </span>
-        );
     }
   };
 
@@ -543,17 +583,12 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
 
           {/* Right: Date Picker + Audit History + Reset + Save */}
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Effective Date Picker */}
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
-                title="Select Analysis Date"
-              />
-            </div>
+            {/* Locked Operating Date Display */}
+            <LockedDateDisplay
+              date={selectedDate}
+              id="gas-conc-locked-date"
+              badgeText="Operating Day"
+            />
 
             {/* Audit History Button */}
             {editAuditHistory.length > 0 && (
@@ -584,10 +619,11 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             <StatusSaveButton
               id="btn-gas-conc-save"
               saving={saving}
-              savePhase={emailStatus === 'failed' ? 'email_failed' : (emailStatus === 'sent' || saveSuccess) ? 'completed' : 'idle'}
+              savePhase={savePhase}
               saveSuccess={saveSuccess}
               onClick={handleInitiateSave}
               disabled={loading}
+              alwaysShowSaveText={true}
               defaultLabel="Save / Submit"
               title="Save Gas Conc. observations with sequential shift-locking"
             />
@@ -606,11 +642,11 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             </div>
             <div className="text-[10px] text-slate-500 mt-0.5">
               {shiftStatuses.shift1 === 'LOCKED'
-                ? 'Locked permanently (Shift 2 saved)'
+                ? 'Locked permanently'
                 : (lockedShifts.shift1Saved ? 'Saved & Editable until Shift 2 save' : 'First permitted shift for entry')}
             </div>
           </div>
-          <div>{renderStatusBadge(shiftStatuses.shift1)}</div>
+          <div><RecordStatusBadge status={shiftStatuses.shift1} /></div>
         </div>
 
         {/* Shift 2 Card */}
@@ -624,11 +660,11 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
               {shiftStatuses.shift2 === 'WAITING'
                 ? 'Waiting for Shift 1 save'
                 : (shiftStatuses.shift2 === 'LOCKED'
-                    ? 'Locked permanently (Shift 3 saved)'
+                    ? 'Locked permanently'
                     : 'Editable until Shift 3 save')}
             </div>
           </div>
-          <div>{renderStatusBadge(shiftStatuses.shift2)}</div>
+          <div><RecordStatusBadge status={shiftStatuses.shift2} /></div>
         </div>
 
         {/* Shift 3 Card */}
@@ -643,29 +679,12 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
                 ? 'Waiting for Shift 2 save'
                 : (shiftStatuses.shift3 === 'LOCKED'
                     ? 'Locked permanently'
-                    : (shiftStatuses.shift3 === 'FINAL EDIT' ? '1 final edit permitted before lock' : 'Active shift'))}
+                    : (lockedShifts.shift3Saved ? '1 final edit permitted before lock' : 'Active shift'))}
             </div>
           </div>
-          <div>{renderStatusBadge(shiftStatuses.shift3)}</div>
+          <div><RecordStatusBadge status={shiftStatuses.shift3} /></div>
         </div>
       </div>
-
-      {/* ── EMAIL NOTIFICATION STATUS BANNER ── */}
-      <SaveStatusBanner
-        id="gas-conc-email-banner"
-        saveSuccess={saveSuccess || emailStatus === 'sent' || emailStatus === 'failed'}
-        savePhase={emailStatus === 'failed' ? 'email_failed' : (emailStatus === 'sent' || saveSuccess) ? 'completed' : 'idle'}
-        date={selectedDate}
-        analysisName="Gas Conc. Analysis"
-        recipientEmail={emailRecipient}
-        emailStatusDetail={emailMessage}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => {
-          setEmailStatus(null);
-          setSaveSuccess(false);
-        }}
-        saving={saving || retryingEmail}
-      />
 
       {/* ── DATA ENTRY TABLE CARD ── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
@@ -683,7 +702,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             </span>
             <span className="text-[11px] text-slate-500 hidden md:inline-flex items-center gap-1">
               <HelpCircle className="w-3 h-3 text-slate-400" />
-              Blank dates inherit the preceding date
+              Blank dates inherit preceding date
             </span>
           </div>
 
@@ -747,6 +766,8 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             <tbody className="divide-y divide-slate-200">
               {rowsWithResolvedDates.map((r, idx) => {
                 const disabled = isRowDisabled(r.shiftKey);
+                const isShiftSaved = Boolean(lockedShifts[`${r.shiftKey}Saved`]);
+                const isTimeDisabled = disabled || isShiftSaved;
                 const shiftStatus = shiftStatuses[r.shiftKey];
                 const isGroupStart = r.isGroupStart && idx > 0;
                 const rowBg = disabled
@@ -770,7 +791,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
                         <input
                           type="date"
                           value={r.date}
-                          disabled={disabled}
+                          disabled={isTimeDisabled}
                           onChange={(e) => handleCellChange(r.id, 'date', e.target.value)}
                           className={`w-full px-1.5 py-1 text-xs font-semibold rounded border text-center transition focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed ${
                             r.date
@@ -795,7 +816,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
                         <input
                           type="time"
                           value={r.time}
-                          disabled={disabled}
+                          disabled={isTimeDisabled}
                           onChange={(e) => handleCellChange(r.id, 'time', e.target.value)}
                           className={`w-full px-1.5 py-1 text-xs font-bold rounded border text-center transition focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed ${
                             errors[`${r.id}_time`]
@@ -807,7 +828,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
                           <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
                             {r.shiftName}
                           </span>
-                          {renderStatusBadge(shiftStatus)}
+                          <RecordStatusBadge status={shiftStatus} />
                         </div>
                         {errors[`${r.id}_time`] && (
                           <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
@@ -887,7 +908,6 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
                               )}
                             </div>
 
-                            {/* Range display & status & EDITED badge */}
                             <div className="flex items-center justify-center gap-1 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">75%–85%</span>
                               {hasVal && (
@@ -1069,7 +1089,7 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
 
                     {/* Delete Action */}
                     <td className="py-2 px-1 text-center align-middle">
-                      {!disabled && (
+                      {!disabled && !isShiftSaved && (
                         <button
                           onClick={() => handleDeleteRow(r.id, r.shiftKey)}
                           className="text-slate-300 hover:text-rose-600 transition p-1 cursor-pointer"
@@ -1086,14 +1106,19 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
           </table>
         </div>
 
-        {/* Bottom Bar with Add Row actions */}
+        {/* Bottom Bar with Add Row actions & Footer Note */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 bg-slate-50 border-t border-slate-200 text-xs">
-          <div className="text-slate-500 text-[11px]">
-            Showing <strong className="text-slate-700">{rows.length}</strong> observations across{' '}
-            <strong className="text-slate-700">
-              {new Set(rowsWithResolvedDates.map((r) => r.resolvedDate)).size}
-            </strong>{' '}
-            date group(s).
+          <div>
+            <div className="text-slate-500 text-[11px]">
+              Showing <strong className="text-slate-700">{rows.length}</strong> observations across{' '}
+              <strong className="text-slate-700">
+                {new Set(rowsWithResolvedDates.map((r) => r.resolvedDate)).size}
+              </strong>{' '}
+              date group(s).
+            </div>
+            <div className="text-[11px] text-slate-400 italic mt-0.5">
+              One correction allowed after first save; saving the next shift locks the previous one.
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -1134,20 +1159,16 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             <div className="p-5 space-y-4 text-xs text-slate-700">
               <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Effective Date:</span>
+                  <span className="font-semibold text-slate-500">Operating Date:</span>
                   <span className="font-extrabold text-slate-900">{formatDateDisplay(selectedDate)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Plant / Unit:</span>
-                  <span className="font-extrabold text-blue-700">SA Plant — Gas Conc. Analysis</span>
+                  <span className="font-semibold text-slate-500">Target Shift:</span>
+                  <span className="font-extrabold text-blue-700">{SHIFT_INFO[pendingTargetShift]?.name || pendingTargetShift}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-500">Total Observations:</span>
-                  <span className="font-extrabold text-slate-900">{rows.length} rows recorded</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Assigned Operator:</span>
-                  <span className="font-extrabold text-slate-900">{emailRecipient}</span>
+                  <span className="font-extrabold text-slate-900">{rows.length} rows</span>
                 </div>
               </div>
 
@@ -1155,15 +1176,17 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 text-[11px] leading-relaxed">
                 <strong>Sequential Shift Locking Notice:</strong>
                 <ul className="list-disc list-inside mt-1 space-y-0.5">
-                  {!lockedShifts.shift1Saved && <li>Saving will mark <strong>SHIFT 1</strong> as saved and permit SHIFT 2 entries.</li>}
-                  {lockedShifts.shift1Saved && !lockedShifts.shift2Saved && <li>Saving will lock <strong>SHIFT 1 permanently</strong> and permit SHIFT 3 entries.</li>}
-                  {lockedShifts.shift2Saved && !lockedShifts.shift3Saved && <li>Saving will lock <strong>SHIFT 2 permanently</strong> and enter SHIFT 3 final edit allowance.</li>}
-                  {lockedShifts.shift3Saved && lockedShifts.shift3Edits === 0 && <li>This is the <strong>FINAL EDIT for SHIFT 3</strong>. Submitting will permanently lock all shifts.</li>}
+                  {pendingTargetShift === 'shift1' && !lockedShifts.shift1Saved && <li>Saving will mark <strong>SHIFT 1</strong> as saved and permit SHIFT 2 entries.</li>}
+                  {pendingTargetShift === 'shift1' && lockedShifts.shift1Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 1 and permanently lock it.</li>}
+                  {pendingTargetShift === 'shift2' && !lockedShifts.shift2Saved && <li>Saving will mark <strong>SHIFT 2</strong> as saved, permanently lock SHIFT 1, and permit SHIFT 3 entries.</li>}
+                  {pendingTargetShift === 'shift2' && lockedShifts.shift2Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 2 and permanently lock it.</li>}
+                  {pendingTargetShift === 'shift3' && !lockedShifts.shift3Saved && <li>Saving will mark <strong>SHIFT 3</strong> as saved and permanently lock SHIFT 2.</li>}
+                  {pendingTargetShift === 'shift3' && lockedShifts.shift3Saved && <li>This is the <strong>FINAL EDIT for SHIFT 3</strong>. Submitting will permanently lock all shifts.</li>}
                 </ul>
               </div>
 
               <div className="text-slate-500 text-[11px]">
-                Upon confirmation, data will be atomically persisted to MongoDB Atlas and an automated email report with an Excel attachment will be dispatched to the assigned SA Plant Operator.
+                Data will be atomically persisted to MongoDB with sequential slot locking.
               </div>
             </div>
 
