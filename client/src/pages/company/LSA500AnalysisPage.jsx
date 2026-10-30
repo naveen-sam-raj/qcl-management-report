@@ -6,19 +6,19 @@ import api from '../../services/api';
 import { getCellLimit } from '../../services/analysisValidation';
 import {
   ArrowLeft,
-  Calendar,
   Save,
   RotateCcw,
   CheckCircle2,
-  AlertCircle,
   ChevronRight,
-  Plus,
-  Trash2,
   Layers,
   RefreshCw,
-  Mail,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
+
+const LSA500_SLOTS = [
+  'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12'
+];
 
 const DEFAULT_ROWS = [
   { id: 'r1',  time: '06:30', nacl: '', bd: '', turbidity: '', isDefault: true },
@@ -38,24 +38,17 @@ const DEFAULT_ROWS = [
   { id: 'r15', time: '',      nacl: '', bd: '', turbidity: '', isDefault: false },
 ];
 
-const getTodayAsiaKolkata = () => {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-};
-
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
-const formatDateDisplay = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return isoDate;
+const isValDiff = (o, n) => {
+  if (o === undefined || o === null || o === '') o = null;
+  if (n === undefined || n === null || n === '') n = null;
+  if (o === null && n === null) return false;
+  if (o === null || n === null) return true;
+  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
+    return Number(o) !== Number(n);
   }
+  return String(o) !== String(n);
 };
 
 const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
@@ -66,28 +59,77 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Strict Current-Date Restriction) ──
-  const [date]                                          = useState(() => getTodayAsiaKolkata());
+  // ── States (Strict Operating Date) ──
+  const [date]                                          = useState(() => getOperatingDateIST());
   const [rows, setRows]                                 = useState(DEFAULT_ROWS);
   const [originalRows, setOriginalRows]                 = useState(null);
   const [errors, setErrors]                             = useState({});
   const [saving, setSaving]                             = useState(false);
   const [lastSaved, setLastSaved]                       = useState(null);
 
-  // Email & Persistence states
-  const [savePhase, setSavePhase]                       = useState('idle'); // 'idle' | 'saving' | 'completed' | 'email_failed'
+  // Persistence & Locking states
+  const [savePhase, setSavePhase]                       = useState('idle');
   const [recordId, setRecordId]                         = useState(null);
   const [recipientEmail, setRecipientEmail]             = useState('');
   const [emailStatusDetail, setEmailStatusDetail]       = useState('');
-  const [isPermanentMailError, setIsPermanentMailError] = useState(false);
   const [editedFields, setEditedFields]                 = useState({});
-  const [retryingEmail, setRetryingEmail]               = useState(false);
+  const [lockedSlots, setLockedSlots]                   = useState({});
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]         = useState(false);
   const [confirmData, setConfirmData]                   = useState(null);
 
-  // Fetch existing data for today
+  const getSlotKey = useCallback((row) => {
+    if (!row) return null;
+    if (row.id && LSA500_SLOTS.includes(row.id)) return row.id;
+    const t = String(row.time || '').trim();
+    if (t === '06:30') return 'r1';
+    if (t === '08:30') return 'r2';
+    if (t === '10:00' || t === '10:30') return 'r3';
+    if (t === '12:00' || t === '12:30') return 'r4';
+    if (t === '14:30') return 'r5';
+    if (t === '16:00' || t === '16:30') return 'r6';
+    if (t === '18:00' || t === '18:30') return 'r7';
+    if (t === '20:00' || t === '20:30') return 'r8';
+    if (t === '22:30') return 'r9';
+    if (t === '00:30') return 'r10';
+    if (t === '02:00' || t === '02:30') return 'r11';
+    if (t === '04:00' || t === '04:30') return 'r12';
+    return null;
+  }, []);
+
+  const getSlotStatus = useCallback((slotKey) => {
+    if (!slotKey || !LSA500_SLOTS.includes(slotKey)) return 'LOCKED';
+    const s = lockedSlots[slotKey] || {};
+    const idx = LSA500_SLOTS.indexOf(slotKey);
+
+    if (idx === 0) {
+      if (s.isLocked) return 'LOCKED';
+      const nextKey = LSA500_SLOTS[1];
+      if (lockedSlots[nextKey]?.isSaved) return 'LOCKED';
+      if (s.isSaved) return 'EDITABLE';
+      return 'NEW';
+    }
+
+    const prevKey = LSA500_SLOTS[idx - 1];
+    if (!lockedSlots[prevKey]?.isSaved) return 'WAITING';
+
+    if (s.isLocked) return 'LOCKED';
+    if (idx < LSA500_SLOTS.length - 1) {
+      const nextKey = LSA500_SLOTS[idx + 1];
+      if (lockedSlots[nextKey]?.isSaved) return 'LOCKED';
+    }
+    if (s.isSaved) return 'EDITABLE';
+    return 'OPEN';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
+    if (isViewOnly) return true;
+    const status = getSlotStatus(slotKey);
+    return status === 'LOCKED' || status === 'WAITING';
+  }, [isViewOnly, getSlotStatus]);
+
+  // Fetch existing data for operating day
   useEffect(() => {
     let active = true;
     const fetchExistingData = async () => {
@@ -97,17 +139,12 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
 
         if (response.data && response.data.success) {
           const rec = response.data.record || (Array.isArray(response.data.data) ? response.data.data[0] : response.data.data);
+          const returnedSlots = response.data.lockedSlots || rec?.lockedSlots || rec?.data?.lockedSlots || {};
+          setLockedSlots(returnedSlots);
+
           if (rec) {
             setRecordId(rec._id || response.data.recordId || null);
             setRecipientEmail(rec.emailRecipient || response.data.assignedOperatorEmail || '');
-
-            if (rec.emailStatus === 'sent') {
-              setSavePhase('completed');
-              setEmailStatusDetail(`Email sent to ${rec.emailRecipient || response.data.assignedOperatorEmail || 'plant operator'}`);
-            } else if (rec.emailStatus === 'failed') {
-              setSavePhase('email_failed');
-              setEmailStatusDetail('Database save succeeded. Email dispatch failed.');
-            }
 
             const fetchedRows = rec.rows || rec.data?.rows;
             if (Array.isArray(fetchedRows) && fetchedRows.length > 0) {
@@ -118,7 +155,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
               setOriginalRows(null);
             }
 
-            setEditedFields(rec.editedFields || response.data.editedFields || {});
+            setEditedFields(rec.editedFields || rec.data?.editedFields || response.data.editedFields || {});
           } else {
             setRows(DEFAULT_ROWS);
             setOriginalRows(null);
@@ -192,25 +229,14 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
     }
   }, [errors, isViewOnly]);
 
-  const handleAddRow = () => {
-    if (isViewOnly) return;
-    const nextId = `r_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    setRows((prev) => [...prev, { id: nextId, time: '', nacl: '', bd: '', turbidity: '', isDefault: false }]);
-  };
-
-  const handleDeleteRow = (id) => {
-    if (isViewOnly) return;
-    setRows((prev) => prev.filter((r) => r.id !== id));
-  };
-
   const handleReset = useCallback(() => {
     if (isViewOnly) return;
     if (originalRows) {
       setRows(JSON.parse(JSON.stringify(originalRows)));
-      showToast('Restored values to last saved state.', 'info');
+      showToast?.('Restored values to last saved state.', 'info');
     } else {
       setRows(DEFAULT_ROWS);
-      showToast('LSA AT 500# analysis form cleared to defaults.', 'info');
+      showToast?.('LSA AT 500# analysis form cleared to defaults.', 'info');
     }
     setErrors({});
   }, [originalRows, showToast, isViewOnly]);
@@ -229,20 +255,45 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      showToast('Please fix invalid numeric values before saving.', 'error');
+      showToast?.('Please fix invalid numeric values before saving.', 'error');
       return;
     }
 
-    const filledRows = rows.filter(r => r.time || r.nacl || r.bd || r.turbidity);
-    if (filledRows.length === 0) {
-      showToast('Please enter at least one measurement before saving.', 'warning');
+    // Determine changed slots
+    const baseline = originalRows || DEFAULT_ROWS;
+    const changedSlotKeys = [];
+
+    LSA500_SLOTS.forEach((sk) => {
+      const curRow = rows.find(r => getSlotKey(r) === sk);
+      const baseRow = baseline.find(r => getSlotKey(r) === sk);
+      const hasDiff = ['nacl', 'bd', 'turbidity'].some(f => isValDiff(baseRow?.[f], curRow?.[f]));
+      if (hasDiff) {
+        changedSlotKeys.push(sk);
+      }
+    });
+
+    if (changedSlotKeys.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (changedSlotKeys.length > 1) {
+      showToast?.('Please save one slot at a time.', 'warning');
+      return;
+    }
+
+    const targetSlot = changedSlotKeys[0];
+    const targetRow = rows.find(r => getSlotKey(r) === targetSlot);
+    const isEmpty = ['nacl', 'bd', 'turbidity'].every(f => !targetRow?.[f] || String(targetRow[f]).trim() === '');
+    if (isEmpty) {
+      showToast?.(`Cannot save empty slot ${targetSlot}. At least one measurement is required.`, 'warning');
       return;
     }
 
     setConfirmData({
       date,
-      rows: filledRows,
-      totalCount: rows.length,
+      targetSlot,
+      targetRow,
       averageNaCl: stats.avg,
     });
     setShowConfirmModal(true);
@@ -259,8 +310,10 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
       const payload = {
         date,
         plant: 'SA',
+        plantCode: 'SA',
         analysisType: 'LSA AT 500# Analysis',
         unit: 'LSA AT 500#',
+        targetSlot: confirmData?.targetSlot,
         rows,
         averageNaCl: stats.avg,
         submittedBy: user?.name || 'Plant Operator',
@@ -268,8 +321,15 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
 
       const res = await api.post('/api/lsa-500-analysis', payload);
 
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       if (!res.data?.success) {
-        showToast(res.data?.message || 'Failed to save LSA AT 500# Analysis data.', 'error');
+        showToast?.(res.data?.message || 'Failed to save LSA AT 500# Analysis data.', 'error');
         setSavePhase('idle');
         setSaving(false);
         return;
@@ -283,69 +343,29 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
       const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
 
       setEditedFields(newEdited);
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
       if (newRecordId) setRecordId(newRecordId);
 
-      const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
-      const recipient = res.data?.emailRecipient;
-      if (recipient) setRecipientEmail(recipient);
-
-      if (deliveryStatus === 'sent') {
+      const statusFromApi = res.data?.emailStatus || res.data?.emailDeliveryStatus;
+      if (statusFromApi === 'disabled') {
         setSavePhase('completed');
-        setEmailStatusDetail(`Email sent to ${recipient || 'plant operator'}`);
-        showToast('Saved & Email Sent Successfully!', 'success');
-      } else if (deliveryStatus === 'failed') {
-        setSavePhase('email_failed');
-        const errDetail = res.data?.message || 'SMTP delivery rejected';
-        setEmailStatusDetail(errDetail);
-        if (errDetail.includes('550') || errDetail.includes('Access denied')) {
-          setIsPermanentMailError(true);
-        }
-        showToast('Analysis Saved, but notification email delivery failed.', 'warning');
+        setEmailStatusDetail('Saved ✓ (Email disabled for this plant)');
+        showToast?.('Saved ✓', 'success');
       } else {
         setSavePhase('completed');
-        setEmailStatusDetail('Saved successfully. Email notification is processing in background.');
-        showToast('LSA AT 500# data saved successfully!', 'success');
+        setEmailStatusDetail('Saved successfully.');
+        showToast?.('Saved ✓', 'success');
       }
     } catch (err) {
       console.error('Error saving LSA AT 500# data:', err);
       const msg = err?.response?.data?.message || 'Failed to save LSA AT 500# Analysis data.';
-      showToast(msg, 'error');
-      setSavePhase('save_failed');
+      showToast?.(msg, 'error');
+      setSavePhase('idle');
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Retry Email Handler ──
-  const handleRetryEmail = async () => {
-    if (!recordId || retryingEmail) return;
-    setRetryingEmail(true);
-
-    try {
-      const res = await api.post(`/api/lsa-500-analysis/${recordId}/retry-email`);
-      if (res.data?.success && res.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail(`Notification email re-sent to ${res.data.emailRecipient || recipientEmail}`);
-        showToast('Email successfully re-sent!', 'success');
-      } else {
-        setSavePhase('email_failed');
-        const errMsg = res.data?.emailError || res.data?.message || 'Retry failed';
-        setEmailStatusDetail(`Retry failed: ${errMsg}`);
-        if (errMsg.includes('550') || errMsg.includes('Access denied')) {
-          setIsPermanentMailError(true);
-        }
-        showToast('Email retry failed.', 'error');
-      }
-    } catch (err) {
-      console.error('Retry email error:', err);
-      const msg = err.response?.data?.message || err.message || 'Retry failed';
-      setEmailStatusDetail(`Retry failed: ${msg}`);
-      showToast('Email retry failed.', 'error');
-    } finally {
-      setRetryingEmail(false);
-    }
-  };
-  
   const getCellClass = (val, paramKey, hasErr) => {
     if (hasErr) return 'border-red-500 bg-red-50 text-red-900 focus:ring-red-200';
     if (!val || val === '') return 'border-slate-300 bg-white text-slate-900 focus:border-emerald-600 focus:ring-emerald-100 hover:border-slate-400';
@@ -398,41 +418,14 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
             </span>
           )}
 
-          {/* Date Selector - Locked to Today */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-            <label htmlFor="lsa500-date-input" className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1">
-              <span>Date:</span><span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="lsa500-date-input"
-                type="date"
-                value={date}
-                readOnly
-                disabled
-                className="pl-7 pr-2 py-1 text-xs font-bold border rounded-md text-slate-800 bg-slate-100 border-slate-300 cursor-not-allowed select-none"
-                title="Date is automatically locked to today (Asia/Kolkata timezone)"
-              />
-            </div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-200 hidden sm:inline-block">
-              {formatDateDisplay(date)} (Today)
-            </span>
-          </div>
+          {/* Locked Operating Date Display */}
+          <LockedDateDisplay
+            date={date}
+            id="lsa500-date-display"
+            badgeText="Operating Day"
+          />
 
           <div className="flex items-center gap-2 shrink-0">
-            {!isViewOnly && (
-              <button
-                type="button"
-                onClick={handleAddRow}
-                id="btn-add-lsa500-row"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50/80 hover:bg-emerald-100 transition shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Add Time Slot</span>
-              </button>
-            )}
-
             {!isViewOnly && (
               <button
                 onClick={handleReset}
@@ -453,24 +446,24 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                 onClick={handleSaveClick}
                 defaultLabel="Save Analysis"
                 title="Save LSA AT 500# data"
+                alwaysShowSaveText
               />
             )}
           </div>
         </div>
       </div>
 
-      {/* ── Status Banner (Email / Save Status) ── */}
+      {/* ── Status Banner ── */}
       <SaveStatusBanner
         id="lsa500-success-banner"
-        saveSuccess={savePhase === 'completed' || savePhase === 'email_failed'}
+        saveSuccess={savePhase === 'completed'}
         savePhase={savePhase}
         date={date}
         analysisName="LSA AT 500# Analysis"
         recipientEmail={recipientEmail}
         emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => setSavePhase('idle')}
-        saving={saving || retryingEmail}
+        saving={saving}
       />
 
       {/* ── Table Container ── */}
@@ -481,6 +474,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
               <tr>
                 <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center w-14 border-r border-slate-800">#</th>
                 <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase w-32 border-r border-slate-800">Time</th>
+                <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center w-28 border-r border-slate-800">Status</th>
                 <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center border-r border-slate-800">
                   NaCl %
                 </th>
@@ -490,42 +484,39 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                 <th className="px-4 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center border-r border-slate-800">
                   TURBIDITY
                 </th>
-                {!isViewOnly && (
-                  <th className="px-2 py-2.5 text-xs font-extrabold tracking-wider uppercase text-center w-12">Action</th>
-                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/80">
               {rows.map((row, index) => {
+                const slotKey = getSlotKey(row);
+                const disabled = isSlotDisabled(slotKey);
+                const slotStatus = getSlotStatus(slotKey);
                 const rowKey = row.id || `time_${row.time}`;
-                const rowEdits = editedFields[rowKey] || {};
+                const rowEdits = editedFields[slotKey] || editedFields[rowKey] || {};
                 const hasVal = row.nacl !== '' || row.bd !== '' || row.turbidity !== '';
 
                 return (
-                  <tr key={row.id} className={`transition-colors ${hasVal ? 'bg-emerald-50/20 hover:bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
+                  <tr key={row.id} className={`transition-colors ${disabled ? 'bg-slate-50/60' : hasVal ? 'bg-emerald-50/20 hover:bg-emerald-50/40' : 'hover:bg-slate-50'}`}>
                     <td className="px-3 py-2 text-center text-xs font-bold text-slate-400 border-r border-slate-100">{index + 1}</td>
                     
-                    {/* Time Input */}
+                    {/* Time (Read-only) */}
                     <td className="px-3 py-1.5 border-r border-slate-100">
                       <div className="relative">
                         <input
                           type="text"
                           value={row.time}
-                          disabled={isViewOnly}
+                          readOnly
+                          disabled
                           placeholder="HH:MM"
-                          onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                          className="w-full max-w-[130px] px-2.5 py-1 text-xs font-bold font-mono text-slate-800 bg-slate-50 border border-slate-300 rounded focus:bg-white focus:border-emerald-600 focus:ring-1 focus:ring-emerald-200 outline-none transition text-center disabled:bg-slate-100"
+                          className="w-full max-w-[130px] px-2.5 py-1 text-xs font-bold font-mono text-slate-800 bg-slate-100 border border-slate-300 rounded outline-none transition text-center cursor-not-allowed"
                           id={`lsa500-time-${index}`}
                         />
-                        {rowEdits.time && (
-                          <span
-                            className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8.5px] font-black px-1 rounded shadow-2xs pointer-events-none"
-                            title="Field previously edited"
-                          >
-                            EDITED
-                          </span>
-                        )}
                       </div>
+                    </td>
+
+                    {/* Status Badge */}
+                    <td className="px-3 py-2 text-center border-r border-slate-100">
+                      <RecordStatusBadge status={slotStatus} />
                     </td>
                     
                     {/* NaCl % */}
@@ -535,7 +526,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                           <input
                             type="text"
                             inputMode="decimal"
-                            disabled={isViewOnly}
+                            disabled={disabled}
                             value={row.nacl}
                             placeholder="0.00"
                             onChange={(e) => handleCellChange(row.id, 'nacl', e.target.value)}
@@ -546,7 +537,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                               }
                             }}
                             id={`lsa500-nacl-${index}`}
-                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 ${getCellClass(row.nacl, 'nacl', errors[`${row.id}_nacl`])}`}
+                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${getCellClass(row.nacl, 'nacl', errors[`${row.id}_nacl`])}`}
                           />
                           {rowEdits.nacl && (
                             <span
@@ -568,7 +559,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                           <input
                             type="text"
                             inputMode="decimal"
-                            disabled={isViewOnly}
+                            disabled={disabled}
                             value={row.bd}
                             placeholder="0.00"
                             onChange={(e) => handleCellChange(row.id, 'bd', e.target.value)}
@@ -579,7 +570,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                               }
                             }}
                             id={`lsa500-bd-${index}`}
-                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 ${getCellClass(row.bd, 'bd', errors[`${row.id}_bd`])}`}
+                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${getCellClass(row.bd, 'bd', errors[`${row.id}_bd`])}`}
                           />
                           {rowEdits.bd && (
                             <span
@@ -601,18 +592,18 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                           <input
                             type="text"
                             inputMode="decimal"
-                            disabled={isViewOnly}
+                            disabled={disabled}
                             value={row.turbidity}
                             placeholder="0.00"
                             onChange={(e) => handleCellChange(row.id, 'turbidity', e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                const next = document.getElementById(`lsa500-time-${index + 1}`);
+                                const next = document.getElementById(`lsa500-nacl-${index + 1}`);
                                 if (next) next.focus();
                               }
                             }}
                             id={`lsa500-turbidity-${index}`}
-                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 ${getCellClass(row.turbidity, 'turbidity', errors[`${row.id}_turbidity`])}`}
+                            className={`w-full px-3 py-1 text-xs font-bold font-mono text-center rounded border transition outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${getCellClass(row.turbidity, 'turbidity', errors[`${row.id}_turbidity`])}`}
                           />
                           {rowEdits.turbidity && (
                             <span
@@ -626,35 +617,19 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
                         <span className="text-[10px] text-slate-400 font-medium tracking-wide">Limit: {getLimitText('turbidity') || '75 – 85 NTU'}</span>
                       </div>
                     </td>
-
-                    {/* Delete Row Button */}
-                    {!isViewOnly && (
-                      <td className="px-2 py-1.5 text-center">
-                        {!row.isDefault && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteRow(row.id)}
-                            className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                            title="Remove row"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    )}
                   </tr>
                 );
               })}
             </tbody>
             <tfoot className="bg-slate-100/80 border-t-2 border-slate-300 sticky bottom-0 z-10 font-bold text-xs">
               <tr>
-                <td colSpan={2} className="px-4 py-2.5 text-right text-slate-700 uppercase tracking-wider font-extrabold border-r border-slate-300">
+                <td colSpan={3} className="px-4 py-2.5 text-right text-slate-700 uppercase tracking-wider font-extrabold border-r border-slate-300">
                   Average NaCl %:
                 </td>
                 <td className="px-4 py-2.5 text-center text-emerald-700 font-black text-sm border-r border-slate-300">
                   {stats.avg !== null ? `${stats.avg}%` : '—'}
                 </td>
-                <td colSpan={3} className="px-4 py-2.5 text-slate-500 text-xs italic">
+                <td colSpan={2} className="px-4 py-2.5 text-slate-500 text-xs italic">
                   ({rows.length} Total Time Slots)
                 </td>
               </tr>
@@ -663,7 +638,7 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
         </div>
         <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
           <div>Values for <strong>LSA AT 500#</strong> (NaCl %, BD, Turbidity). Numeric decimal values only. Leave blank if not sampled.</div>
-          <div className="font-mono text-[11px] text-slate-400">Shift 1: 06:30–12:00 | Shift 2: 14:30–20:00 | Shift 3: 22:30–04:00</div>
+          <div>One correction allowed after first save; saving the next slot locks the previous one.</div>
         </div>
       </div>
 
@@ -685,24 +660,36 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
 
             <div className="p-5 space-y-3.5 text-xs text-slate-600">
               <p>
-                You are about to persist readings for <strong>{confirmData?.rows?.length || 0}</strong> active time slots for today:
+                You are about to persist readings for slot <strong>{confirmData?.targetSlot}</strong> ({confirmData?.targetRow?.time || 'Scheduled Time'}):
               </p>
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Date:</span>
+                  <span className="text-slate-500">Operating Date:</span>
                   <span className="font-bold text-slate-800">{date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Target Slot:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetSlot} ({confirmData?.targetRow?.time})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">NaCl %:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.nacl || '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">BD:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.bd || '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Turbidity:</span>
+                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.turbidity || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Average NaCl:</span>
                   <span className="font-bold text-emerald-700">{confirmData?.averageNaCl !== null ? `${confirmData?.averageNaCl}%` : '—'}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Recipient Operator:</span>
-                  <span className="font-bold text-slate-800">{recipientEmail || ''}</span>
-                </div>
               </div>
               <p className="text-[11px] text-slate-500">
-                Saving will securely store all rows to MongoDB and dispatch an official notification email with an Excel report.
+                Saving will securely store this slot in MongoDB.
               </p>
             </div>
 
