@@ -1,43 +1,22 @@
 const express = require('express');
-const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { ActivityLog, PlantAnalysisRecord } = require('../models');
+const { PlantAnalysisRecord } = require('../models');
 const {
-  hydrateLockState,
-  getInitialLockState,
-  validateSequentialSave,
-  applySequentialSaveTransition,
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isValueDifferent,
 } = require('../services/analysisLockEngine');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
-// In-memory cache fallback for LSA Bagging records
-const lsaBaggingRecords = [];
-
-// Apply authentication middleware
-router.use(protect);
-
-/**
- * Returns current date string formatted as YYYY-MM-DD in Asia/Kolkata timezone
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-};
-
-const isValDiff = (o, n) => {
-  if (o === undefined || o === null || o === '') o = null;
-  if (n === undefined || n === null || n === '') n = null;
-  if (o === null && n === null) return false;
-  if (o === null || n === null) return true;
-  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-    return Number(o) !== Number(n);
-  }
-  return String(o) !== String(n);
-};
-
+const CANONICAL_ANALYSIS_TYPE = 'LSA Bagging Analysis';
+const ANALYSIS_TYPES = [
+  'LSA Bagging Analysis',
+  'LSA Bagging',
+  'LSA BAGGING ANALYSIS',
+  'LSA Bagging Shift Analysis',
+  'LSA Bagging Hourly Monitoring',
+];
+const PLANT_CODES = ['SA', 'SA Plant', 'SA PLANT'];
 const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
 const SHIFT_PARAMS = ['na2co3', 'nacl', 'fe', 'na2so4', 'vm', 'ir', 'bd', 'turbidity'];
 
@@ -58,6 +37,35 @@ const PARAM_DISPLAY_NAMES = {
   turbidity: 'Turbidity (NTU)',
 };
 
+const DEFAULT_HOURLY_SLOTS = [
+  { id: 'h0600', time: '06:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h0700', time: '07:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h0800', time: '08:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h0900', time: '09:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h1000', time: '10:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h1100', time: '11:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h1200', time: '12:00', shift: 'Shift 1', nacl: '', bd: '' },
+  { id: 'h1300', time: '13:00', shift: 'Shift 1', nacl: '', bd: '' },
+
+  { id: 'h1400', time: '14:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h1500', time: '15:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h1600', time: '16:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h1700', time: '17:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h1800', time: '18:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h1900', time: '19:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h2000', time: '20:00', shift: 'Shift 2', nacl: '', bd: '' },
+  { id: 'h2100', time: '21:00', shift: 'Shift 2', nacl: '', bd: '' },
+
+  { id: 'h2200', time: '22:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h2300', time: '23:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0000', time: '00:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0100', time: '01:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0200', time: '02:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0300', time: '03:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0400', time: '04:00', shift: 'Shift 3', nacl: '', bd: '' },
+  { id: 'h0500', time: '05:00', shift: 'Shift 3', nacl: '', bd: '' },
+];
+
 /**
  * Determines which shift an hourly time slot belongs to:
  * - SHIFT 1: 06:00 to 13:59
@@ -66,7 +74,7 @@ const PARAM_DISPLAY_NAMES = {
  */
 const getShiftFromTime = (timeStr) => {
   if (!timeStr) return 'Shift 1';
-  const hour = parseInt(timeStr.split(':')[0], 10);
+  const hour = parseInt(String(timeStr).split(':')[0], 10);
   if (isNaN(hour)) return 'Shift 1';
   if (hour >= 6 && hour < 14) return 'Shift 1';
   if (hour >= 14 && hour < 22) return 'Shift 2';
@@ -82,298 +90,496 @@ const normalizeShiftKey = (s) => {
   return 'all';
 };
 
-/**
- * @desc    Save LSA Bagging Analysis data with shift-wise sequential locking
- * @route   POST /api/lsa-bagging & /api/lsa-bagging-analysis
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body;
+function deriveBaggingLocks(doc) {
+  const data = doc?.data || doc || {};
+  const storedSlots = data.lockedSlots || {};
+  const storedShifts = data.lockedShifts || {};
 
-    if (!payload || !payload.date) {
-      return res.status(400).json({
+  const slots = {};
+  for (const sk of SHIFT_KEYS) {
+    if (storedSlots[sk]) {
+      slots[sk] = {
+        isSaved: Boolean(storedSlots[sk].isSaved),
+        isLocked: Boolean(storedSlots[sk].isLocked),
+        correctionUsed: Boolean(storedSlots[sk].correctionUsed),
+      };
+    } else {
+      const isSaved = Boolean(storedShifts[`${sk}Saved`] || storedShifts[`s${sk.slice(5)}Saved`]);
+      const isLocked = Boolean(storedShifts[`${sk}Locked`] || storedShifts[`s${sk.slice(5)}Locked`]);
+      const edits = Number(storedShifts[`${sk}Edits`] || storedShifts[`s${sk.slice(5)}Edits`] || 0);
+      slots[sk] = {
+        isSaved,
+        isLocked,
+        correctionUsed: edits > 0 || (isSaved && isLocked),
+      };
+    }
+  }
+
+  // Progression:
+  if (!slots.shift1.isSaved) {
+    slots.shift1.isLocked = false;
+    slots.shift2.isLocked = true;
+    slots.shift3.isLocked = true;
+  } else {
+    if (!slots.shift2.isSaved) {
+      slots.shift2.isLocked = false;
+      slots.shift3.isLocked = true;
+    } else {
+      slots.shift1.isLocked = true;
+      if (!slots.shift3.isSaved) {
+        slots.shift3.isLocked = false;
+      } else {
+        slots.shift2.isLocked = true;
+      }
+    }
+  }
+
+  const allPermanentlyLocked =
+    slots.shift1.isLocked && slots.shift2.isLocked && slots.shift3.isLocked;
+
+  const flatShifts = {
+    shift1Saved: slots.shift1.isSaved,
+    shift1Locked: slots.shift1.isLocked,
+    shift1Edits: slots.shift1.correctionUsed ? 1 : 0,
+    shift1: slots.shift1.isLocked,
+    s1Saved: slots.shift1.isSaved,
+    s1Locked: slots.shift1.isLocked,
+    s1Edits: slots.shift1.correctionUsed ? 1 : 0,
+    s1: slots.shift1.isLocked,
+
+    shift2Saved: slots.shift2.isSaved,
+    shift2Locked: slots.shift2.isLocked,
+    shift2Edits: slots.shift2.correctionUsed ? 1 : 0,
+    shift2: slots.shift2.isLocked,
+    s2Saved: slots.shift2.isSaved,
+    s2Locked: slots.shift2.isLocked,
+    s2Edits: slots.shift2.correctionUsed ? 1 : 0,
+    s2: slots.shift2.isLocked,
+
+    shift3Saved: slots.shift3.isSaved,
+    shift3Locked: slots.shift3.isLocked,
+    shift3Edits: slots.shift3.correctionUsed ? 1 : 0,
+    shift3: slots.shift3.isLocked,
+    s3Saved: slots.shift3.isSaved,
+    s3Locked: slots.shift3.isLocked,
+    s3Edits: slots.shift3.correctionUsed ? 1 : 0,
+    s3: slots.shift3.isLocked,
+
+    allPermanentlyLocked,
+  };
+
+  return { lockedSlots: slots, lockedShifts: flatShifts };
+}
+
+function createLSABaggingRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+  router.use(protect);
+
+  router.get('/', async (req, res) => {
+    try {
+      const { date } = req.query;
+
+      let assignedOperatorEmail = null;
+      try {
+        const { getPlantAssignedUser } = require('../services/plantNotificationService');
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA', { company: req.user?.company });
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (recipErr) {
+        console.warn('Operator email resolution note:', recipErr.message);
+      }
+
+      const defaultLocks = deriveBaggingLocks(null);
+
+      if (date) {
+        const query = {
+          date,
+          plantCode: { $in: PLANT_CODES },
+          analysisType: { $in: ANALYSIS_TYPES },
+        };
+
+        if (req.user && req.user.company) {
+          query.$or = [{ company: req.user.company }, { company: null }];
+        }
+
+        let matchingDocs = [];
+        try {
+          if (PlantAnalysisRecord) {
+            matchingDocs = await PlantAnalysisRecord.find(query).lean();
+          }
+        } catch (e) {
+          console.warn('[LSABagging] Mongo lookup fallback:', e.message);
+        }
+
+        const doc = pickCanonicalDoc(matchingDocs);
+
+        if (doc) {
+          const payloadData = doc.data || {};
+          const shiftAnalysis = payloadData.shiftAnalysis || doc.shiftAnalysis || {};
+          const hourlyReadings = Array.isArray(payloadData.hourlyReadings)
+            ? payloadData.hourlyReadings
+            : Array.isArray(doc.hourlyReadings)
+            ? doc.hourlyReadings
+            : DEFAULT_HOURLY_SLOTS.map((s) => ({ ...s }));
+
+          const { lockedSlots, lockedShifts } = deriveBaggingLocks(doc);
+
+          return res.status(200).json({
+            success: true,
+            data: {
+              ...payloadData,
+              _id: doc._id,
+              id: doc._id.toString(),
+              date: doc.date,
+              plant: doc.plantCode,
+              analysisType: doc.analysisType,
+              shiftAnalysis,
+              hourlyReadings,
+              lockedSlots,
+              lockedShifts,
+              editedFields: payloadData.editedFields || {},
+              editAuditHistory: payloadData.editAuditHistory || [],
+              submittedBy: doc.submittedBy,
+            },
+            record: {
+              ...doc,
+              shiftAnalysis,
+              hourlyReadings,
+              lockedSlots,
+              lockedShifts,
+            },
+            recordId: doc._id,
+            shiftAnalysis,
+            hourlyReadings,
+            lockedSlots,
+            lockedShifts,
+            editedFields: payloadData.editedFields || {},
+            assignedOperatorEmail,
+            emailStatus: doc.emailStatus || 'disabled',
+            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: null,
+          record: null,
+          shiftAnalysis: null,
+          hourlyReadings: DEFAULT_HOURLY_SLOTS.map((s) => ({ ...s })),
+          lockedSlots: defaultLocks.lockedSlots,
+          lockedShifts: defaultLocks.lockedShifts,
+          assignedOperatorEmail,
+          emailStatus: 'disabled',
+          emailRecipient: assignedOperatorEmail,
+        });
+      }
+
+      let records = [];
+      try {
+        if (PlantAnalysisRecord) {
+          records = await PlantAnalysisRecord.find({
+            plantCode: { $in: PLANT_CODES },
+            analysisType: { $in: ANALYSIS_TYPES },
+          })
+            .sort({ date: -1, createdAt: -1 })
+            .limit(30)
+            .lean();
+        }
+      } catch (err) {
+        console.warn('Could not fetch LSA Bagging records:', err.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        count: records.length,
+        data: records.map((r) => {
+          const derived = deriveBaggingLocks(r);
+          return {
+            id: r._id,
+            _id: r._id,
+            date: r.date,
+            plant: r.plantCode,
+            analysisType: r.analysisType,
+            shiftAnalysis: r.data?.shiftAnalysis || r.shiftAnalysis || {},
+            hourlyReadings: r.data?.hourlyReadings || r.hourlyReadings || [],
+            lockedSlots: derived.lockedSlots,
+            lockedShifts: derived.lockedShifts,
+            editedFields: r.data?.editedFields || {},
+            editAuditHistory: r.data?.editAuditHistory || [],
+            submittedBy: r.submittedBy,
+          };
+        }),
+        assignedOperatorEmail,
+      });
+    } catch (error) {
+      console.error('Error fetching LSA Bagging Analysis records:', error);
+      return res.status(500).json({
         success: false,
-        message: 'Analysis Date is required to save LSA Bagging Analysis.',
+        message: 'Server error while fetching LSA Bagging Analysis records.',
+        error: error.message,
       });
     }
+  });
 
-    // 1. Current-Date Restriction Enforcement (Asia/Kolkata timezone)
-    const todayKolkata = getTodayKolkata();
-    if (payload.date !== todayKolkata) {
-      return res.status(400).json({
-        success: false,
-        message: `Date restriction enforced: Submissions are only permitted for the current date (${todayKolkata} in Asia/Kolkata timezone). Past and future dates cannot be submitted.`,
-      });
-    }
+  router.post('/', async (req, res) => {
+    try {
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: LSA Bagging data entry and modification is restricted to Company Admins.',
+        });
+      }
 
-    const { shiftAnalysis = {}, hourlyReadings = [], saveType = 'all', targetShift = 'all' } = payload;
-    const errors = [];
+      const payload = req.body;
+      if (!payload || !payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save LSA Bagging Analysis.',
+        });
+      }
 
-    // Validate shift-wise parameters (Na2CO3, NaCl, Fe, Na2SO4, VM, IR, BD, Turbidity)
-    SHIFT_KEYS.forEach((shiftKey) => {
-      const shiftData = shiftAnalysis[shiftKey] || {};
-      SHIFT_PARAMS.forEach((paramKey) => {
-        const val = shiftData[paramKey];
-        if (val !== undefined && val !== null && val !== '') {
-          const num = Number(val);
-          if (isNaN(num)) {
-            errors.push(`Shift parameter '${shiftKey}.${paramKey}' must be a valid number.`);
-          }
-        }
-      });
-    });
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
+      const submissionDate = String(payload.date).trim();
 
-    // Validate hourly parameters (NaCl, BD), check duplicate times, and verify shift alignment
-    const seenTimes = new Set();
-    if (Array.isArray(hourlyReadings)) {
-      hourlyReadings.forEach((reading, idx) => {
-        if (reading.time) {
-          const t = reading.time.trim();
-          if (seenTimes.has(t)) {
-            errors.push(`Duplicate sampling time '${t}' detected in hourly routine monitoring.`);
-          }
-          seenTimes.add(t);
+      if (submissionDate !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: Submissions are only permitted for the current operating date (${operatingDate}). Past and future dates cannot be submitted.`,
+        });
+      }
 
-          // Verify time belongs to assigned shift
-          const expectedShift = getShiftFromTime(t);
-          if (reading.shift && reading.shift !== expectedShift) {
-            errors.push(`Sampling time '${t}' belongs to ${expectedShift} (06:00–14:00 for Shift 1, 14:00–22:00 for Shift 2, 22:00–06:00 for Shift 3), but was assigned to ${reading.shift}.`);
-          }
-        }
+      const { shiftAnalysis = {}, hourlyReadings = [], saveType = 'all', targetShift = 'all' } = payload;
+      const normalizedTarget = normalizeShiftKey(targetShift);
 
-        ['nacl', 'bd'].forEach((param) => {
-          const val = reading[param];
+      // Validate numeric parameters
+      const errors = [];
+      SHIFT_KEYS.forEach((shiftKey) => {
+        const shiftData = shiftAnalysis[shiftKey] || {};
+        SHIFT_PARAMS.forEach((paramKey) => {
+          const val = shiftData[paramKey];
           if (val !== undefined && val !== null && val !== '') {
             const num = Number(val);
             if (isNaN(num)) {
-              errors.push(`Hourly reading at ${reading.time || `row ${idx + 1}`} '${param}' must be a valid number.`);
+              errors.push(`Shift parameter '${shiftKey}.${paramKey}' must be a valid number.`);
             }
           }
         });
       });
-    }
 
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: errors[0],
-        errors,
-      });
-    }
-
-    // 2. Lookup existing document in MongoDB Atlas
-    const query = {
-      date: payload.date,
-      plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-      analysisType: {
-        $in: [
-          'LSA Bagging Analysis',
-          'LSA Bagging',
-          'LSA BAGGING ANALYSIS',
-        ],
-      },
-    };
-
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company }, { company: null }];
-    }
-
-    let existingDoc = null;
-    try {
-      if (PlantAnalysisRecord) {
-        existingDoc = await PlantAnalysisRecord.findOne(query);
-      }
-    } catch (e) {
-      console.warn('MongoDB existing lookup warning:', e.message);
-    }
-
-    const existingData = existingDoc?.data || lsaBaggingRecords.find((r) => r.date === payload.date) || {};
-    const existingShiftAnalysis = existingData.shiftAnalysis || existingDoc?.shiftAnalysis || {};
-    const existingHourlyReadings = Array.isArray(existingData.hourlyReadings)
-      ? existingData.hourlyReadings
-      : Array.isArray(existingDoc?.hourlyReadings)
-      ? existingDoc.hourlyReadings
-      : [];
-
-    let editedFields = { ...(existingData.editedFields || {}) };
-    let editAuditHistory = [...(existingData.editAuditHistory || [])];
-
-    // 3. Extract and initialize Sequential Locking State via Universal Engine
-    let lockedShifts = existingData.lockedShifts
-      ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-      : getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
-
-    const s1Saved = Boolean(lockedShifts.shift1Saved || lockedShifts.s1Saved);
-    const s2Saved = Boolean(lockedShifts.shift2Saved || lockedShifts.s2Saved);
-    const s3Saved = Boolean(lockedShifts.shift3Saved || lockedShifts.s3Saved);
-
-    const s1Locked = Boolean(lockedShifts.shift1Locked || lockedShifts.s1Locked || s2Saved);
-    const s2Locked = Boolean(lockedShifts.shift2Locked || lockedShifts.s2Locked || s3Saved);
-    const s3Locked = Boolean(lockedShifts.shift3Locked || lockedShifts.s3Locked);
-
-    const nowIso = new Date().toISOString();
-    const saveEventId = payload.saveEventId || `lsa_bagging_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const editor = req.user?.name || payload.submittedBy || 'Plant Operator';
-
-    const normalizedTarget = normalizeShiftKey(targetShift);
-    const shouldProcessShifts = saveType !== 'hourly' && (payload.shiftAnalysis || saveType === 'shift' || normalizedTarget !== 'all');
-    const shouldProcessHourly = saveType !== 'shift' && (Array.isArray(payload.hourlyReadings) || saveType === 'hourly');
-
-    // 4. Enforce Sequential Shift Locking on Section 1: Shift Analysis
-    if (shouldProcessShifts) {
-      if (normalizedTarget === 'shift1' || normalizedTarget === 'shift2' || normalizedTarget === 'shift3') {
-        const valRes = validateSequentialSave({
-          lockState: lockedShifts,
-          targetItem: normalizedTarget,
-          itemsOrder: SHIFT_KEYS,
-          isDiff: true,
-          type: 'shift',
+      if (Array.isArray(hourlyReadings)) {
+        hourlyReadings.forEach((row, idx) => {
+          ['nacl', 'bd'].forEach((param) => {
+            const val = row[param];
+            if (val !== undefined && val !== null && val !== '') {
+              const num = Number(val);
+              if (isNaN(num)) {
+                errors.push(`Hourly reading row #${idx + 1} (${row.time}): ${param} must be a valid number.`);
+              }
+            }
+          });
         });
-        if (!valRes.allowed) {
-          return res.status(valRes.statusCode || 400).json({
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: errors[0],
+          errors,
+        });
+      }
+
+      // Query canonical doc
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: submissionDate,
+        plantCode: { $in: PLANT_CODES },
+        analysisType: { $in: ANALYSIS_TYPES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      let matchingDocs = [];
+      try {
+        if (PlantAnalysisRecord) {
+          matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        }
+      } catch (e) {
+        console.warn('[LSABagging] Query warning:', e.message);
+      }
+
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+      const existingShiftAnalysis = existingData.shiftAnalysis || existingDoc?.shiftAnalysis || {};
+      const existingHourlyReadings = Array.isArray(existingData.hourlyReadings)
+        ? existingData.hourlyReadings
+        : Array.isArray(existingDoc?.hourlyReadings)
+        ? existingDoc.hourlyReadings
+        : DEFAULT_HOURLY_SLOTS.map((s) => ({ ...s }));
+
+      const { lockedSlots: currentLockedSlots, lockedShifts: currentFlatLocks } =
+        deriveBaggingLocks(existingDoc);
+
+      const editor = req.user?.name || payload.submittedBy || 'Plant Operator';
+      const editorId = req.user?._id || null;
+      const nowIso = now.toISOString();
+      const saveEventId = payload.saveEventId || `lsa_bagging_evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      let editedFields = JSON.parse(JSON.stringify(existingData.editedFields || {}));
+      let editAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      // =========================================================================
+      // BRANCH A: HOURLY ROUTINE MONITORING SAVE (saveType === 'hourly')
+      // =========================================================================
+      if (saveType === 'hourly') {
+        if (!Array.isArray(hourlyReadings) || hourlyReadings.length === 0) {
+          return res.status(400).json({
             success: false,
-            message: valRes.message,
+            message: 'Hourly readings array is required for hourly save.',
           });
         }
-      } else if (normalizedTarget === 'all') {
-        // Saving all shifts: validate each shift being entered/changed
-        const targetShiftsToSave = [];
-        for (const sKey of SHIFT_KEYS) {
-          const incObj = shiftAnalysis[sKey] || {};
-          const hasData = Object.values(incObj).some((v) => v !== '' && v !== null && v !== undefined);
-          const isModified = SHIFT_PARAMS.some((p) => isValDiff(existingShiftAnalysis[sKey]?.[p], incObj[p]));
-          if (hasData && (isModified || !existingShiftAnalysis[sKey])) {
-            targetShiftsToSave.push(sKey);
+
+        // Group incoming and existing hourly readings by shift
+        const hourlyChangedShifts = [];
+        for (const sk of SHIFT_KEYS) {
+          const extRows = existingHourlyReadings.filter((r) => normalizeShiftKey(getShiftFromTime(r.time)) === sk);
+          const incRows = hourlyReadings.filter((r) => normalizeShiftKey(getShiftFromTime(r.time)) === sk);
+
+          let hasDiff = false;
+          // Row addition or deletion
+          if (extRows.length !== incRows.length) {
+            hasDiff = true;
+          } else {
+            for (const ir of incRows) {
+              const er = extRows.find((r) => r.time === ir.time);
+              if (!er) {
+                hasDiff = true;
+                break;
+              }
+              if (isValueDifferent(er.nacl, ir.nacl) || isValueDifferent(er.bd, ir.bd)) {
+                hasDiff = true;
+                break;
+              }
+            }
+          }
+
+          if (hasDiff) {
+            hourlyChangedShifts.push(sk);
           }
         }
-        for (const sKey of targetShiftsToSave) {
-          const valRes = validateSequentialSave({
-            lockState: lockedShifts,
-            targetItem: sKey,
-            itemsOrder: SHIFT_KEYS,
-            isDiff: true,
-            type: 'shift',
+
+        // Identical hourly re-save
+        if (hourlyChangedShifts.length === 0) {
+          return res.status(200).json({
+            success: true,
+            noChange: true,
+            message: 'No changes',
+            data: existingData,
+            record: existingData,
+            recordId: existingDoc?._id,
+            shiftAnalysis: existingShiftAnalysis,
+            hourlyReadings: existingHourlyReadings,
+            lockedSlots: currentLockedSlots,
+            lockedShifts: currentFlatLocks,
+            editedFields,
+            editAuditHistory,
+            emailStatus: 'disabled',
+            emailSent: false,
           });
-          if (!valRes.allowed) {
-            return res.status(valRes.statusCode || 400).json({
-              success: false,
-              message: valRes.message,
-            });
-          }
         }
-      }
-    }
 
-    // 5. Enforce Shift Locking on Section 2: Hourly Routine Monitoring
-    if (shouldProcessHourly && Array.isArray(hourlyReadings)) {
-      // Check each hourly row to ensure its containing shift is editable
-      for (const newRow of hourlyReadings) {
-        if (!newRow.time) continue;
-        const shiftBelonging = getShiftFromTime(newRow.time);
-        const oldRow = existingHourlyReadings.find((r) => r.time === newRow.time || (r.id && r.id === newRow.id));
+        // Only one shift's hourly readings may change per save
+        if (hourlyChangedShifts.length > 1) {
+          return res.status(400).json({
+            success: false,
+            message: `Hourly submission affects multiple shifts (${hourlyChangedShifts.join(', ')}). Only one shift may be modified per save.`,
+          });
+        }
 
-        const isModified = !oldRow
-          ? (newRow.nacl !== '' && newRow.nacl !== null && newRow.nacl !== undefined) || (newRow.bd !== '' && newRow.bd !== null && newRow.bd !== undefined)
-          : isValDiff(oldRow.nacl, newRow.nacl) || isValDiff(oldRow.bd, newRow.bd);
+        const targetHourlyShift = hourlyChangedShifts[0];
 
-        if (isModified) {
-          if (shiftBelonging === 'Shift 1' && s1Locked) {
-            return res.status(400).json({
-              success: false,
-              message: `Cannot edit hourly reading at '${newRow.time}': Shift 1 is permanently locked.`,
-            });
-          }
-          if (shiftBelonging === 'Shift 2') {
-            if (!s1Saved) {
+        // Check if containing shift is permanently locked
+        if (currentLockedSlots[targetHourlyShift]?.isLocked) {
+          return res.status(400).json({
+            success: false,
+            message: `Cannot edit hourly readings for ${targetHourlyShift}: shift is permanently locked.`,
+          });
+        }
+
+        // Check predecessor sequence: preceding shifts must not be waiting
+        const targetIdx = SHIFT_KEYS.indexOf(targetHourlyShift);
+        if (targetIdx > 0) {
+          for (let p = 0; p < targetIdx; p++) {
+            const pKey = SHIFT_KEYS[p];
+            if (!currentLockedSlots[pKey]?.isSaved) {
               return res.status(400).json({
                 success: false,
-                message: `Cannot edit hourly reading at '${newRow.time}': Shift 2 is waiting for Shift 1 to be saved.`,
-              });
-            }
-            if (s2Locked) {
-              return res.status(400).json({
-                success: false,
-                message: `Cannot edit hourly reading at '${newRow.time}': Shift 2 is permanently locked.`,
-              });
-            }
-          }
-          if (shiftBelonging === 'Shift 3') {
-            if (!s2Saved) {
-              return res.status(400).json({
-                success: false,
-                message: `Cannot edit hourly reading at '${newRow.time}': Shift 3 is waiting for Shift 2 to be saved.`,
-              });
-            }
-            if (s3Locked) {
-              return res.status(400).json({
-                success: false,
-                message: `Cannot edit hourly reading at '${newRow.time}': Shift 3 is permanently locked.`,
+                message: `Cannot save hourly readings for ${targetHourlyShift}: preceding shift ${pKey} is not saved.`,
               });
             }
           }
         }
-      }
 
-      // Check row deletions: cannot delete rows belonging to locked shifts
-      for (const oldRow of existingHourlyReadings) {
-        if (oldRow.isCustom && !hourlyReadings.some((r) => r.time === oldRow.time)) {
-          const shiftBelonging = getShiftFromTime(oldRow.time);
-          if (shiftBelonging === 'Shift 1' && s1Locked) {
-            return res.status(400).json({
-              success: false,
-              message: `Cannot delete custom hourly slot '${oldRow.time}': Shift 1 is permanently locked.`,
-            });
-          }
-          if (shiftBelonging === 'Shift 2' && (!s1Saved || s2Locked)) {
-            return res.status(400).json({
-              success: false,
-              message: `Cannot delete custom hourly slot '${oldRow.time}': Shift 2 is locked or waiting.`,
-            });
-          }
-          if (shiftBelonging === 'Shift 3' && (!s2Saved || s3Locked)) {
-            return res.status(400).json({
-              success: false,
-              message: `Cannot delete custom hourly slot '${oldRow.time}': Shift 3 is locked or waiting.`,
-            });
+        // Saved hourly row constraints: cannot delete or change time on existing saved custom rows
+        for (const er of existingHourlyReadings) {
+          const shiftBelonging = normalizeShiftKey(getShiftFromTime(er.time));
+          if (shiftBelonging === targetHourlyShift && er.isCustom) {
+            const ir = hourlyReadings.find((r) => r.time === er.time || r.id === er.id);
+            if (!ir) {
+              return res.status(400).json({
+                success: false,
+                message: `Cannot delete saved custom hourly slot '${er.time}'.`,
+              });
+            }
+            if (ir.time !== er.time) {
+              return res.status(400).json({
+                success: false,
+                message: `Cannot modify sampling time of saved custom hourly slot '${er.time}'.`,
+              });
+            }
           }
         }
-      }
-    }
 
-    // 6. Merge Shift Analysis cleanly & audit field-level changes
-    const mergedShiftAnalysis = {
-      shift1: { ...(existingShiftAnalysis.shift1 || {}) },
-      shift2: { ...(existingShiftAnalysis.shift2 || {}) },
-      shift3: { ...(existingShiftAnalysis.shift3 || {}) },
-    };
+        // Audit changes in hourly readings
+        if (!editedFields.hourly) editedFields.hourly = {};
 
-    if (shouldProcessShifts) {
-      const activeShiftKeys = normalizedTarget !== 'all' && SHIFT_KEYS.includes(normalizedTarget)
-        ? [normalizedTarget]
-        : SHIFT_KEYS;
+        // Audit row additions
+        hourlyReadings.forEach((newRow) => {
+          const existingMatch = existingHourlyReadings.find((r) => r.time === newRow.time);
+          if (!existingMatch && newRow.isCustom) {
+            editAuditHistory.push({
+              date: submissionDate,
+              section: 'Hourly Routine Monitoring',
+              action: 'ROW_ADDED',
+              shift: newRow.shift,
+              samplingTime: newRow.time,
+              details: `Custom hourly slot added for ${newRow.time} (${newRow.shift})`,
+              editor,
+              timestamp: nowIso,
+              saveEventId,
+            });
+          }
+        });
 
-      activeShiftKeys.forEach((sKey) => {
-        if (shiftAnalysis[sKey] && typeof shiftAnalysis[sKey] === 'object') {
-          const incData = shiftAnalysis[sKey];
-          const oldData = existingShiftAnalysis[sKey] || {};
-
-          SHIFT_PARAMS.forEach((paramKey) => {
-            if (incData[paramKey] !== undefined) {
-              const oldVal = oldData[paramKey];
-              const newVal = incData[paramKey];
-
-              if (isValDiff(oldVal, newVal) && oldVal !== undefined && oldVal !== null && oldVal !== '') {
-                if (!editedFields[sKey]) editedFields[sKey] = {};
-                editedFields[sKey][paramKey] = true;
+        // Audit field edits
+        hourlyReadings.forEach((newRow) => {
+          const oldRow = existingHourlyReadings.find((r) => r.time === newRow.time);
+          if (oldRow) {
+            ['nacl', 'bd'].forEach((param) => {
+              const oldVal = oldRow[param];
+              const newVal = newRow[param];
+              if (isValueDifferent(oldVal, newVal) && oldVal !== undefined && oldVal !== null && oldVal !== '') {
+                const rowIdKey = newRow.id || newRow.time;
+                if (!editedFields.hourly[rowIdKey]) editedFields.hourly[rowIdKey] = {};
+                editedFields.hourly[rowIdKey][param] = true;
 
                 editAuditHistory.push({
-                  date: payload.date,
-                  section: 'Shift Analysis',
-                  shift: SHIFT_DISPLAY_NAMES[sKey] || sKey,
-                  shiftKey: sKey,
-                  field: paramKey,
-                  fieldName: PARAM_DISPLAY_NAMES[paramKey] || paramKey,
+                  date: submissionDate,
+                  section: 'Hourly Routine Monitoring',
+                  shift: newRow.shift,
+                  samplingTime: newRow.time,
+                  field: param,
+                  fieldName: param === 'nacl' ? 'NaCl %' : 'BD (g/L)',
                   oldValue: oldVal,
                   newValue: newVal,
                   editor,
@@ -381,385 +587,464 @@ router.post('/', async (req, res) => {
                   saveEventId,
                 });
               }
-
-              mergedShiftAnalysis[sKey][paramKey] = newVal === '' ? '' : newVal;
-            }
-          });
-        }
-      });
-    }
-
-    // 7. Merge Hourly Routine Monitoring cleanly & audit changes
-    let mergedHourlyReadings = [...existingHourlyReadings];
-    if (shouldProcessHourly && Array.isArray(hourlyReadings)) {
-      if (!editedFields.hourly) editedFields.hourly = {};
-
-      // Audit row additions
-      hourlyReadings.forEach((newRow) => {
-        const existingMatch = existingHourlyReadings.find((r) => r.time === newRow.time);
-        if (!existingMatch && newRow.isCustom) {
-          editAuditHistory.push({
-            date: payload.date,
-            section: 'Hourly Routine Monitoring',
-            action: 'ROW_ADDED',
-            shift: newRow.shift,
-            samplingTime: newRow.time,
-            details: `Custom hourly slot added for ${newRow.time} (${newRow.shift})`,
-            editor,
-            timestamp: nowIso,
-            saveEventId,
-          });
-        }
-      });
-
-      // Audit row deletions
-      existingHourlyReadings.forEach((oldRow) => {
-        if (oldRow.isCustom && !hourlyReadings.some((r) => r.time === oldRow.time)) {
-          editAuditHistory.push({
-            date: payload.date,
-            section: 'Hourly Routine Monitoring',
-            action: 'ROW_DELETED',
-            shift: oldRow.shift,
-            samplingTime: oldRow.time,
-            details: `Custom hourly slot deleted for ${oldRow.time} (${oldRow.shift})`,
-            editor,
-            timestamp: nowIso,
-            saveEventId,
-          });
-        }
-      });
-
-      // Audit field changes in existing rows
-      hourlyReadings.forEach((newRow) => {
-        const oldRow = existingHourlyReadings.find((r) => r.time === newRow.time);
-        if (oldRow) {
-          ['nacl', 'bd'].forEach((param) => {
-            const oldVal = oldRow[param];
-            const newVal = newRow[param];
-
-            if (isValDiff(oldVal, newVal) && oldVal !== undefined && oldVal !== null && oldVal !== '') {
-              const rowIdKey = newRow.id || newRow.time;
-              if (!editedFields.hourly[rowIdKey]) editedFields.hourly[rowIdKey] = {};
-              editedFields.hourly[rowIdKey][param] = true;
-
-              editAuditHistory.push({
-                date: payload.date,
-                section: 'Hourly Routine Monitoring',
-                shift: newRow.shift,
-                samplingTime: newRow.time,
-                field: param,
-                fieldName: param === 'nacl' ? 'NaCl %' : 'BD (g/L)',
-                oldValue: oldVal,
-                newValue: newVal,
-                editor,
-                timestamp: nowIso,
-                saveEventId,
-              });
-            }
-          });
-        }
-      });
-
-      mergedHourlyReadings = hourlyReadings;
-    }
-
-    // 8. Update Sequential Shift Locking State on Successful Shift Save
-    if (shouldProcessShifts) {
-      const shiftsSaved = normalizedTarget !== 'all' && SHIFT_KEYS.includes(normalizedTarget)
-        ? [normalizedTarget]
-        : SHIFT_KEYS.filter((sKey) => {
-            const incObj = shiftAnalysis[sKey] || {};
-            return Object.values(incObj).some((v) => v !== '' && v !== null && v !== undefined);
-          });
-
-      for (const sKey of shiftsSaved) {
-        const isCorrection = (sKey === 'shift1' && s1Saved) ||
-                             (sKey === 'shift2' && s2Saved) ||
-                             (sKey === 'shift3' && s3Saved);
-        lockedShifts = applySequentialSaveTransition({
-          lockState: lockedShifts,
-          targetItem: sKey,
-          itemsOrder: SHIFT_KEYS,
-          isCorrection,
-          type: 'shift',
+            });
+          }
         });
-      }
-    }
 
-    // 9. Construct Complete Record Payload
-    const recordPayload = {
-      id: existingDoc?._id ? existingDoc._id.toString() : `lsa_bagging_${Date.now()}`,
-      date: payload.date,
-      plant: 'SA',
-      plantCode: 'SA',
-      plantId: 'sa',
-      unit: 'LSA Bagging',
-      section: 'LSA Bagging',
-      analysisType: 'LSA Bagging Analysis',
-      shiftAnalysis: mergedShiftAnalysis,
-      hourlyReadings: mergedHourlyReadings,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      saveType,
-      targetShift,
-      saveEventId,
-      submittedBy: editor,
-      submittedById: req.user?._id,
-      submittedAt: nowIso,
-      company: req.user?.company?._id || req.user?.company,
-    };
+        // Hourly saves do NOT advance the shift chain (default decision)
+        const updatedHourlyDocPayload = {
+          'data.hourlyReadings': hourlyReadings,
+          'data.editedFields': editedFields,
+          'data.editAuditHistory': editAuditHistory,
+          'data.submittedBy': editor,
+          'data.submittedAt': nowIso,
+          'data.saveEventId': saveEventId,
+          submittedBy: editor,
+          submittedById: editorId,
+          status: 'completed',
+          emailStatus: 'disabled',
+          emailRecipient: null,
+        };
 
-    // 10. Persist to MongoDB PlantAnalysisRecord
-    let savedRecordDoc = null;
-    try {
-      if (PlantAnalysisRecord) {
-        savedRecordDoc = await PlantAnalysisRecord.findOneAndUpdate(
-          {
-            date: payload.date,
-            plantCode: 'SA',
-            analysisType: 'LSA Bagging Analysis',
-          },
-          {
+        if (existingDoc?._id) {
+          const updateFilter = {
+            _id: existingDoc._id,
+            [`data.lockedSlots.${targetHourlyShift}.isLocked`]: { $ne: true },
+          };
+
+          const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+            $set: updatedHourlyDocPayload,
+          });
+
+          if (updateRes.matchedCount === 0) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: This shift was locked or updated concurrently by another user.',
+            });
+          }
+        } else {
+          await PlantAnalysisRecord.create({
             plantName: 'SA Plant',
             plantCode: 'SA',
-            analysisType: 'LSA Bagging Analysis',
+            analysisType: CANONICAL_ANALYSIS_TYPE,
             unit: 'LSA Bagging',
-            date: payload.date,
-            shift: targetShift !== 'all' ? targetShift.toUpperCase() : 'All Shifts',
-            data: recordPayload,
-            submittedBy: recordPayload.submittedBy,
-            submittedById: recordPayload.submittedById,
-            company: recordPayload.company,
+            date: submissionDate,
+            shift: 'All Shifts',
             status: 'completed',
+            submittedBy: editor,
+            submittedById: editorId,
+            company: companyVal,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+            data: {
+              id: `lsa_bagging_${Date.now()}`,
+              date: submissionDate,
+              plant: 'SA',
+              plantCode: 'SA',
+              unit: 'LSA Bagging',
+              analysisType: CANONICAL_ANALYSIS_TYPE,
+              shiftAnalysis: existingShiftAnalysis,
+              hourlyReadings,
+              lockedSlots: currentLockedSlots,
+              lockedShifts: currentFlatLocks,
+              editedFields,
+              editAuditHistory,
+              submittedBy: editor,
+              submittedById: editorId,
+              submittedAt: nowIso,
+              company: companyVal,
+              saveEventId,
+            },
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: `Hourly readings for ${targetHourlyShift} saved successfully.`,
+          data: {
+            date: submissionDate,
+            shiftAnalysis: existingShiftAnalysis,
+            hourlyReadings,
+            lockedSlots: currentLockedSlots,
+            lockedShifts: currentFlatLocks,
+            editedFields,
+            editAuditHistory,
           },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      }
-    } catch (dbErr) {
-      console.error('[LSABagging Save] Database persistence failure:', dbErr);
-      return res.status(500).json({
-        success: false,
-        message: 'Database persistence failed: ' + dbErr.message,
-      });
-    }
-
-    // Update in-memory fallback cache
-    const cachedIdx = lsaBaggingRecords.findIndex((r) => r.date === payload.date);
-    if (cachedIdx >= 0) {
-      lsaBaggingRecords[cachedIdx] = recordPayload;
-    } else {
-      lsaBaggingRecords.unshift(recordPayload);
-    }
-
-    // 12. Activity log
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'SAVE_ANALYSIS',
-          module: 'PLANT_ANALYSIS',
-          details: `Saved LSA Bagging Analysis for SA Plant on ${payload.date} (SaveType: ${saveType}, TargetShift: ${targetShift}).`,
-          user: req.user?._id,
-          userName: req.user?.name,
-          company: req.user?.company,
-          timestamp: new Date(),
+          record: {
+            date: submissionDate,
+            shiftAnalysis: existingShiftAnalysis,
+            hourlyReadings,
+            lockedSlots: currentLockedSlots,
+            lockedShifts: currentFlatLocks,
+            editedFields,
+            editAuditHistory,
+          },
+          shiftAnalysis: existingShiftAnalysis,
+          hourlyReadings,
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentFlatLocks,
+          editedFields,
+          editAuditHistory,
+          statusFromApi: 'disabled',
+          emailStatus: 'disabled',
+          emailSent: false,
+          saveEventId,
         });
       }
-    } catch (logErr) {
-      console.warn('[ActivityLog] Could not log LSA Bagging activity:', logErr.message);
-    }
 
-    return res.status(201).json({
-      success: true,
-      message: 'LSA Bagging Analysis saved successfully in MongoDB ✓',
-      data: recordPayload,
-      recordId: savedRecordDoc?._id || recordPayload.id,
-      shiftAnalysis: mergedShiftAnalysis,
-      hourlyReadings: mergedHourlyReadings,
-      lockedShifts,
-      emailStatus: 'disabled',
-      emailDeliveryStatus: 'disabled',
-      emailRecipient: null,
-      editedFields,
-      saveEventId,
-    });
-  } catch (error) {
-    console.error('Error saving LSA Bagging Analysis:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while saving LSA Bagging Analysis: ' + error.message,
-      error: error.message,
-    });
-  }
-});
+      // =========================================================================
+      // BRANCH B: SHIFT ANALYSIS SAVE (saveType !== 'hourly')
+      // =========================================================================
+      // Check if an explicitly targeted or single-provided unsaved shift is empty
+      const effectiveTarget = (normalizedTarget !== 'all' && SHIFT_KEYS.includes(normalizedTarget))
+        ? normalizedTarget
+        : (Object.keys(shiftAnalysis).length === 1 && SHIFT_KEYS.includes(Object.keys(shiftAnalysis)[0]))
+        ? Object.keys(shiftAnalysis)[0]
+        : null;
 
-/**
- * @desc    Get LSA Bagging Analysis data by date
- * @route   GET /api/lsa-bagging & /api/lsa-bagging-analysis
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date } = req.query;
+      if (effectiveTarget) {
+        const incTarget = shiftAnalysis[effectiveTarget] || {};
+        const isTargetEmpty = SHIFT_PARAMS.every(
+          (pk) => incTarget[pk] === '' || incTarget[pk] === null || incTarget[pk] === undefined
+        );
+        if (isTargetEmpty && !currentLockedSlots[effectiveTarget]?.isSaved) {
+          return res.status(400).json({
+            success: false,
+            message: `Cannot save empty shift ${effectiveTarget}. At least one parameter value is required.`,
+          });
+        }
+      }
 
-    let assignedOperatorEmail = null;
-    try {
-      const { getPlantAssignedUser } = require('../services/plantNotificationService');
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('SA', { company: req.user?.company });
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (recipErr) {
-      console.warn('Operator email resolution note:', recipErr.message);
-    }
+      const changedShifts = [];
+      for (const sk of SHIFT_KEYS) {
+        if (!shiftAnalysis[sk]) {
+          continue;
+        }
+        const ext = existingShiftAnalysis[sk] || {};
+        const inc = shiftAnalysis[sk] || {};
 
-    if (date) {
-      const query = {
-        date,
-        plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-        analysisType: {
-          $in: [
-            'LSA Bagging Analysis',
-            'LSA Bagging',
-            'LSA BAGGING ANALYSIS',
-          ],
-        },
+        const hasDiff = SHIFT_PARAMS.some((pk) => isValueDifferent(ext[pk], inc[pk]));
+        if (hasDiff) {
+          changedShifts.push(sk);
+        }
+      }
+
+      // Identical re-save
+      if (changedShifts.length === 0) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          shiftAnalysis: existingShiftAnalysis,
+          hourlyReadings: existingHourlyReadings,
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentFlatLocks,
+          editedFields,
+          editAuditHistory,
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      // Enforce single-shift save
+      if (changedShifts.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: `Only one shift can be entered or edited per save. Detected changes in: ${changedShifts.join(', ')}`,
+        });
+      }
+
+      const targetShiftKey = changedShifts[0];
+      const incTargetShift = shiftAnalysis[targetShiftKey] || {};
+
+      // Empty shift check
+      const isShiftEmpty = SHIFT_PARAMS.every(
+        (pk) => incTargetShift[pk] === '' || incTargetShift[pk] === null || incTargetShift[pk] === undefined
+      );
+
+      if (isShiftEmpty) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot save empty shift ${targetShiftKey}. At least one parameter value is required.`,
+        });
+      }
+
+      // Prepare units for computeSlotTransition
+      const storedUnits = {};
+      const incomingUnits = {};
+      for (const sk of SHIFT_KEYS) {
+        storedUnits[sk] = {};
+        incomingUnits[sk] = {};
+        SHIFT_PARAMS.forEach((pk) => {
+          storedUnits[sk][pk] = existingShiftAnalysis[sk]?.[pk];
+          if (sk === targetShiftKey) {
+            incomingUnits[sk][pk] = incTargetShift[pk];
+          } else {
+            incomingUnits[sk][pk] = existingShiftAnalysis[sk]?.[pk];
+          }
+        });
+      }
+
+      const transition = computeSlotTransition({
+        unitsOrder: SHIFT_KEYS,
+        lockedSlots: currentLockedSlots,
+        storedRows: storedUnits,
+        incomingRows: incomingUnits,
+        now,
+      });
+
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
+
+      const isCorrection = transition.isCorrection;
+
+      // Update lockedSlots
+      const updatedLockedSlots = JSON.parse(JSON.stringify(currentLockedSlots));
+      if (!isCorrection) {
+        updatedLockedSlots[targetShiftKey] = {
+          isSaved: true,
+          isLocked: false,
+          correctionUsed: false,
+        };
+        const targetIdx = SHIFT_KEYS.indexOf(targetShiftKey);
+        for (let p = 0; p < targetIdx; p++) {
+          updatedLockedSlots[SHIFT_KEYS[p]].isLocked = true;
+        }
+        if (targetIdx + 1 < SHIFT_KEYS.length) {
+          updatedLockedSlots[SHIFT_KEYS[targetIdx + 1]].isLocked = false;
+        }
+      } else {
+        updatedLockedSlots[targetShiftKey] = {
+          isSaved: true,
+          isLocked: true,
+          correctionUsed: true,
+        };
+      }
+
+      const allPermanentlyLocked =
+        updatedLockedSlots.shift1.isLocked &&
+        updatedLockedSlots.shift2.isLocked &&
+        updatedLockedSlots.shift3.isLocked;
+
+      const updatedLockedShifts = {
+        shift1Saved: updatedLockedSlots.shift1.isSaved,
+        shift1Locked: updatedLockedSlots.shift1.isLocked,
+        shift1Edits: updatedLockedSlots.shift1.correctionUsed ? 1 : 0,
+        shift1: updatedLockedSlots.shift1.isLocked,
+        s1Saved: updatedLockedSlots.shift1.isSaved,
+        s1Locked: updatedLockedSlots.shift1.isLocked,
+        s1Edits: updatedLockedSlots.shift1.correctionUsed ? 1 : 0,
+        s1: updatedLockedSlots.shift1.isLocked,
+
+        shift2Saved: updatedLockedSlots.shift2.isSaved,
+        shift2Locked: updatedLockedSlots.shift2.isLocked,
+        shift2Edits: updatedLockedSlots.shift2.correctionUsed ? 1 : 0,
+        shift2: updatedLockedSlots.shift2.isLocked,
+        s2Saved: updatedLockedSlots.shift2.isSaved,
+        s2Locked: updatedLockedSlots.shift2.isLocked,
+        s2Edits: updatedLockedSlots.shift2.correctionUsed ? 1 : 0,
+        s2: updatedLockedSlots.shift2.isLocked,
+
+        shift3Saved: updatedLockedSlots.shift3.isSaved,
+        shift3Locked: updatedLockedSlots.shift3.isLocked,
+        shift3Edits: updatedLockedSlots.shift3.correctionUsed ? 1 : 0,
+        shift3: updatedLockedSlots.shift3.isLocked,
+        s3Saved: updatedLockedSlots.shift3.isSaved,
+        s3Locked: updatedLockedSlots.shift3.isLocked,
+        s3Edits: updatedLockedSlots.shift3.correctionUsed ? 1 : 0,
+        s3: updatedLockedSlots.shift3.isLocked,
+
+        allPermanentlyLocked,
       };
 
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company }, { company: null }];
+      // Audit correction edits
+      if (isCorrection) {
+        const oldShift = existingShiftAnalysis[targetShiftKey] || {};
+        const newShift = shiftAnalysis[targetShiftKey] || {};
+
+        SHIFT_PARAMS.forEach((pk) => {
+          const oldVal = oldShift[pk];
+          const newVal = newShift[pk];
+          if (isValueDifferent(oldVal, newVal) && oldVal !== undefined && oldVal !== null && oldVal !== '') {
+            if (!editedFields[targetShiftKey]) editedFields[targetShiftKey] = {};
+            editedFields[targetShiftKey][pk] = true;
+
+            editAuditHistory.push({
+              date: submissionDate,
+              section: 'Shift Analysis',
+              shift: SHIFT_DISPLAY_NAMES[targetShiftKey] || targetShiftKey,
+              shiftKey: targetShiftKey,
+              field: pk,
+              fieldName: PARAM_DISPLAY_NAMES[pk] || pk,
+              oldValue: oldVal,
+              newValue: newVal,
+              editor,
+              timestamp: nowIso,
+              saveEventId,
+            });
+          }
+        });
       }
 
-      let doc = null;
-      if (PlantAnalysisRecord) {
-        doc = await PlantAnalysisRecord.findOne(query).sort({ updatedAt: -1 });
-      }
+      // Merge shiftAnalysis cleanly
+      const mergedShiftAnalysis = {
+        shift1: { ...(existingShiftAnalysis.shift1 || {}) },
+        shift2: { ...(existingShiftAnalysis.shift2 || {}) },
+        shift3: { ...(existingShiftAnalysis.shift3 || {}) },
+      };
+      mergedShiftAnalysis[targetShiftKey] = { ...incTargetShift };
 
-      const defaultLocks = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
+      const docUpdatePayload = {
+        'data.shiftAnalysis': mergedShiftAnalysis,
+        'data.hourlyReadings': existingHourlyReadings,
+        'data.lockedSlots': updatedLockedSlots,
+        'data.lockedShifts': updatedLockedShifts,
+        'data.editedFields': editedFields,
+        'data.editAuditHistory': editAuditHistory,
+        'data.submittedBy': editor,
+        'data.submittedAt': nowIso,
+        'data.saveEventId': saveEventId,
+        'data.unit': 'LSA Bagging',
+        'data.section': 'LSA Bagging',
+        'data.analysisType': CANONICAL_ANALYSIS_TYPE,
+        'data.plant': 'SA',
+        'data.plantCode': 'SA',
+        'data.plantName': 'SA Plant',
+        submittedBy: editor,
+        submittedById: editorId,
+        status: 'completed',
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      };
 
-      if (doc) {
-        const payloadData = doc.data || {};
-        const shiftAnalysis = payloadData.shiftAnalysis || doc.shiftAnalysis || {};
-        const hourlyReadings = payloadData.hourlyReadings || doc.hourlyReadings || [];
-        const resolvedLocks = payloadData.lockedShifts
-          ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-          : defaultLocks;
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+                [`data.lockedSlots.${targetShiftKey}.isSaved`]: true,
+                [`data.lockedSlots.${targetShiftKey}.correctionUsed`]: false,
+                [`data.lockedSlots.${targetShiftKey}.isLocked`]: false,
+              }
+            : {
+                $or: [
+                  { [`data.lockedSlots.${targetShiftKey}.isSaved`]: { $ne: true } },
+                  { [`data.lockedSlots.${targetShiftKey}`]: { $exists: false } },
+                  { [`data.lockedSlots`]: { $exists: false } },
+                ],
+              }),
+        };
 
-        return res.status(200).json({
-          success: true,
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This shift was locked or updated concurrently by another user.',
+          });
+        }
+      } else {
+        await PlantAnalysisRecord.create({
+          plantName: 'SA Plant',
+          plantCode: 'SA',
+          analysisType: CANONICAL_ANALYSIS_TYPE,
+          unit: 'LSA Bagging',
+          date: submissionDate,
+          shift: 'All Shifts',
+          status: 'completed',
+          submittedBy: editor,
+          submittedById: editorId,
+          company: companyVal,
+          emailStatus: 'disabled',
+          emailRecipient: null,
           data: {
-            ...payloadData,
-            _id: doc._id,
-            id: doc._id.toString(),
-            date: doc.date,
-            plant: doc.plantCode,
-            analysisType: doc.analysisType,
-            shiftAnalysis,
-            hourlyReadings,
-            lockedShifts: resolvedLocks,
-            editedFields: payloadData.editedFields || {},
-            editAuditHistory: payloadData.editAuditHistory || [],
-            submittedBy: doc.submittedBy,
+            id: `lsa_bagging_${Date.now()}`,
+            date: submissionDate,
+            plant: 'SA',
+            plantCode: 'SA',
+            unit: 'LSA Bagging',
+            section: 'LSA Bagging',
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            shiftAnalysis: mergedShiftAnalysis,
+            hourlyReadings: existingHourlyReadings,
+            lockedSlots: updatedLockedSlots,
+            lockedShifts: updatedLockedShifts,
+            editedFields,
+            editAuditHistory,
+            submittedBy: editor,
+            submittedById: editorId,
+            submittedAt: nowIso,
+            company: companyVal,
+            saveEventId,
           },
-          record: doc.toObject ? { ...doc.toObject(), shiftAnalysis, hourlyReadings, lockedShifts: resolvedLocks } : doc,
-          recordId: doc._id,
-          shiftAnalysis,
-          hourlyReadings,
-          lockedShifts: resolvedLocks,
-          editedFields: payloadData.editedFields || {},
-          assignedOperatorEmail,
-          emailStatus: doc.emailStatus || 'pending',
-          emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-        });
-      }
-
-      const match = lsaBaggingRecords.find((r) => r.date === date);
-      if (match) {
-        const resolvedLocks = match.lockedShifts
-          ? hydrateLockState(match.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-          : defaultLocks;
-        return res.status(200).json({
-          success: true,
-          data: match,
-          record: match,
-          recordId: match._id || match.id,
-          shiftAnalysis: match.shiftAnalysis,
-          hourlyReadings: match.hourlyReadings,
-          lockedShifts: resolvedLocks,
-          editedFields: match.editedFields || {},
-          assignedOperatorEmail,
-          emailStatus: 'failed',
-          emailRecipient: assignedOperatorEmail,
         });
       }
 
       return res.status(200).json({
         success: true,
-        data: null,
-        record: null,
-        shiftAnalysis: null,
-        hourlyReadings: null,
-        lockedShifts: defaultLocks,
-        assignedOperatorEmail,
-        emailStatus: null,
-        emailRecipient: assignedOperatorEmail,
+        message: isCorrection
+          ? `Shift ${targetShiftKey} corrected successfully. Slot is now permanently locked.`
+          : `Shift ${targetShiftKey} saved successfully.`,
+        data: {
+          date: submissionDate,
+          shiftAnalysis: mergedShiftAnalysis,
+          hourlyReadings: existingHourlyReadings,
+          lockedSlots: updatedLockedSlots,
+          lockedShifts: updatedLockedShifts,
+          editedFields,
+          editAuditHistory,
+        },
+        record: {
+          date: submissionDate,
+          shiftAnalysis: mergedShiftAnalysis,
+          hourlyReadings: existingHourlyReadings,
+          lockedSlots: updatedLockedSlots,
+          lockedShifts: updatedLockedShifts,
+          editedFields,
+          editAuditHistory,
+        },
+        shiftAnalysis: mergedShiftAnalysis,
+        hourlyReadings: existingHourlyReadings,
+        lockedSlots: updatedLockedSlots,
+        lockedShifts: updatedLockedShifts,
+        editedFields,
+        editAuditHistory,
+        statusFromApi: 'disabled',
+        emailStatus: 'disabled',
+        emailSent: false,
+        saveEventId,
+      });
+    } catch (error) {
+      console.error('[LSABagging Save] Error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while saving LSA Bagging Analysis data: ' + error.message,
+        error: error.message,
       });
     }
+  });
 
-    // If no date query, return recent list
-    let records = [];
-    try {
-      if (PlantAnalysisRecord) {
-        records = await PlantAnalysisRecord.find({
-          plantCode: { $in: ['SA', 'SA Plant', 'SA PLANT'] },
-          analysisType: {
-            $in: [
-              'LSA Bagging Analysis',
-              'LSA Bagging',
-              'LSA BAGGING ANALYSIS',
-            ],
-          },
-        })
-          .sort({ date: -1 })
-          .limit(30)
-          .lean();
-      }
-    } catch (e) {
-      console.warn('Error querying all LSA Bagging records:', e.message);
-    }
-
-    if (records.length > 0) {
-      return res.status(200).json({
-        success: true,
-        count: records.length,
-        data: records.map((r) => r.data || r),
-      });
-    }
-
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      count: lsaBaggingRecords.length,
-      data: lsaBaggingRecords,
+      emailSent: false,
+      emailStatus: 'disabled',
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('Error in GET /api/lsa-bagging:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while fetching LSA Bagging Analysis: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retry sending email for an existing saved LSA Bagging analysis record
- * @route   POST /api/lsa-bagging/:id/retry-email & /api/lsa-bagging-analysis/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-module.exports = router;
+  return router;
+}
+
+const defaultRouter = createLSABaggingRouter();
+defaultRouter.createRouter = createLSABaggingRouter;
+module.exports = defaultRouter;
