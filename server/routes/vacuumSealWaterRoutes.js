@@ -1,537 +1,751 @@
 const express = require('express');
-const router = express.Router();
-const mongoose = require('mongoose');
+const { PlantAnalysisRecord } = require('../models');
 const { protect } = require('../middleware/auth');
-const { ActivityLog, PlantAnalysisRecord } = require('../models');
 const {
-  hydrateLockState,
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isUnitEmpty,
+  isValueDifferent,
   getInitialLockState,
-  validateSequentialSave,
-  applySequentialSaveTransition,
+  hydrateLockState,
 } = require('../services/analysisLockEngine');
-const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const { getOperatingDateIST } = require('../utils/operatingDate');
+const { getPlantAssignedUser } = require('../services/plantNotificationService');
 
-/**
- * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-};
+const CANONICAL_ANALYSIS_TYPE = 'Vacuum Seal Water Analysis';
+const ANALYSIS_TYPES = ['Vacuum Seal Water Analysis'];
+const PLANT_CODES = ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'];
+const CANONICAL_PLANT_CODE = 'OFFSITE';
+const CANONICAL_PLANT_NAME = 'OFFSITE Plant';
+const CANONICAL_UNIT = 'Vaccum seal water';
 
-/**
- * Compares two values for differences, preserving decimal precision
- */
-const isValDiff = (o, n) => {
-  if (o === undefined || o === null || o === '') o = null;
-  if (n === undefined || n === null || n === '') n = null;
-  if (o === null && n === null) return false;
-  if (o === null || n === null) return true;
-  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-    return Number(o) !== Number(n);
-  }
-  return String(o) !== String(n);
-};
-
-const getShiftFromTime = (timeStr) => {
-  if (!timeStr) return 'shift1';
-  const hour = parseInt(String(timeStr).split(':')[0], 10);
-  if (isNaN(hour)) return 'shift1';
-  if (hour >= 6 && hour < 14) return 'shift1';
-  if (hour >= 14 && hour < 22) return 'shift2';
-  return 'shift3';
-};
-
+const PARAM_FIELDS = ['fnh3', 'cnh3', 'ca'];
 const NUMERIC_FIELDS = ['fnh3', 'cnh3'];
+const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
 
-// Seed readings from laboratory specifications
-const SEED_READINGS = [
-  { id: '1', time: '07:00', fnh3: '1530', cnh3: '0', ca: 'Nil' },
+const SLOT_META = {
+  shift1: { id: '1', shift: 'I SHIFT', defaultTime: '07:00', label: 'I SHIFT' },
+  shift2: { id: '2', shift: 'II SHIFT', defaultTime: '15:00', label: 'II SHIFT' },
+  shift3: { id: '3', shift: 'III SHIFT', defaultTime: '23:00', label: 'III SHIFT' },
+};
+
+const DEFAULT_READINGS_TEMPLATE = [
+  { id: '1', time: '07:00', fnh3: '', cnh3: '', ca: '' },
   { id: '2', time: '15:00', fnh3: '', cnh3: '', ca: '' },
   { id: '3', time: '23:00', fnh3: '', cnh3: '', ca: '' },
 ];
 
-// In-memory fallback cache
-const vacuumSealRecords = [];
+function getSlotKeyFromRow(r) {
+  if (!r) return null;
+  const idStr = String(r.id || '').trim();
+  const timeStr = String(r.time || '').trim();
+  const shiftStr = String(r.shift || '').trim().toUpperCase();
 
-// Apply authentication middleware
-router.use(protect);
+  if (idStr === '1' || timeStr === '07:00' || shiftStr.includes('I SHIFT') || shiftStr === 'I' || shiftStr === 'SHIFT1') return 'shift1';
+  if (idStr === '2' || timeStr === '15:00' || shiftStr.includes('II SHIFT') || shiftStr === 'II' || shiftStr === 'SHIFT2') return 'shift2';
+  if (idStr === '3' || timeStr === '23:00' || shiftStr.includes('III SHIFT') || shiftStr === 'III' || shiftStr === 'SHIFT3') return 'shift3';
 
-/**
- * @desc    Get Vacuum Seal Water Analysis data
- * @route   GET /api/vacuum-seal-water
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date, startDate, endDate, plant } = req.query;
 
-    // Resolve assigned OFFSITE Plant operator email dynamically from registered database records
-    let assignedOperatorEmail = null;
-    try {
-      const companyId = req.user?.company?._id || req.user?.company || null;
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE', { company: companyId });
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (recipErr) {
-      console.warn('[VacuumSeal GET] Operator recipient resolution note:', recipErr.message);
-      assignedOperatorEmail = null;
+  return null;
+}
+
+function getSlotKeyFromInput(val) {
+  if (!val) return null;
+  const s = String(val).trim().toLowerCase();
+  if (s === 'shift1' || s === 's1' || s === '1' || s === 'i' || s === 'i shift') return 'shift1';
+  if (s === 'shift2' || s === 's2' || s === '2' || s === 'ii' || s === 'ii shift') return 'shift2';
+  if (s === 'shift3' || s === 's3' || s === '3' || s === 'iii' || s === 'iii shift') return 'shift3';
+  return null;
+}
+
+function cleanParamValues(row = {}) {
+  const cleaned = {};
+  for (const f of PARAM_FIELDS) {
+    const v = row[f];
+    if (v === '' || v === null || v === undefined) {
+      cleaned[f] = '';
+    } else if (NUMERIC_FIELDS.includes(f)) {
+      const num = Number(v);
+      cleaned[f] = !isNaN(num) ? String(num) : String(v).trim();
+    } else {
+      cleaned[f] = String(v).trim();
     }
+  }
+  return cleaned;
+}
 
-    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
-    const defaultLocks = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
+function deriveVacuumSealWaterLocks(existingDoc) {
+  const existingData = existingDoc?.data || {};
+  const storedSlots = existingData.lockedSlots;
+  const legacyShifts = existingData.lockedShifts || {};
+  const readings = Array.isArray(existingData.readings) ? existingData.readings : [];
 
-    if (date) {
-      try {
-        const query = {
-          date,
-          analysisType: 'Vacuum Seal Water Analysis',
-          plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-        };
-        if (req.user && req.user.company) {
-          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
-        }
+  const s1Row = readings.find((r) => getSlotKeyFromRow(r) === 'shift1');
+  const s2Row = readings.find((r) => getSlotKeyFromRow(r) === 'shift2');
+  const s3Row = readings.find((r) => getSlotKeyFromRow(r) === 'shift3');
 
-        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
-        if (doc && doc.data) {
-          const payloadData = doc.data;
-          const readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
-          const resolvedLocks = payloadData.lockedShifts
-            ? hydrateLockState(payloadData.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-            : defaultLocks;
-          return res.status(200).json({
-            success: true,
-            recordId: doc._id,
-            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            emailStatus: doc.emailStatus || 'pending',
-            assignedOperatorEmail,
-            lockedShifts: resolvedLocks,
-            editedFields: payloadData.editedFields || {},
-            editAuditHistory: payloadData.editAuditHistory || [],
-            data: {
-              ...payloadData,
-              _id: doc._id,
-              id: doc._id,
-              date: doc.date,
-              readings: readings || [],
-              lockedShifts: resolvedLocks,
-              editedFields: payloadData.editedFields || {},
-              editAuditHistory: payloadData.editAuditHistory || [],
-              emailStatus: doc.emailStatus || 'pending',
-              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            },
-          });
-        }
-      } catch (dbErr) {
-        console.warn('[VacuumSeal GET] MongoDB lookup note:', dbErr.message);
-      }
+  const s1HasData = s1Row && !isUnitEmpty(s1Row);
+  const s2HasData = s2Row && !isUnitEmpty(s2Row);
+  const s3HasData = s3Row && !isUnitEmpty(s3Row);
 
-      const match = vacuumSealRecords.find((r) => r.date === date);
-      if (match) {
-        const resolvedLocks = match.lockedShifts
-          ? hydrateLockState(match.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-          : defaultLocks;
-        return res.status(200).json({
-          success: true,
-          assignedOperatorEmail,
-          lockedShifts: resolvedLocks,
-          data: match,
+  const s1Saved = Boolean(storedSlots?.shift1?.isSaved || legacyShifts.shift1Saved || legacyShifts.s1Saved || s1HasData);
+  const s2Saved = Boolean(storedSlots?.shift2?.isSaved || legacyShifts.shift2Saved || legacyShifts.s2Saved || s2HasData);
+  const s3Saved = Boolean(storedSlots?.shift3?.isSaved || legacyShifts.shift3Saved || legacyShifts.s3Saved || s3HasData);
+
+  const s1Corr = Boolean(storedSlots?.shift1?.correctionUsed || (legacyShifts.shift1Edits || 0) >= 1 || (legacyShifts.s1Edits || 0) >= 1 || (legacyShifts.shift1Locked && !s2Saved));
+  const s2Corr = Boolean(storedSlots?.shift2?.correctionUsed || (legacyShifts.shift2Edits || 0) >= 1 || (legacyShifts.s2Edits || 0) >= 1 || (legacyShifts.shift2Locked && !s3Saved));
+  const s3Corr = Boolean(storedSlots?.shift3?.correctionUsed || (legacyShifts.shift3Edits || 0) >= 1 || (legacyShifts.s3Edits || 0) >= 1 || legacyShifts.shift3Locked);
+
+  const lockedSlots = {};
+  for (const sk of SHIFT_KEYS) {
+    if (storedSlots && storedSlots[sk]) {
+      lockedSlots[sk] = {
+        isSaved: Boolean(storedSlots[sk].isSaved || storedSlots[sk].initialSaved),
+        isLocked: Boolean(storedSlots[sk].isLocked),
+        correctionUsed: Boolean(storedSlots[sk].correctionUsed),
+      };
+    } else {
+      const isSaved = (sk === 'shift1' && s1Saved) || (sk === 'shift2' && s2Saved) || (sk === 'shift3' && s3Saved);
+      const isLocked = (sk === 'shift1' && s2Saved) || (sk === 'shift2' && s3Saved) || (sk === 'shift3' && s3Corr);
+      const corr = (sk === 'shift1' && s1Corr) || (sk === 'shift2' && s2Corr) || (sk === 'shift3' && s3Corr);
+      lockedSlots[sk] = {
+        isSaved,
+        isLocked: Boolean(isLocked || corr),
+        correctionUsed: corr,
+      };
+    }
+  }
+
+  const hydratedState = hydrateLockState({ slots: lockedSlots }, { type: 'shift', items: SHIFT_KEYS });
+  return {
+    lockedSlots,
+    lockedShifts: hydratedState,
+  };
+}
+
+function createVacuumSealWaterRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+
+  router.use(protect);
+
+  /**
+   * @desc    Get Vacuum Seal Water Analysis data
+   * @route   GET /api/vacuum-seal-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.get('/', async (req, res) => {
+    try {
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Vacuum Seal Water Analysis data access is restricted to authorized Admins.',
         });
       }
 
-      return res.status(200).json({
-        success: true,
-        assignedOperatorEmail,
-        lockedShifts: defaultLocks,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
-    }
+      const { date, startDate, endDate } = req.query;
 
-    // List query
-    try {
+      let assignedOperatorEmail = null;
+      try {
+        const companyId = req.user?.company?._id || req.user?.company || null;
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE', { company: companyId });
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (recipErr) {
+        assignedOperatorEmail = null;
+      }
+
+      const defaultLockedSlots = {
+        shift1: { isSaved: false, isLocked: false, correctionUsed: false },
+        shift2: { isSaved: false, isLocked: false, correctionUsed: false },
+        shift3: { isSaved: false, isLocked: false, correctionUsed: false },
+      };
+      const defaultLockedShifts = getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
+
+      if (date) {
+        const companyVal = req.user?.company?._id || req.user?.company || null;
+        const query = {
+          date,
+          analysisType: { $in: ANALYSIS_TYPES },
+          plantCode: { $in: PLANT_CODES },
+        };
+        if (companyVal) {
+          query.$or = [{ company: companyVal }, { company: null }];
+        }
+
+        const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        const doc = pickCanonicalDoc(matchingDocs);
+
+        if (doc && doc.data) {
+          const payloadData = doc.data;
+          const { lockedSlots, lockedShifts } = deriveVacuumSealWaterLocks(doc);
+          const rawReadings = Array.isArray(payloadData.readings)
+            ? payloadData.readings
+            : (payloadData.shifts || payloadData.rows || []);
+
+          const matchedSlotKeys = new Set();
+          const mergedReadings = DEFAULT_READINGS_TEMPLATE.map((defRow) => {
+            const slotKey = getSlotKeyFromRow(defRow);
+            const found = rawReadings.find((r) => getSlotKeyFromRow(r) === slotKey);
+            if (found) {
+              matchedSlotKeys.add(found.id || found.time);
+              return {
+                id: defRow.id,
+                time: defRow.time,
+                fnh3: found.fnh3 !== undefined && found.fnh3 !== null ? String(found.fnh3) : '',
+                cnh3: found.cnh3 !== undefined && found.cnh3 !== null ? String(found.cnh3) : '',
+                ca: found.ca !== undefined && found.ca !== null ? String(found.ca).trim() : '',
+              };
+            }
+            return { ...defRow };
+          });
+
+          // Append legacy extra rows
+          rawReadings.forEach((r) => {
+            const k = r.id || r.time;
+            if (!matchedSlotKeys.has(k) && !getSlotKeyFromRow(r)) {
+              mergedReadings.push(r);
+            }
+          });
+
+          const recordData = {
+            ...payloadData,
+            _id: doc._id,
+            id: doc._id.toString(),
+            date: doc.date,
+            plant: doc.plantCode || 'OFFSET',
+            plantCode: doc.plantCode || 'OFFSITE',
+            plantName: 'OFFSITE Plant',
+            unit: 'FLY ash',
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            readings: mergedReadings,
+            lockedSlots,
+            lockedShifts,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            submittedBy: doc.submittedBy,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+          };
+
+          return res.status(200).json({
+            success: true,
+            data: recordData,
+            record: recordData,
+            recordId: doc._id,
+            readings: mergedReadings,
+            lockedSlots,
+            lockedShifts,
+            editedFields: payloadData.editedFields || {},
+            editAuditHistory: payloadData.editAuditHistory || [],
+            assignedOperatorEmail,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: null,
+          record: null,
+          recordId: null,
+          readings: DEFAULT_READINGS_TEMPLATE.map((r) => ({ ...r })),
+          lockedSlots: defaultLockedSlots,
+          lockedShifts: defaultLockedShifts,
+          editedFields: {},
+          editAuditHistory: [],
+          assignedOperatorEmail,
+          emailStatus: 'disabled',
+          emailRecipient: null,
+          message: `No record found for date ${date}`,
+        });
+      }
+
+      // List query
       const query = {
-        analysisType: 'Vacuum Seal Water Analysis',
-        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
       };
       if (startDate && endDate) {
         query.date = { $gte: startDate, $lte: endDate };
       }
       if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        const companyVal = req.user.company._id || req.user.company;
+        query.$or = [{ company: companyVal }, { company: null }];
       }
 
       const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      if (docs && docs.length > 0) {
-        const results = docs.map((d) => ({
-          ...d.data,
-          _id: d._id,
-          id: d._id,
-          date: d.date,
-          emailStatus: d.emailStatus,
-          emailRecipient: d.emailRecipient,
-        }));
-        return res.status(200).json({
-          success: true,
-          count: results.length,
-          data: results,
-        });
-      }
-    } catch (listErr) {
-      console.warn('[VacuumSeal GET list] MongoDB note:', listErr.message);
-    }
+      const results = (docs || []).map((d) => ({
+        ...d.data,
+        _id: d._id,
+        id: d._id,
+        date: d.date,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      }));
 
-    return res.status(200).json({
-      success: true,
-      count: vacuumSealRecords.length,
-      data: vacuumSealRecords,
-    });
-  } catch (error) {
-    console.error('[VacuumSeal GET] Error fetching records:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while retrieving Vacuum Seal Water records: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Save Vacuum Seal Water Analysis data (Sequential Shift Progression)
- * @route   POST /api/vacuum-seal-water
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const todayKolkata = getTodayKolkata();
-
-    if (!payload.date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis Date is required to save Vacuum Seal Water Analysis.',
+      return res.status(200).json({
+        success: true,
+        count: results.length,
+        data: results,
       });
-    }
-
-    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || req.headers['x-test-mode'] === 'true';
-
-    // Backend Date Restriction Enforcement (Asia/Kolkata)
-    if (payload.date !== todayKolkata && !isTestMode) {
-      return res.status(400).json({
-        success: false,
-        message: `Date restriction policy: Vacuum Seal Water Analysis can only be submitted for today (${todayKolkata}). Historical or future date entry (${payload.date}) is not permitted.`,
-      });
-    }
-
-    const readings = Array.isArray(payload.readings) ? payload.readings : [];
-    if (readings.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one analytical reading row is required.',
-      });
-    }
-
-    const errors = [];
-    readings.forEach((reading, idx) => {
-      const rowNum = idx + 1;
-      NUMERIC_FIELDS.forEach((f) => {
-        const val = reading[f];
-        if (val !== '' && val !== null && val !== undefined) {
-          if (isNaN(Number(val))) {
-            errors.push(`Row #${rowNum} (${reading.time || ''}): ${f.toUpperCase()} must be a valid number.`);
-          }
-        }
-      });
-    });
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed. Enter numeric values only.',
-        errors,
-      });
-    }
-
-    // Prevent duplicate time slots
-    const timeSlots = readings.map((r) => String(r.time || '').trim()).filter(Boolean);
-    const uniqueSlots = new Set(timeSlots);
-    if (timeSlots.length !== uniqueSlots.size) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate sampling time slots detected. Each observation must have a unique time slot.',
-      });
-    }
-
-    // Fetch existing record in MongoDB
-    const query = {
-      date: payload.date,
-      analysisType: 'Vacuum Seal Water Analysis',
-      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-    };
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
-    }
-
-    const existingDoc = await PlantAnalysisRecord.findOne(query);
-
-    const SHIFT_KEYS = ['shift1', 'shift2', 'shift3'];
-    let lockedShifts = existingDoc?.data?.lockedShifts
-      ? hydrateLockState(existingDoc.data.lockedShifts, { type: 'shift', items: SHIFT_KEYS })
-      : getInitialLockState({ type: 'shift', items: SHIFT_KEYS });
-    let editedFields = {};
-    let editAuditHistory = [];
-    let oldReadings = [];
-
-    if (existingDoc && existingDoc.data) {
-      editedFields = { ...(existingDoc.data.editedFields || {}) };
-      editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
-      oldReadings = existingDoc.data.readings || existingDoc.data.shifts || [];
-    }
-
-    // Group incoming rows by shift
-    const s1Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift1');
-    const s2Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift2');
-    const s3Rows = readings.filter((r) => getShiftFromTime(r.time) === 'shift3');
-
-    const hasData = (rowList) =>
-      rowList.some((r) => [...NUMERIC_FIELDS, 'ca'].some((f) => r[f] !== '' && r[f] !== null && r[f] !== undefined));
-
-    const hasS1 = hasData(s1Rows);
-    const hasS2 = hasData(s2Rows);
-    const hasS3 = hasData(s3Rows);
-
-    // Check if shift1/shift2/shift3 values changed
-    const s1Changed = s1Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-    const s2Changed = s2Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-    const s3Changed = s3Rows.some((newRow) => {
-      const oldRow = oldReadings.find((r) => r.id === newRow.id || r.time === newRow.time);
-      return oldRow && [...NUMERIC_FIELDS, 'ca'].some((f) => isValDiff(oldRow[f], newRow[f]));
-    });
-
-    const incomingShifts = [];
-    if (hasS1) incomingShifts.push('shift1');
-    if (hasS2) incomingShifts.push('shift2');
-    if (hasS3) incomingShifts.push('shift3');
-
-    // Authoritative sequential save check via Universal Lock Engine
-    for (const sKey of incomingShifts) {
-      const isDiff = (sKey === 'shift1' && s1Changed) ||
-                     (sKey === 'shift2' && s2Changed) ||
-                     (sKey === 'shift3' && s3Changed) ||
-                     !lockedShifts.slots?.[sKey]?.isSaved;
-      const valRes = validateSequentialSave({
-        lockState: lockedShifts,
-        targetItem: sKey,
-        itemsOrder: SHIFT_KEYS,
-        isDiff,
-        type: 'shift',
-      });
-      if (!valRes.allowed) {
-        return res.status(valRes.statusCode || 400).json({
-          success: false,
-          message: valRes.message,
-        });
-      }
-    }
-
-    // Field-level edit audit
-    const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
-    const nowIso = new Date().toISOString();
-
-    if (existingDoc && existingDoc.data) {
-      readings.forEach((newRow, idx) => {
-        const rowId = newRow.id || `row_${idx}`;
-        const oldRow = oldReadings.find((r) => r.id === rowId || r.time === newRow.time);
-        const shiftType = getShiftFromTime(newRow.time);
-        const wasPriorSaved =
-          (shiftType === 'shift1' && (existingDoc.data.lockedShifts?.shift1Saved || existingDoc.data.lockedShifts?.s1Saved)) ||
-          (shiftType === 'shift2' && (existingDoc.data.lockedShifts?.shift2Saved || existingDoc.data.lockedShifts?.s2Saved)) ||
-          (shiftType === 'shift3' && (existingDoc.data.lockedShifts?.shift3Saved || existingDoc.data.lockedShifts?.s3Saved));
-
-        if (oldRow && wasPriorSaved) {
-          [...NUMERIC_FIELDS, 'ca'].forEach((f) => {
-            const oldVal = oldRow[f];
-            const newVal = newRow[f];
-
-            if (isValDiff(oldVal, newVal)) {
-              editedFields[`${rowId}_${f}`] = true;
-              editedFields[`${newRow.time}_${f}`] = true;
-              editedFields[`${idx + 1}_${f}`] = true;
-              editAuditHistory.push({
-                rowId,
-                time: newRow.time,
-                field: f,
-                oldValue: oldVal !== undefined && oldVal !== null ? String(oldVal) : '',
-                newValue: newVal !== undefined && newVal !== null ? String(newVal) : '',
-                editedBy: editorName,
-                timestamp: nowIso,
-              });
-            }
-          });
-        }
-      });
-    }
-
-    // Update Shift Lock State Machine via Universal Lock Engine
-    for (const sKey of incomingShifts) {
-      const isCorrection = (sKey === 'shift1' && (lockedShifts.shift1Saved || lockedShifts.s1Saved)) ||
-                           (sKey === 'shift2' && (lockedShifts.shift2Saved || lockedShifts.s2Saved)) ||
-                           (sKey === 'shift3' && (lockedShifts.shift3Saved || lockedShifts.s3Saved));
-      lockedShifts = applySequentialSaveTransition({
-        lockState: lockedShifts,
-        targetItem: sKey,
-        itemsOrder: SHIFT_KEYS,
-        isCorrection,
-        type: 'shift',
-      });
-    }
-
-    const activeShift = hasS3 ? 'III SHIFT' : hasS2 ? 'II SHIFT' : 'I SHIFT';
-
-    const recordData = {
-      id: existingDoc ? String(existingDoc._id) : `vacuum_${Date.now()}`,
-      date: payload.date,
-      plant: 'OFFSET',
-      plantCode: 'OFFSITE',
-      plantName: 'OFFSITE Plant',
-      unit: payload.unit || 'Vaccum seal water',
-      analysisType: 'Vacuum Seal Water Analysis',
-      readings,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id,
-      submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company || null,
-    };
-
-    // Update in-memory fallback
-    const memIdx = vacuumSealRecords.findIndex((r) => r.date === payload.date);
-    if (memIdx >= 0) {
-      vacuumSealRecords[memIdx] = { ...vacuumSealRecords[memIdx], ...recordData };
-    } else {
-      vacuumSealRecords.unshift(recordData);
-    }
-
-    // Persist to MongoDB
-    let savedRecord = null;
-    try {
-      savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
-        query,
-        {
-          plantName: 'OFFSITE Plant',
-          plantCode: 'OFFSITE',
-          analysisType: 'Vacuum Seal Water Analysis',
-          unit: 'Vaccum seal water',
-          date: payload.date,
-          shift: activeShift,
-          data: recordData,
-          submittedBy: recordData.submittedBy,
-          submittedById: recordData.submittedById,
-          company: recordData.company,
-          savedAt: new Date(),
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-      recordData.id = String(savedRecord._id);
-      recordData._id = savedRecord._id;
-    } catch (dbErr) {
-      console.error('[VacuumSeal POST] MongoDB save error:', dbErr);
+    } catch (error) {
+      console.error('[VacuumSealWater GET] Error fetching records:', error);
       return res.status(500).json({
         success: false,
-        message: 'Database persistence failed: ' + dbErr.message,
+        message: 'Server error while retrieving Vacuum Seal Water records: ' + error.message,
       });
     }
+  });
 
-    // Execute Email Workflow
-    const saveEventId = `save_vacuum_${Date.now()}`;
-    let emailResult = { success: false, emailStatus: 'pending' };
-
+  /**
+   * @desc    Save Vacuum Seal Water Analysis data (Sequential Shift Progression)
+   * @route   POST /api/vacuum-seal-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.post('/', async (req, res) => {
     try {
-      emailResult = await executeSaveAndEmailWorkflow({
-        plantIdentifier: 'OFFSITE',
-        analysisType: 'Vacuum Seal Water Analysis',
-        unit: 'Vaccum seal water',
-        shift: activeShift,
-        date: payload.date,
-        data: recordData,
-        submittedBy: recordData.submittedBy,
-        submittedById: recordData.submittedById,
-        company: recordData.company,
-        explicitRecord: savedRecord,
-        rawBody: { ...payload, ...recordData },
-        saveEventId,
-        isTestMode,
-      });
-    } catch (notifyErr) {
-      console.warn('[VacuumSeal POST] Email notification dispatch note:', notifyErr.message);
-      emailResult = {
-        success: false,
-        emailStatus: 'failed',
-        error: notifyErr.message,
-      };
-    }
-
-    const isEmailDelivered = emailResult.emailSent === true || (emailResult.success === true && emailResult.emailStatus === 'sent');
-    const emailStatus = emailResult.emailStatus || (isEmailDelivered ? 'sent' : 'failed');
-    const emailRecipient = emailResult.recipient || savedRecord.emailRecipient || null;
-
-    // Activity Log
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'VACUUM_SEAL_WATER_ANALYSIS_SAVED',
-          user: req.user?._id,
-          userName: req.user?.name,
-          details: `Vacuum Seal Water Analysis saved for date: ${payload.date} (${activeShift}). Email ${emailStatus} to ${emailRecipient || 'N/A'}.`,
-          timestamp: new Date(),
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Vacuum Seal Water Analysis data entry and modification is restricted to authorized Admins.',
         });
       }
-    } catch (logErr) {}
 
+      const payload = req.body || {};
+
+      if (!payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save Vacuum Seal Water Analysis.',
+        });
+      }
+
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
+
+      if (payload.date !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: Vacuum Seal Water Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
+        });
+      }
+
+      const readings = Array.isArray(payload.readings) ? payload.readings : [];
+      if (readings.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one analytical reading row is required.',
+        });
+      }
+
+      const errors = [];
+      readings.forEach((reading, idx) => {
+        const rowNum = idx + 1;
+        NUMERIC_FIELDS.forEach((f) => {
+          const val = reading[f];
+          if (val !== '' && val !== null && val !== undefined) {
+            if (isNaN(Number(val))) {
+              errors.push(`Row #${rowNum} (${reading.time || ''}): ${f.toUpperCase()} must be a valid number.`);
+            }
+          }
+        });
+      });
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed. Enter numeric values only.',
+          errors,
+        });
+      }
+
+      // Prevent duplicate time slots
+      const timeSlots = readings.map((r) => String(r.time || '').trim()).filter(Boolean);
+      const uniqueSlots = new Set(timeSlots);
+      if (timeSlots.length !== uniqueSlots.size) {
+        return res.status(400).json({
+          success: false,
+          message: 'Duplicate sampling time slots detected. Each observation must have a unique time slot.',
+        });
+      }
+
+      // Parse incoming readings by slotKey
+      const incomingSlots = {};
+      const incomingExtraRows = [];
+      readings.forEach((r) => {
+        const sk = getSlotKeyFromRow(r);
+        if (sk) {
+          incomingSlots[sk] = cleanParamValues(r);
+        } else {
+          incomingExtraRows.push(r);
+        }
+      });
+
+      // Fetch existing record in MongoDB
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: payload.date,
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+      const existingReadings = Array.isArray(existingData.readings)
+        ? existingData.readings
+        : (existingData.shifts || existingData.rows || []);
+
+      const existingSlots = {};
+      const existingExtraRows = [];
+      existingReadings.forEach((r) => {
+        const sk = getSlotKeyFromRow(r);
+        if (sk) {
+          existingSlots[sk] = cleanParamValues(r);
+        } else {
+          existingExtraRows.push(r);
+        }
+      });
+
+      const { lockedSlots: currentLockedSlots } = deriveVacuumSealWaterLocks(existingDoc);
+
+      const explicitUnitKey = payload.targetSlot || (payload.shift ? getSlotKeyFromInput(payload.shift) : null);
+
+      // Check if any unit is currently saved in this document
+      const hasAnySaved = SHIFT_KEYS.some((u) => currentLockedSlots[u]?.isSaved);
+      const nonEmptyUnsaved = SHIFT_KEYS.filter(
+        (u) => !currentLockedSlots[u]?.isSaved && incomingSlots[u] && !isUnitEmpty(incomingSlots[u])
+      );
+
+      // If explicitUnitKey is provided, check if saving an unsaved slot as empty
+      if (explicitUnitKey) {
+        if (!currentLockedSlots[explicitUnitKey]?.isSaved && isUnitEmpty(incomingSlots[explicitUnitKey])) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot save empty slot ' + explicitUnitKey + '. At least one non-empty value is required.',
+          });
+        }
+      }
+
+      if (!hasAnySaved) {
+        if (explicitUnitKey) {
+          const explicitVal = incomingSlots[explicitUnitKey] || {};
+          if (isUnitEmpty(explicitVal)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot save empty slot ' + explicitUnitKey + '. At least one non-empty value is required.',
+            });
+          }
+        } else if (nonEmptyUnsaved.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot save empty slot ' + SHIFT_KEYS[0] + '. At least one non-empty value is required.',
+          });
+        }
+      }
+
+      // Normalize incomingShiftRows for computeSlotTransition:
+      const incomingShiftRows = {};
+      if (explicitUnitKey) {
+        for (const u of SHIFT_KEYS) {
+          if (u === explicitUnitKey) {
+            incomingShiftRows[u] = incomingSlots[u] || {};
+          } else if (existingSlots[u] !== undefined) {
+            incomingShiftRows[u] = existingSlots[u];
+          }
+        }
+      } else {
+        for (const u of SHIFT_KEYS) {
+          if (currentLockedSlots[u]?.isSaved) {
+            if (incomingSlots[u] !== undefined) {
+              incomingShiftRows[u] = incomingSlots[u];
+            } else if (existingSlots[u] !== undefined) {
+              incomingShiftRows[u] = existingSlots[u];
+            }
+          } else {
+            if (incomingSlots[u] !== undefined && !isUnitEmpty(incomingSlots[u])) {
+              incomingShiftRows[u] = incomingSlots[u];
+            }
+          }
+        }
+      }
+
+      // Compute sequential transition via Universal Lock Engine
+      const transition = computeSlotTransition({
+        unitsOrder: SHIFT_KEYS,
+        lockedSlots: currentLockedSlots,
+        storedRows: existingSlots,
+        incomingRows: incomingShiftRows,
+        now,
+      });
+
+      if (transition.noChange) {
+        const { lockedShifts: currentFlatLocks } = deriveVacuumSealWaterLocks(existingDoc);
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          readings: existingReadings.length > 0 ? existingReadings : DEFAULT_READINGS_TEMPLATE.map((r) => ({ ...r })),
+          lockedSlots: currentLockedSlots,
+          lockedShifts: currentFlatLocks,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
+
+      const isCorrection = transition.isCorrection;
+      const targetSlot = transition.targetUnit;
+      const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
+      const editorId = req.user?._id || null;
+      const nowIso = now.toISOString();
+
+      // Compute next lockedSlots
+      const updatedLockedSlots = JSON.parse(JSON.stringify(currentLockedSlots));
+      if (!isCorrection) {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: false,
+          correctionUsed: false,
+        };
+        const targetIdx = SHIFT_KEYS.indexOf(targetSlot);
+        for (let p = 0; p < targetIdx; p++) {
+          updatedLockedSlots[SHIFT_KEYS[p]].isLocked = true;
+        }
+      } else {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: true,
+          correctionUsed: true,
+        };
+      }
+
+      const updatedLockedShifts = hydrateLockState({ slots: updatedLockedSlots }, { type: 'shift', items: SHIFT_KEYS });
+
+      // Field-level flat edit audit on corrections
+      const updatedEditedFields = { ...(existingData.editedFields || {}) };
+      const updatedAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      if (isCorrection) {
+        const rowId = SLOT_META[targetSlot].id;
+        const timeVal = SLOT_META[targetSlot].defaultTime;
+        const shiftLabel = SLOT_META[targetSlot].label;
+        const targetExisting = existingSlots[targetSlot] || {};
+        const targetIncoming = incomingSlots[targetSlot] || {};
+
+        PARAM_FIELDS.forEach((f) => {
+          const ov = targetExisting[f];
+          const nv = targetIncoming[f];
+          if (isValueDifferent(ov, nv)) {
+            updatedEditedFields[`${rowId}_${f}`] = true;
+            updatedEditedFields[`${timeVal}_${f}`] = true;
+            updatedEditedFields[`${targetSlot}_${f}`] = true;
+            updatedAuditHistory.push({
+              date: payload.date,
+              rowId,
+              shift: shiftLabel,
+              time: timeVal,
+              field: f,
+              oldValue: ov !== undefined && ov !== null ? String(ov) : '',
+              newValue: nv !== undefined && nv !== null ? String(nv) : '',
+              editedBy: editorName,
+              editedById: editorId,
+              timestamp: nowIso,
+            });
+          }
+        });
+      }
+
+      // Rebuild updated readings array preserving template rows and legacy extra rows
+      const mergedSlots = { ...existingSlots, [targetSlot]: incomingSlots[targetSlot] };
+      const updatedReadings = DEFAULT_READINGS_TEMPLATE.map((defRow) => {
+        const sk = getSlotKeyFromRow(defRow);
+        const slotVals = mergedSlots[sk] || {};
+        const existingRow = existingReadings.find((r) => getSlotKeyFromRow(r) === sk) || {};
+        const incomingRow = readings.find((r) => getSlotKeyFromRow(r) === sk) || {};
+        return {
+          id: defRow.id,
+          time: existingRow.time || incomingRow.time || defRow.time,
+          fnh3: slotVals.fnh3 !== undefined && slotVals.fnh3 !== null ? String(slotVals.fnh3) : '',
+          cnh3: slotVals.cnh3 !== undefined && slotVals.cnh3 !== null ? String(slotVals.cnh3) : '',
+          ca: slotVals.ca !== undefined && slotVals.ca !== null ? String(slotVals.ca).trim() : '',
+        };
+      });
+
+      // Preserve legacy extra rows
+      const existingExtra = existingReadings.filter((r) => !getSlotKeyFromRow(r));
+      existingExtra.forEach((extraRow) => {
+        updatedReadings.push(extraRow);
+      });
+
+      const docUpdatePayload = {
+        'data.readings': updatedReadings,
+        'data.lockedSlots': updatedLockedSlots,
+        'data.lockedShifts': updatedLockedShifts,
+        'data.editedFields': updatedEditedFields,
+        'data.editAuditHistory': updatedAuditHistory,
+        'data.submittedBy': editorName,
+        'data.submittedById': editorId,
+        'data.submittedAt': nowIso,
+        'data.unit': CANONICAL_UNIT,
+        'data.analysisType': CANONICAL_ANALYSIS_TYPE,
+        'data.plant': 'OFFSET',
+        'data.plantCode': CANONICAL_PLANT_CODE,
+        'data.plantName': CANONICAL_PLANT_NAME,
+        date: payload.date,
+        shift: 'All Shifts',
+        plantCode: CANONICAL_PLANT_CODE,
+        plantName: CANONICAL_PLANT_NAME,
+        analysisType: CANONICAL_ANALYSIS_TYPE,
+        unit: CANONICAL_UNIT,
+        submittedBy: editorName,
+        submittedById: editorId,
+        savedAt: now,
+        company: companyVal,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      };
+
+      let savedDoc = null;
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+                [`data.lockedSlots.${targetSlot}.isSaved`]: true,
+                [`data.lockedSlots.${targetSlot}.correctionUsed`]: false,
+                [`data.lockedSlots.${targetSlot}.isLocked`]: false,
+              }
+            : {
+                $or: [
+                  { [`data.lockedSlots.${targetSlot}.isSaved`]: { $ne: true } },
+                  { [`data.lockedSlots.${targetSlot}`]: { $exists: false } },
+                  { [`data.lockedSlots`]: { $exists: false } },
+                ],
+              }),
+        };
+
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This shift was locked or updated concurrently by another user.',
+          });
+        }
+        savedDoc = await PlantAnalysisRecord.findById(existingDoc._id).lean();
+      } else {
+        try {
+          const insertDoc = {
+            plantName: CANONICAL_PLANT_NAME,
+            plantCode: CANONICAL_PLANT_CODE,
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            unit: CANONICAL_UNIT,
+            date: payload.date,
+            shift: 'All Shifts',
+            status: 'completed',
+            submittedBy: editorName,
+            submittedById: editorId,
+            company: companyVal,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+            data: {
+              id: `vacuumsealwater_${Date.now()}`,
+              date: payload.date,
+              plant: 'OFFSET',
+              plantCode: CANONICAL_PLANT_CODE,
+              plantName: CANONICAL_PLANT_NAME,
+              unit: CANONICAL_UNIT,
+              analysisType: CANONICAL_ANALYSIS_TYPE,
+              readings: updatedReadings,
+              lockedSlots: updatedLockedSlots,
+              lockedShifts: updatedLockedShifts,
+              editedFields: updatedEditedFields,
+              editAuditHistory: updatedAuditHistory,
+              submittedBy: editorName,
+              submittedById: editorId,
+              submittedAt: nowIso,
+              company: companyVal,
+            },
+          };
+          const created = await PlantAnalysisRecord.create(insertDoc);
+          savedDoc = created.toObject();
+        } catch (insertErr) {
+          if (insertErr.code === 11000) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently.',
+            });
+          }
+          throw insertErr;
+        }
+      }
+
+      const finalRecordData = {
+        ...savedDoc.data,
+        _id: savedDoc._id,
+        id: savedDoc._id.toString(),
+        recordId: savedDoc._id,
+        readings: updatedReadings,
+        lockedSlots: updatedLockedSlots,
+        lockedShifts: updatedLockedShifts,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+      };
+
+      return res.status(200).json({
+        success: true,
+        message: 'Vacuum Seal Water Analysis saved successfully in MongoDB ✓',
+        recordId: savedDoc._id,
+        data: finalRecordData,
+        record: finalRecordData,
+        readings: updatedReadings,
+        lockedSlots: updatedLockedSlots,
+        lockedShifts: updatedLockedShifts,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+        emailSent: false,
+      });
+    } catch (error) {
+      console.error('[VacuumSealWater POST] Uncaught error saving data:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while processing Vacuum Seal Water analysis: ' + error.message,
+      });
+    }
+  });
+
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      message: 'Vacuum Seal Water Analysis saved successfully in MongoDB ✓',
-      recordId: savedRecord._id,
-      emailStatus: 'disabled',
-      emailRecipient: null,
       emailSent: false,
-      emailPending: false,
-      lockedShifts,
-      editedFields,
-      editAuditHistory,
-      data: recordData,
+      emailStatus: 'disabled',
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('[VacuumSeal POST] Uncaught error saving data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while processing Vacuum Seal Water analysis: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retry email notification for Vacuum Seal Water Analysis
- * @route   POST /api/vacuum-seal-water/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-module.exports = router;
+  return router;
+}
+
+const defaultRouter = createVacuumSealWaterRouter();
+defaultRouter.createRouter = createVacuumSealWaterRouter;
+defaultRouter.createVacuumSealWaterRouter = createVacuumSealWaterRouter;
+
+module.exports = defaultRouter;
