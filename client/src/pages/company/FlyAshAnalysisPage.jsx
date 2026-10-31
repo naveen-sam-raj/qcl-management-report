@@ -1,13 +1,4 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
-import {
-  getTodayAsiaKolkata,
-  formatDateDisplay,
-  SaveStatusBanner,
-  SaveConfirmationModal,
-  EditedBadge,
-  retryAnalysisEmail,
-} from '../../utils/offsetAnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -15,20 +6,25 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  Calendar,
-  Save,
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   Layers,
   Lock,
-  Flame,
+  Activity,
 } from 'lucide-react';
+import {
+  getOperatingDateIST,
+  LockedDateDisplay,
+  RecordStatusBadge,
+  StatusSaveButton,
+  SaveStatusBanner,
+  SaveConfirmationModal,
+  EditedBadge,
+} from '../../utils/co2AnalysisHelper';
+import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 
-// Default initial readings with empty measurement fields
 const DEFAULT_READINGS = [
   { id: '1', time: '07:00', combustible: '', gcv: '' },
   { id: '2', time: '15:00', combustible: '', gcv: '' },
@@ -42,9 +38,15 @@ const DEFAULT_LOCKS = {
   shift1Locked: false,
   shift2Locked: false,
   shift3Locked: false,
+  shift1: false,
+  shift2: false,
+  shift3: false,
+  shift1Edits: 0,
+  shift2Edits: 0,
   shift3Edits: 0,
 };
 
+const NUMERIC_FIELDS = ['combustible', 'gcv'];
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
 const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
@@ -56,39 +58,70 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [readings, setReadings] = useState(() => DEFAULT_READINGS.map((r) => ({ ...r })));
+  const [originalReadings, setOriginalReadings] = useState(() => DEFAULT_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle');
+  const [lastSaved, setLastSaved] = useState(null);
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [lockedShifts, setLockedShifts] = useState(DEFAULT_LOCKS);
+  const [lockedSlots, setLockedSlots] = useState({});
   const [editedFields, setEditedFields] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
-  // Sequential shift permissions
-  const isRowDisabled = useCallback((row, idx) => {
+  const getShiftSlotKey = useCallback((row) => {
+    if (!row) return 'shift1';
+    const idStr = String(row.id || '').trim();
+    const timeStr = String(row.time || '').trim();
+    if (idStr === '1' || timeStr === '07:00') return 'shift1';
+    if (idStr === '2' || timeStr === '15:00') return 'shift2';
+    if (idStr === '3' || timeStr === '23:00') return 'shift3';
+    return 'shift1';
+  }, []);
+
+  const isShiftDisabled = useCallback((slotKey) => {
     if (isViewOnly) return true;
-    const time = String(row.time || '');
-    if (idx === 0 || time === '07:00') {
-      return Boolean(lockedShifts.shift1Locked || lockedShifts.shift2Saved);
+    if (slotKey === 'shift1') {
+      return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
     }
-    if (idx === 1 || time === '15:00') {
-      if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
-      return Boolean(lockedShifts.shift2Locked || lockedShifts.shift3Saved);
+    if (slotKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return true;
+      return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
     }
-    if (idx === 2 || time === '23:00') {
-      if (!lockedShifts.shift2Saved) return true; // Waiting for Shift 2
-      if (lockedShifts.shift3Locked) return true;
+    if (slotKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
       if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
       return false;
     }
-    return false;
+    return true;
   }, [isViewOnly, lockedShifts]);
+
+  const getShiftBadgeStatus = useCallback((slotKey) => {
+    if (slotKey === 'shift1') {
+      if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+      if (lockedShifts.shift1Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift2') {
+      if (!lockedShifts.shift1Saved) return 'WAITING';
+      if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+      if (lockedShifts.shift2Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (slotKey === 'shift3') {
+      if (!lockedShifts.shift2Saved) return 'WAITING';
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) return 'LOCKED';
+      if (lockedShifts.shift3Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    return 'WAITING';
+  }, [lockedShifts]);
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -97,146 +130,121 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
 
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/fly-ash-analysis?date=${date}`);
+        const res = await api.get(`/api/fly-ash-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
+        if (res.data?.success && res.data?.data) {
+          const fetchedData = res.data.data;
+          const rawReadings = fetchedData.readings || fetchedData.shifts || fetchedData.rows || [];
 
-        if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          if (record && (record._id || record.id)) {
-            setRecordId(record._id || record.id);
-          }
-          if (record?.lockedShifts) {
-            setLockedShifts(record.lockedShifts);
-          }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
-          } else {
-            setEditedFields({});
-          }
-          
-          if (!record) {
-            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
-          } else if (record.shifts) {
-            setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
-          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            setReadings(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setReadings(record);
-          } else {
-            setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
-          }
+          const merged = DEFAULT_READINGS.map((defRow) => {
+            const slotKey = getShiftSlotKey(defRow);
+            const found = rawReadings.find((r) => getShiftSlotKey(r) === slotKey);
+            if (found) {
+              return {
+                id: defRow.id,
+                time: defRow.time,
+                combustible: found.combustible !== undefined && found.combustible !== null ? String(found.combustible) : '',
+                gcv: found.gcv !== undefined && found.gcv !== null ? String(found.gcv) : '',
+              };
+            }
+            return { ...defRow };
+          });
+
+          setReadings(merged);
+          setOriginalReadings(JSON.parse(JSON.stringify(merged)));
+          setRecordId(fetchedData._id || fetchedData.id || res.data.recordId || null);
+          setLockedShifts(fetchedData.lockedShifts || res.data.lockedShifts || DEFAULT_LOCKS);
+          setLockedSlots(fetchedData.lockedSlots || res.data.lockedSlots || {});
+          setEditedFields(fetchedData.editedFields || res.data.editedFields || {});
+          setRecipientEmail(res.data.assignedOperatorEmail || fetchedData.emailRecipient || '');
         } else {
           setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
-          setLockedShifts(DEFAULT_LOCKS);
-          setEditedFields({});
+          setOriginalReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
           setRecordId(null);
+          setLockedShifts(res.data?.lockedShifts || DEFAULT_LOCKS);
+          setLockedSlots(res.data?.lockedSlots || {});
+          setEditedFields({});
+          setRecipientEmail(res.data?.assignedOperatorEmail || '');
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing Fly Ash data', err);
+        if (err?.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        }
         setReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
+        setOriginalReadings(DEFAULT_READINGS.map((r) => ({ ...r })));
         setLockedShifts(DEFAULT_LOCKS);
+        setLockedSlots({});
         setEditedFields({});
-        setRecordId(null);
       }
     };
+
     fetchExistingData();
 
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, getShiftSlotKey]);
 
-  // ── Handle reading change ──
-  const handleCellChange = useCallback((id, field, value) => {
-    if (field !== 'time' && !isValidDecimal(value)) return;
+  // ── Cell Value Change ──
+  const handleCellChange = (rowId, field, value) => {
+    if (isViewOnly) return;
+    if (!isValidDecimal(value)) return;
 
     setReadings((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+      prev.map((r) => {
+        if (r.id === rowId) {
+          return { ...r, [field]: value };
+        }
+        return r;
+      })
     );
 
-    // Clear error for this field
-    setErrors((prev) => {
-      const copy = { ...prev };
-      delete copy[`${id}_${field}`];
-      return copy;
-    });
-  }, []);
-
-  // ── Add new time slot reading ──
-  const handleAddRow = () => {
-    const nextId = String(Date.now());
-    const nextTime = readings.length === 0 ? '07:00' : '11:00';
-    setReadings((prev) => [
-      ...prev,
-      { id: nextId, time: nextTime, combustible: '', gcv: '' },
-    ]);
-  };
-
-  // ── Remove time slot reading ──
-  const handleRemoveRow = (id) => {
-    if (readings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
+    // Clear field-level error
+    const errKey = `${rowId}_${field}`;
+    if (errors[errKey]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[errKey];
+        return next;
+      });
     }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
   };
 
-  // ── Reset ──
+  // ── Form Reset ──
   const handleReset = () => {
-    setReadings(DEFAULT_READINGS);
+    if (isViewOnly) return;
+    setReadings(JSON.parse(JSON.stringify(originalReadings)));
     setErrors({});
-    showToast?.('Values reset to defaults.', 'info');
   };
 
-  // ── Summary statistics (Averages) ──
+  // ── Summary Calculations ──
   const stats = useMemo(() => {
-    let combTotal = 0;
-    let combCount = 0;
-    let gcvTotal = 0;
-    let gcvCount = 0;
-
-    readings.forEach((r) => {
-      if (r.combustible !== '' && !isNaN(Number(r.combustible))) {
-        combTotal += Number(r.combustible);
-        combCount += 1;
-      }
-      if (r.gcv !== '' && !isNaN(Number(r.gcv))) {
-        gcvTotal += Number(r.gcv);
-        gcvCount += 1;
-      }
-    });
+    const calcAvg = (field) => {
+      const vals = readings
+        .map((r) => parseFloat(r[field]))
+        .filter((n) => !isNaN(n));
+      return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null;
+    };
 
     return {
-      combAvg: combCount > 0 ? (combTotal / combCount).toFixed(2) : null,
-      gcvAvg: gcvCount > 0 ? (gcvTotal / gcvCount).toFixed(1) : null,
-      count: combCount || gcvCount,
+      combAvg: calcAvg('combustible'),
+      gcvAvg: calcAvg('gcv'),
     };
   }, [readings]);
 
-  // ── Save flow with confirmation modal ──
-  const initiateSave = () => {
+  // ── Pre-Save Prompt & Validation ──
+  const handleSaveClick = () => {
+    if (isViewOnly) return;
     const newErrors = {};
 
     readings.forEach((r) => {
-      if (r.combustible !== '' && isNaN(Number(r.combustible))) {
-        newErrors[`${r.id}_combustible`] = 'Invalid number';
-      }
-      if (r.gcv !== '' && isNaN(Number(r.gcv))) {
-        newErrors[`${r.id}_gcv`] = 'Invalid number';
-      }
+      NUMERIC_FIELDS.forEach((f) => {
+        if (r[f] !== '' && r[f] !== null && r[f] !== undefined && isNaN(Number(r[f]))) {
+          newErrors[`${r.id}_${f}`] = 'Invalid';
+        }
+      });
     });
 
     if (Object.keys(newErrors).length > 0) {
@@ -245,309 +253,286 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
-    const payload = {
-      date,
-      plant: 'OFFSET',
-      unit: 'FLY ash',
-      readings,
-      submittedBy: user?.name || 'Shift Chemist',
-    };
+    const modifiedShifts = [];
+    readings.forEach((r) => {
+      const slotKey = getShiftSlotKey(r);
+      if (isShiftDisabled(slotKey)) return;
+      const origRow = originalReadings?.find((o) => o.id === r.id);
+      const isDiff = NUMERIC_FIELDS.some((f) => {
+        const origVal = origRow?.[f] ?? '';
+        const curVal = r[f] ?? '';
+        return String(origVal).trim() !== String(curVal).trim();
+      });
+      const hasAnyVal = NUMERIC_FIELDS.some((f) => r[f] !== '' && r[f] !== null && r[f] !== undefined);
+      if (isDiff || (!lockedShifts?.[`${slotKey}Saved`] && hasAnyVal)) {
+        modifiedShifts.push(slotKey);
+      }
+    });
 
-    setConfirmData(payload);
+    if (modifiedShifts.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (modifiedShifts.length > 1) {
+      showToast?.('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+      return;
+    }
+
+    const targetSlot = modifiedShifts[0];
+    const targetRow = readings.find((r) => getShiftSlotKey(r) === targetSlot);
+    const summaryItems = [
+      { label: 'Combustible', value: targetRow?.combustible ? `${targetRow.combustible}%` : '—' },
+      { label: 'GCV', value: targetRow?.gcv ? `${targetRow.gcv} Kcals/kg` : '—' },
+    ];
+
+    setConfirmData({
+      date,
+      readings,
+      targetSlot,
+      shiftOrTime: targetSlot === 'shift1' ? 'I SHIFT (07:00)' : targetSlot === 'shift2' ? 'II SHIFT (15:00)' : 'III SHIFT (23:00)',
+      summaryItems,
+    });
     setShowConfirmModal(true);
   };
 
+  // ── Save Handler ──
   const handleConfirmSave = async () => {
-    if (!confirmData) return;
+    if (saving) return;
     setSaving(true);
     setSavePhase('saving');
+    setShowConfirmModal(false);
 
     try {
-      const res = await api.post('/fly-ash-analysis', confirmData);
+      const payload = {
+        date,
+        plant: 'OFFSET',
+        plantCode: 'OFFSITE',
+        unit: 'Bottom ash',
+        analysisType: 'Fly Ash Analysis',
+        readings,
+        targetSlot: confirmData?.targetSlot,
+        submittedBy: user?.name || 'Plant Operator',
+      };
 
-      if (res.data?.success) {
-        setSaveSuccess(true);
-        const record = res.data.data;
-        if (record?._id || record?.id) {
-          setRecordId(record._id || record.id);
-        }
-        if (record?.lockedShifts) {
-          setLockedShifts(record.lockedShifts);
-        }
-        if (record?.editedFields) {
-          setEditedFields(record.editedFields);
-        }
+      const res = await api.post('/api/fly-ash-analysis', payload);
 
-        const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
-        const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
-        if (operatorEmail) setRecipientEmail(operatorEmail);
-
-        if (emailSuccess) {
-          setSavePhase('completed');
-          showToast?.(`Fly Ash Analysis saved & notification sent to ${operatorEmail || 'operator'}!`, 'success');
-        } else if (res.data.emailStatus === 'failed') {
-          setSavePhase('email_failed');
-          setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
-          showToast?.('Fly Ash Analysis saved to MongoDB. Email dispatch failed.', 'warning');
-        } else {
-          setSavePhase('idle');
-          showToast?.('Fly Ash Analysis saved to MongoDB. Email dispatch pending.', 'info');
-        }
-      } else {
-        showToast?.(res.data?.message || 'Error saving Fly Ash data.', 'error');
+      if (res.data?.noChange) {
+        setSaving(false);
         setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
+      }
+
+      if (!res.data?.success) {
+        showToast?.(res.data?.message || 'Failed to save Fly Ash Analysis.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
+      setOriginalReadings(JSON.parse(JSON.stringify(readings)));
+      setLastSaved(new Date().toLocaleTimeString());
+
+      const returnedDoc = res.data?.data || res.data?.record || {};
+      const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
+      const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
+
+      setEditedFields(newEdited);
+      setLockedShifts(returnedDoc.lockedShifts || res.data?.lockedShifts || DEFAULT_LOCKS);
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
+      if (newRecordId) setRecordId(newRecordId);
+
+      const deliveryStatus = res.data?.emailDeliveryStatus || res.data?.emailStatus;
+      if (deliveryStatus === 'disabled' || res.data?.emailStatus === 'disabled') {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved ✓');
+        showToast?.('Saved ✓', 'success');
+      } else {
+        setSavePhase('completed');
+        setEmailStatusDetail('Saved ✓');
+        showToast?.('Saved ✓', 'success');
       }
     } catch (err) {
-      console.error('API save error:', err);
-      const errMsg = err.response?.data?.message || 'Failed to save Fly Ash Analysis to database.';
-      showToast?.(errMsg, 'error');
+      console.error('Error saving Fly Ash data:', err);
+      const msg = err?.response?.data?.message || 'Failed to save Fly Ash Analysis data.';
+      showToast?.(msg, 'error');
       setSavePhase('idle');
     } finally {
       setSaving(false);
-      setShowConfirmModal(false);
     }
   };
 
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/fly-ash-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
-  };
-
-  const summaryItems = useMemo(() => {
-    return [
-      { label: 'Time Slots Recorded', value: readings.length },
-      { label: 'Avg Combustible', value: stats.combAvg ? `${stats.combAvg} %` : '—' },
-      { label: 'Avg GCV', value: stats.gcvAvg ? `${stats.gcvAvg} Kcals/kg` : '—' },
-    ];
-  }, [readings, stats]);
-
   return (
-    <div className="space-y-5 animate-fadeIn">
-      {/* ── SAVE STATUS BANNER ── */}
-      <SaveStatusBanner
-        saveSuccess={saveSuccess}
-        savePhase={savePhase}
-        date={date}
-        analysisName="Fly Ash Analysis"
-        recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => {
-          setSaveSuccess(false);
-          setSavePhase('idle');
-        }}
-        saving={saving}
-      />
-
-      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* ── Top Header Navigation ── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
+            className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition shadow-2xs cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
           >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <ArrowLeft className="w-4 h-4 text-slate-500" />
             <span>Back</span>
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                OFFSET Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Utilities & Facilities
-              </span>
+              <span className="text-xs font-semibold text-slate-500">OFFSITE Plant</span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
-                FLY Ash
+                Fly Ash
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: 3 Shifts (07:00, 15:00, 23:00)
               </span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Flame className="w-5 h-5 text-amber-600" />
-              FLY ASH ANALYSIS
+              <Activity className="w-5 h-5 text-amber-600" />
+              BOTTOM ASH ANALYSIS
             </h1>
           </div>
         </div>
 
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          <LockedDateDisplay date={date} id="flyash-locked-date" />
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+          {lastSaved && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Saved at {lastSaved}
+            </span>
+          )}
 
           {!isViewOnly && (
             <button
               onClick={handleReset}
               disabled={saving}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Reset
             </button>
           )}
 
-          {!isViewOnly ? (
+          {!isViewOnly && (
             <StatusSaveButton
-              id="btn-flyash-save"
+              id="btn-fly-ash-save"
               saving={saving}
-              isLocked={Boolean(lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))}
               savePhase={savePhase}
-              onClick={initiateSave}
-              title="Save Fly Ash Analysis"
+              onClick={handleSaveClick}
+              defaultLabel="Save Fly Ash Data"
+              title="Save Fly Ash observations"
+              alwaysShowSaveText={true}
             />
-          ) : (
-            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
-              <Lock className="w-3.5 h-3.5" />
-              Read-Only
-            </span>
           )}
         </div>
       </div>
 
-      {/* ── MAIN CONTENT: Fly Ash Hourly / Shift Measurements Table ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="px-5 py-2.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-600" />
-              <h2 className="text-xs font-bold text-slate-900 uppercase">
-                Fly Ash Hourly / Shift Measurements
-              </h2>
-            </div>
-          </div>
+      {/* ── Status Banner (Save Status) ── */}
+      <SaveStatusBanner
+        id="fly-ash-status-banner"
+        saveSuccess={savePhase === 'completed'}
+        savePhase={savePhase}
+        date={date}
+        analysisName="Fly Ash Analysis"
+        recipientEmail={recipientEmail}
+        emailStatusDetail={emailStatusDetail}
+        onRetryEmail={() => {}}
+        onDismiss={() => setSavePhase('idle')}
+      />
 
-          {!isViewOnly && (
-            <button
-              onClick={handleAddRow}
-              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Time Slot
-            </button>
-          )}
+      {/* ── Control Bar: Operating Day Display ── */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
+        <LockedDateDisplay
+          date={date}
+          id="fly-ash-date"
+          badgeText="Operating Day"
+        />
+
+        <div className="flex items-center gap-4 text-xs">
+          <div className="flex items-center gap-1.5 text-slate-600">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            <span className="font-semibold">Sequential Shift Lock:</span>
+            <span>I (07:00) → II (15:00) → III (23:00)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Analytical Observations Table ── */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200/80 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-slate-600" />
+            <h2 className="text-sm font-bold text-slate-900">Shift Observations & Measurements</h2>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider font-extrabold select-none">
-                <th className="py-3 px-4 w-12 text-center border-r border-slate-700">#</th>
-                <th className="py-3 px-4 w-36 text-center border-r border-slate-700">
-                  <span className="flex items-center justify-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-sky-400" />
-                    TIME / SHIFT
-                  </span>
+              <tr className="bg-slate-800 text-white font-semibold text-xs border-b border-slate-700">
+                <th className="py-2.5 px-3 text-center border-r border-slate-700 w-12">#</th>
+                <th className="py-2.5 px-4 text-center border-r border-slate-700 w-44">SHIFT & STATUS</th>
+                <th className="py-2.5 px-4 text-center border-r border-slate-700 w-32">
+                  <div className="flex items-center justify-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-300" />
+                    TIME
+                  </div>
                 </th>
-                <th className="py-3 px-5 text-center border-r border-slate-700">
-                  <div>COMBUSTIBLE</div>
-                  <div className="text-[10px] font-normal text-sky-300 normal-case">%</div>
+                <th className="py-2.5 px-4 text-center border-r border-slate-700">
+                  COMBUSTIBLE <span className="text-[10px] text-slate-300 font-normal">(%)</span>
                 </th>
-                <th className="py-3 px-5 text-center border-r border-slate-700">
-                  <div>GCV</div>
-                  <div className="text-[10px] font-normal text-amber-300 normal-case">Kcals / kg</div>
+                <th className="py-2.5 px-4 text-center border-r border-slate-700">
+                  GCV <span className="text-[10px] text-slate-300 font-normal">(Kcals/kg)</span>
                 </th>
-                <th className="py-3 px-4 text-center border-r border-slate-700">STATUS</th>
-                {!isViewOnly && (
-                  <th className="py-3 px-3 w-16 text-center">ACTION</th>
-                )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {readings.map((row, idx) => {
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {readings.map((row, index) => {
+                const slotKey = getShiftSlotKey(row);
+                const disabled = isShiftDisabled(slotKey);
+                const shiftStatus = getShiftBadgeStatus(slotKey);
+                const shiftLabel = slotKey === 'shift1' ? 'I SHIFT' : slotKey === 'shift2' ? 'II SHIFT' : 'III SHIFT';
+
                 const combErr = errors[`${row.id}_combustible`];
                 const gcvErr = errors[`${row.id}_gcv`];
+
                 const combLimit = getCellLimit('offset', 'fly-ash', 'day', 'combustible');
                 const combValid = combLimit && row.combustible !== '' ? validateCellValue(row.combustible, combLimit) : { isOutOfLimit: false };
 
                 const gcvLimit = getCellLimit('offset', 'fly-ash', 'day', 'gcv');
                 const gcvValid = gcvLimit && row.gcv !== '' ? validateCellValue(row.gcv, gcvLimit) : { isOutOfLimit: false };
 
-                const disabled = isRowDisabled(row, idx);
-
-                // Field-level edit detection
-                const isCombEdited = Boolean(
-                  editedFields[`${row.id}_combustible`] ||
-                  editedFields[`${row.time}_combustible`] ||
-                  (idx === 0 && editedFields['1_combustible']) ||
-                  (idx === 1 && editedFields['2_combustible']) ||
-                  (idx === 2 && editedFields['3_combustible'])
-                );
-
-                const isGcvEdited = Boolean(
-                  editedFields[`${row.id}_gcv`] ||
-                  editedFields[`${row.time}_gcv`] ||
-                  (idx === 0 && editedFields['1_gcv']) ||
-                  (idx === 1 && editedFields['2_gcv']) ||
-                  (idx === 2 && editedFields['3_gcv'])
-                );
-
-                // Shift Status Badge
-                let shiftBadge = null;
-                const time = String(row.time || '');
-                if (idx === 0 || time === '07:00') {
-                  if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-                  } else if (lockedShifts.shift1Saved) {
-                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
-                  } else {
-                    shiftBadge = <RecordStatusBadge status="NEW" subLabel="first entry" />;
-                  }
-                } else if (idx === 1 || time === '15:00') {
-                  if (!lockedShifts.shift1Saved) {
-                    shiftBadge = <RecordStatusBadge status="WAITING" subLabel="pending shift 1" />;
-                  } else if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) {
-                    shiftBadge = <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-                  } else if (lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="saved" />;
-                  } else {
-                    shiftBadge = <RecordStatusBadge status="NEW" subLabel="first entry" />;
-                  }
-                } else if (idx === 2 || time === '23:00') {
-                  if (!lockedShifts.shift2Saved) {
-                    shiftBadge = <RecordStatusBadge status="WAITING" subLabel="pending shift 2" />;
-                  } else if (lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) {
-                    shiftBadge = <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-                  } else if (lockedShifts.shift3Saved) {
-                    shiftBadge = <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
-                  } else {
-                    shiftBadge = <RecordStatusBadge status="NEW" subLabel="first entry" />;
-                  }
-                }
-
                 return (
                   <tr
                     key={row.id}
-                    className={`transition-colors group ${disabled ? 'bg-slate-50/60' : 'hover:bg-amber-50/30'}`}
+                    className={`transition-colors ${
+                      disabled ? 'bg-slate-50/60' : 'hover:bg-amber-50/20'
+                    }`}
                   >
-                    {/* Row Index */}
-                    <td className="py-3.5 px-4 text-center font-bold text-xs text-slate-500 bg-slate-50/50 border-r border-slate-100">
-                      {idx + 1}
+                    {/* Index */}
+                    <td className="py-3 px-3 text-center font-bold text-slate-400 border-r border-slate-100">
+                      {index + 1}
                     </td>
 
-                    {/* TIME */}
-                    <td className="py-3.5 px-3 text-center border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.time}
-                        disabled={disabled}
-                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                        placeholder="HH:mm"
-                        className={`w-full text-center font-mono font-bold text-sm rounded-lg py-1.5 px-2 transition shadow-2xs ${
-                          disabled
-                            ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'
-                            : 'bg-white border border-slate-200 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
-                        }`}
-                      />
+                    {/* Shift & Lock Status */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100 align-middle">
+                      <div className="flex flex-col items-center justify-center gap-1.5">
+                        <span className="font-mono text-xs font-black text-slate-800 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-300">
+                          {shiftLabel}
+                        </span>
+                        <RecordStatusBadge status={shiftStatus} />
+                      </div>
+                    </td>
+
+                    {/* Sampling Time (read-only) */}
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
+                      <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200">
+                        {row.time}
+                      </span>
                     </td>
 
                     {/* COMBUSTIBLE % */}
-                    <td className="py-3.5 px-4 text-center border-r border-slate-100">
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
                       <div className="relative">
                         <input
                           type="text"
@@ -558,19 +543,19 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                           placeholder="0.00"
                           className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
                             disabled
-                              ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                              ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed select-text'
                               : combErr || combValid.isOutOfLimit
                               ? 'border-red-500 bg-red-50/50 text-red-900 focus:ring-red-200'
                               : row.combustible !== ''
-                              ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
-                              : 'border-slate-200 bg-slate-50/50 text-slate-400 focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100'
+                              ? 'border-slate-300 bg-white font-bold text-slate-900 focus:border-amber-600 focus:ring-2 focus:ring-amber-100'
+                              : 'border-slate-200 bg-slate-50/50 text-slate-400 focus:border-amber-600 focus:bg-white focus:ring-2 focus:ring-amber-100'
                           }`}
                         />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 pointer-events-none">
                           %
                         </span>
                       </div>
-                      <EditedBadge isEdited={isCombEdited} />
+                      <EditedBadge isEdited={editedFields[`${row.id}_combustible`] || editedFields[`${row.time}_combustible`] || editedFields[`${slotKey}_combustible`]} />
                       {combErr && (
                         <div className="text-[10px] text-red-600 font-semibold mt-1">
                           {combErr}
@@ -589,7 +574,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                     </td>
 
                     {/* GCV Kcals/kg */}
-                    <td className="py-3.5 px-4 text-center border-r border-slate-100">
+                    <td className="py-3 px-4 text-center border-r border-slate-100">
                       <div className="relative">
                         <input
                           type="text"
@@ -600,7 +585,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                           placeholder="0000"
                           className={`w-full text-center font-mono text-sm py-1.5 px-3 rounded-lg border-2 transition shadow-2xs ${
                             disabled
-                              ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                              ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed select-text'
                               : gcvErr || gcvValid.isOutOfLimit
                               ? 'border-red-500 bg-red-50/50 text-red-900 focus:ring-red-200'
                               : row.gcv !== ''
@@ -612,7 +597,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                           kcal
                         </span>
                       </div>
-                      <EditedBadge isEdited={isGcvEdited} />
+                      <EditedBadge isEdited={editedFields[`${row.id}_gcv`] || editedFields[`${row.time}_gcv`] || editedFields[`${slotKey}_gcv`]} />
                       {gcvErr && (
                         <div className="text-[10px] text-red-600 font-semibold mt-1">
                           {gcvErr}
@@ -630,24 +615,6 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
                       )}
                     </td>
 
-                    {/* STATUS */}
-                    <td className="py-3.5 px-4 text-center border-r border-slate-100">
-                      {shiftBadge || <span className="text-xs text-slate-400">—</span>}
-                    </td>
-
-                    {/* ACTION: Delete */}
-                    {!isViewOnly && (
-                      <td className="py-3.5 px-2 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(row.id)}
-                          disabled={readings.length <= 1 || disabled}
-                          className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-                          title="Delete row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -655,21 +622,10 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
           </table>
         </div>
 
-        {/* Table Footer with quick action and summary info */}
+        {/* Table Footer with Summary Info and Spec Note */}
         <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            {!isViewOnly && (
-              <button
-                onClick={handleAddRow}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 text-blue-600" />
-                Add Another Time Reading
-              </button>
-            )}
-            <span className="text-slate-500 font-medium">
-              {readings.length} {readings.length === 1 ? 'slot' : 'slots'} recorded
-            </span>
+          <div className="text-slate-500 font-medium italic">
+            One correction allowed after first save; saving the next slot/shift locks the previous one.
           </div>
 
           <div className="flex items-center gap-4">
@@ -689,7 +645,7 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
       </div>
 
-      {/* ── SAVE CONFIRMATION MODAL ── */}
+      {/* ── Save Confirmation Modal ── */}
       <SaveConfirmationModal
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
@@ -697,8 +653,8 @@ const FlyAshAnalysisPage = ({ plantId = 'offset' }) => {
         saving={saving}
         analysisName="Fly Ash Analysis"
         date={date}
-        shiftOrTime={readings.length ? `${readings.length} Slots` : 'Daily'}
-        summaryItems={summaryItems}
+        shiftOrTime={confirmData?.shiftOrTime}
+        summaryItems={confirmData?.summaryItems || []}
         recipientEmail={recipientEmail}
       />
     </div>
