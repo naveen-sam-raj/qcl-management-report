@@ -1,33 +1,27 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
-  getTodayAsiaKolkata,
-  formatDateDisplay,
+  getOperatingDateIST,
   LockedDateDisplay,
   RecordStatusBadge,
   StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
-  retryAnalysisEmail,
-} from '../../utils/offsetAnalysisHelper';
+} from '../../utils/co2AnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
-  Calendar,
-  Save,
   RotateCcw,
-  CheckCircle2,
   AlertCircle,
   ChevronRight,
   Droplets,
   Lock,
 } from 'lucide-react';
 
-// Shift rows matching laboratory shifts
 const SHIFTS = [
   {
     key: 'iShift',
@@ -58,7 +52,6 @@ const SHIFTS = [
   },
 ];
 
-// Parameters matching CBD laboratory report screenshot
 const PARAMETERS = [
   { key: 'ph',     label: 'pH',     rawLabel: 'pH',     unit: '',    placeholder: '0.00', step: '0.1' },
   { key: 'po4',    label: 'PO₄',    rawLabel: 'PO4',    unit: 'ppm', placeholder: '0.00', step: '1' },
@@ -69,6 +62,8 @@ const PARAMETERS = [
   { key: 'ss',     label: 'SS',     rawLabel: 'SS',     unit: 'ppm', placeholder: '0.00', step: '1' },
   { key: 'tds',    label: 'TDS',    rawLabel: 'TDS',    unit: 'ppm', placeholder: '0.00', step: '1' },
 ];
+
+const PARAM_KEYS = ['ph', 'po4', 'na2so3', 'talk', 'tfe', 'sio2', 'ss', 'tds'];
 
 const buildEmptyData = () => ({
   iShift:   { ph: '', po4: '', na2so3: '', talk: '', tfe: '', sio2: '', ss: '', tds: '' },
@@ -83,6 +78,11 @@ const DEFAULT_LOCKS = {
   shift1Locked: false,
   shift2Locked: false,
   shift3Locked: false,
+  shift1: false,
+  shift2: false,
+  shift3: false,
+  shift1Edits: 0,
+  shift2Edits: 0,
   shift3Edits: 0,
 };
 
@@ -97,42 +97,60 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData);
+  const [originalShifts, setOriginalShifts] = useState(buildEmptyData);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle');
+  const [lastSaved, setLastSaved] = useState(null);
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [lockedShifts, setLockedShifts] = useState(DEFAULT_LOCKS);
+  const [lockedSlots, setLockedSlots] = useState({});
   const [editedFields, setEditedFields] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
-  // Sequential shift permissions
   const isShiftDisabled = useCallback((shiftKey) => {
     if (isViewOnly) return true;
     if (shiftKey === 'iShift') {
-      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1) return true;
-      return false;
+      return Boolean(lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved);
     }
     if (shiftKey === 'iiShift') {
-      if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
-      if (lockedShifts.shift2Locked || lockedShifts.shift3Saved) return true;
-      if (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1) return true;
-      return false;
+      if (!lockedShifts.shift1Saved) return true;
+      return Boolean(lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved);
     }
     if (shiftKey === 'iiiShift') {
-      if (!lockedShifts.shift2Saved) return true; // Waiting for Shift 2
-      if (lockedShifts.shift3Locked) return true;
+      if (!lockedShifts.shift2Saved) return true;
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked) return true;
       if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
       return false;
     }
     return true;
   }, [isViewOnly, lockedShifts]);
+
+  const getShiftBadgeStatus = useCallback((shiftKey) => {
+    if (shiftKey === 'iShift') {
+      if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+      if (lockedShifts.shift1Saved) return 'EDITABLE';
+      return 'NEW';
+    }
+    if (shiftKey === 'iiShift') {
+      if (!lockedShifts.shift1Saved) return 'WAITING';
+      if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+      if (lockedShifts.shift2Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    if (shiftKey === 'iiiShift') {
+      if (!lockedShifts.shift2Saved) return 'WAITING';
+      if (lockedShifts.shift3 || lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) return 'LOCKED';
+      if (lockedShifts.shift3Saved) return 'EDITABLE';
+      return 'OPEN';
+    }
+    return 'WAITING';
+  }, [lockedShifts]);
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -141,70 +159,60 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
 
     const fetchExistingData = async () => {
       try {
-        const response = await api.get(`/cbd-analysis?date=${date}`);
+        const res = await api.get(`/api/cbd-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
+        if (res.data?.success && res.data?.data) {
+          const fetchedData = res.data.data;
+          const shifts = fetchedData.shifts || buildEmptyData();
+          const cleanData = buildEmptyData();
 
-        if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          if (record && (record._id || record.id)) {
-            setRecordId(record._id || record.id);
-          }
-          if (record?.lockedShifts) {
-            setLockedShifts(record.lockedShifts);
-          }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
-          } else {
-            setEditedFields({});
-          }
-          
-          if (!record) {
-            setData(buildEmptyData());
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else {
-            setData(buildEmptyData());
-          }
+          ['iShift', 'iiShift', 'iiiShift'].forEach((sk) => {
+            const sSrc = shifts[sk] || {};
+            PARAM_KEYS.forEach((pk) => {
+              cleanData[sk][pk] = sSrc[pk] !== undefined && sSrc[pk] !== null ? String(sSrc[pk]) : '';
+            });
+          });
+
+          setData(cleanData);
+          setOriginalShifts(JSON.parse(JSON.stringify(cleanData)));
+          setRecordId(fetchedData._id || fetchedData.id || res.data.recordId || null);
+          setLockedShifts(fetchedData.lockedShifts || res.data.lockedShifts || DEFAULT_LOCKS);
+          setLockedSlots(fetchedData.lockedSlots || res.data.lockedSlots || {});
+          setEditedFields(fetchedData.editedFields || res.data.editedFields || {});
+          setRecipientEmail(res.data.assignedOperatorEmail || fetchedData.emailRecipient || '');
         } else {
           setData(buildEmptyData());
-          setLockedShifts(DEFAULT_LOCKS);
-          setEditedFields({});
+          setOriginalShifts(buildEmptyData());
           setRecordId(null);
+          setLockedShifts(res.data?.lockedShifts || DEFAULT_LOCKS);
+          setLockedSlots(res.data?.lockedSlots || {});
+          setEditedFields({});
+          setRecipientEmail(res.data?.assignedOperatorEmail || '');
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing CBD data', err);
+        if (err?.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        }
         setData(buildEmptyData());
+        setOriginalShifts(buildEmptyData());
         setLockedShifts(DEFAULT_LOCKS);
+        setLockedSlots({});
         setEditedFields({});
-        setRecordId(null);
       }
     };
+
     fetchExistingData();
 
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, showToast]);
 
   // ── Cell Value Change ──
   const handleChange = useCallback((shiftKey, paramKey, value) => {
+    if (isViewOnly) return;
     if (!isValidDecimal(value)) return;
     if (isShiftDisabled(shiftKey)) return;
 
@@ -223,246 +231,253 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
         return next;
       });
     }
+  }, [errors, isShiftDisabled, isViewOnly]);
 
-    setSaveSuccess(false);
-  }, [errors, isShiftDisabled]);
-
-  // ── Reset ──
+  // ── Form Reset ──
   const handleReset = () => {
-    setData(buildEmptyData());
-    setDate(getTodayAsiaKolkata());
+    if (isViewOnly) return;
+    setData(JSON.parse(JSON.stringify(originalShifts)));
     setErrors({});
-    setSaveSuccess(false);
-    showToast('CBD analysis form reset.', 'info');
   };
 
-  // ── Save Click (Opens Confirmation Modal) ──
+  // ── Pre-Save Prompt & Validation ──
   const handleSaveClick = () => {
     if (isViewOnly) return;
-    let hasError = false;
     const newErrors = {};
 
     SHIFTS.forEach((s) => {
-      PARAMETERS.forEach((p) => {
-        const val = data[s.key][p.key];
+      PARAM_KEYS.forEach((p) => {
+        const val = data[s.key][p];
         if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
-          newErrors[`${s.key}_${p.key}`] = 'Numbers only';
-          hasError = true;
+          newErrors[`${s.key}_${p}`] = 'Numbers only';
         }
       });
     });
 
-    if (hasError) {
+    if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      showToast('Please correct highlighted cell errors before saving.', 'error');
+      showToast?.('Please check and fix highlighted cell errors.', 'error');
       return;
     }
 
-    const hasValues = Object.values(data).some((sObj) =>
-      Object.values(sObj).some((val) => val !== '' && val !== null && val !== undefined)
-    );
-
-    if (!hasValues) {
-      showToast('Please enter at least one measurement value.', 'warning');
-      return;
-    }
-
-    // Determine which shifts are being submitted
-    const activeShifts = SHIFTS.filter((s) => !isShiftDisabled(s.key));
-    const summaryItems = [];
-    activeShifts.forEach((s) => {
-      PARAMETERS.forEach((p) => {
-        const val = data[s.key][p.key];
-        if (val !== '' && val !== null && val !== undefined) {
-          summaryItems.push({ label: `${s.label} ${p.label}`, value: val });
-        }
+    const modifiedShifts = [];
+    SHIFTS.forEach((s) => {
+      if (isShiftDisabled(s.key)) return;
+      const origShift = originalShifts[s.key] || {};
+      const curShift = data[s.key] || {};
+      const isDiff = PARAM_KEYS.some((pk) => {
+        const ov = origShift[pk] ?? '';
+        const cv = curShift[pk] ?? '';
+        return String(ov).trim() !== String(cv).trim();
       });
+      const hasAnyVal = PARAM_KEYS.some((pk) => curShift[pk] !== '' && curShift[pk] !== null && curShift[pk] !== undefined);
+      if (isDiff || (!lockedShifts?.[`${s.lockKey}Saved`] && hasAnyVal)) {
+        modifiedShifts.push(s);
+      }
+    });
+
+    if (modifiedShifts.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (modifiedShifts.length > 1) {
+      showToast?.('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
+      return;
+    }
+
+    const targetShift = modifiedShifts[0];
+    const targetSlot = targetShift.lockKey;
+    const summaryItems = PARAMETERS.map((p) => {
+      const val = data[targetShift.key][p.key];
+      return {
+        label: p.label,
+        value: val ? `${val}${p.unit ? ` ${p.unit}` : ''}` : '—',
+      };
     });
 
     setConfirmData({
-      shiftOrTime: activeShifts.map((s) => s.label).join(', '),
+      date,
+      targetSlot,
+      shiftKey: targetShift.key,
+      shiftOrTime: `${targetShift.label} (${targetShift.desc})`,
       summaryItems,
     });
     setShowConfirmModal(true);
   };
 
-  // ── Confirm Save (Submits to Backend) ──
+  // ── Save Handler ──
   const handleConfirmSave = async () => {
     if (saving) return;
     setSaving(true);
     setSavePhase('saving');
     setShowConfirmModal(false);
 
-    const payload = {
-      date,
-      plant: 'OFFSET',
-      unit: 'CBD',
-      analysisType: 'CBD Analysis',
-      submittedBy: user?.name || 'Plant Operator',
-      shifts: data,
-    };
-
     try {
-      const response = await api.post('/api/cbd-analysis', payload);
-      setSaveSuccess(true);
-      const savedDoc = response.data?.data;
-      if (savedDoc && (savedDoc._id || savedDoc.id)) {
-        setRecordId(savedDoc._id || savedDoc.id);
-      }
-      if (savedDoc?.lockedShifts) {
-        setLockedShifts(savedDoc.lockedShifts);
-      }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
-      }
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
+      const payload = {
+        date,
+        plant: 'OFFSET',
+        plantCode: 'OFFSITE',
+        unit: 'CBD',
+        analysisType: 'CBD Analysis',
+        shifts: data,
+        targetSlot: confirmData?.targetSlot,
+        submittedBy: user?.name || 'Plant Operator',
+      };
+
+      const res = await api.post('/api/cbd-analysis', payload);
+
+      if (res.data?.noChange) {
+        setSaving(false);
+        setSavePhase('idle');
+        showToast?.('No changes', 'info');
+        return;
       }
 
-      const emailStatus = response.data?.emailStatus;
-      if (emailStatus === 'sent' || response.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail('Delivered to SMTP server ✓');
-        showToast('Saved & Emailed Successfully ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed');
-        showToast('Data saved to database. Email delivery failed: ' + (response.data?.emailError || 'Server error'), 'warning');
+      if (!res.data?.success) {
+        showToast?.(res.data?.message || 'Failed to save CBD Analysis.', 'error');
+        setSavePhase('idle');
+        setSaving(false);
+        return;
       }
+
+      setOriginalShifts(JSON.parse(JSON.stringify(data)));
+      setLastSaved(new Date().toLocaleTimeString());
+
+      const returnedDoc = res.data?.data || res.data?.record || {};
+      const newEdited = res.data?.editedFields || returnedDoc.editedFields || {};
+      const newRecordId = res.data?.recordId || returnedDoc._id || returnedDoc.id;
+
+      setEditedFields(newEdited);
+      setLockedShifts(returnedDoc.lockedShifts || res.data?.lockedShifts || DEFAULT_LOCKS);
+      setLockedSlots(returnedDoc.lockedSlots || res.data?.lockedSlots || {});
+      if (newRecordId) setRecordId(newRecordId);
+
+      setSavePhase('completed');
+      setEmailStatusDetail('Saved ✓');
+      showToast?.('Saved ✓', 'success');
     } catch (err) {
+      console.error('Error saving CBD Analysis data:', err);
+      const msg = err?.response?.data?.message || 'Failed to save CBD Analysis data.';
+      showToast?.(msg, 'error');
       setSavePhase('idle');
-      console.error('[CBDAnalysis] Save failed:', err);
-      const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/api/cbd-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
-  };
-
-  // Helper for Shift Status Badge
-  const getShiftBadge = (shiftKey) => {
-    if (shiftKey === 'iShift') {
-      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved || (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1)) {
-        return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-      }
-      if (lockedShifts.shift1Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
-      }
-      return <RecordStatusBadge status="NEW" subLabel="first entry" />;
-    }
-    if (shiftKey === 'iiShift') {
-      if (!lockedShifts.shift1Saved) {
-        return <RecordStatusBadge status="WAITING" subLabel="pending shift 1" />;
-      }
-      if (lockedShifts.shift2Locked || lockedShifts.shift3Saved || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) {
-        return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-      }
-      if (lockedShifts.shift2Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
-      }
-      return <RecordStatusBadge status="NEW" subLabel="first entry" />;
-    }
-    if (shiftKey === 'iiiShift') {
-      if (!lockedShifts.shift2Saved) {
-        return <RecordStatusBadge status="WAITING" subLabel="pending shift 2" />;
-      }
-      if (lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) {
-        return <RecordStatusBadge status="LOCKED" subLabel="shift locked" />;
-      }
-      if (lockedShifts.shift3Saved) {
-        return <RecordStatusBadge status="EDITABLE" subLabel="1 edit left" />;
-      }
-      return <RecordStatusBadge status="NEW" subLabel="first entry" />;
-    }
-    return null;
-  };
+  const isAllLocked = Boolean(
+    (lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1)) &&
+    (lockedShifts.shift2Locked || lockedShifts.shift3Saved) &&
+    (lockedShifts.shift1Locked || lockedShifts.shift2Saved)
+  );
 
   return (
-    <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb Header ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Title */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
-                <span>OFFSET Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <span className="text-blue-600 font-semibold">Utilities</span>
-                <ChevronRight className="w-3 h-3" />
-                <span className="text-slate-600 font-semibold">Continuous Blowdown</span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5 flex items-center gap-2">
-                <Droplets className="w-5 h-5 text-blue-600 shrink-0" />
-                CBD ANALYSIS (CONTINUOUS BLOWDOWN)
-              </h1>
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* ── Top Header Navigation ── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition shadow-2xs cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+          >
+            <ArrowLeft className="w-4 h-4 text-slate-500" />
+            <span>Back</span>
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">OFFSET Plant</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                Continuous Blowdown
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: 3 Shifts (06:00, 14:00, 22:00)
+              </span>
             </div>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <Droplets className="w-5 h-5 text-blue-600" />
+              CBD ANALYSIS (CONTINUOUS BLOWDOWN)
+            </h1>
           </div>
+        </div>
 
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="cbd-locked-date" />
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+          {lastSaved && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+              Saved at {lastSaved}
+            </span>
+          )}
 
+          {!isViewOnly && (
             <button
               onClick={handleReset}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-              title="Reset form"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Reset
             </button>
+          )}
 
-            {!isViewOnly ? (
-              <StatusSaveButton
-                id="btn-cbd-save"
-                saving={saving}
-                isLocked={Boolean(lockedShifts.shift3Locked || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))}
-                savePhase={savePhase}
-                onClick={handleSaveClick}
-                title="Save CBD Analysis"
-              />
-            ) : (
-              <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
-                <Lock className="w-3.5 h-3.5" />
-                Read-Only View
-              </span>
-            )}
-          </div>
+          {!isViewOnly && (
+            <StatusSaveButton
+              id="btn-cbd-save"
+              saving={saving}
+              isLocked={isAllLocked}
+              savePhase={savePhase}
+              onClick={handleSaveClick}
+              title="Save CBD Analysis"
+              alwaysShowSaveText={true}
+            />
+          )}
+
+          {isViewOnly && (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              Read-Only View
+            </span>
+          )}
         </div>
       </div>
 
-      {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
+      {/* ── Status Banner (Save Status) ── */}
       <SaveStatusBanner
-        saveSuccess={saveSuccess}
+        id="cbd-status-banner"
+        saveSuccess={savePhase === 'completed'}
         savePhase={savePhase}
         date={date}
         analysisName="CBD Analysis"
         recipientEmail={recipientEmail}
         emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => setSaveSuccess(false)}
-        saving={saving}
+        onRetryEmail={() => {}}
+        onDismiss={() => setSavePhase('idle')}
       />
+
+      {/* ── Control Bar: Operating Day Display ── */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
+        <LockedDateDisplay
+          date={date}
+          id="cbd-locked-date"
+          badgeText="Operating Day"
+        />
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500 font-medium">Sequential Shift Lock Active</span>
+          <div className="flex items-center gap-1.5">
+            {SHIFTS.map((s) => {
+              const status = getShiftBadgeStatus(s.key);
+              return (
+                <div key={s.key} className="flex items-center gap-1">
+                  <span className="text-[11px] font-bold text-slate-600">{s.label}:</span>
+                  <RecordStatusBadge status={status} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
 
       {/* ── Main Data Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
@@ -512,6 +527,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
             <tbody className="divide-y divide-slate-200">
               {SHIFTS.map((shift) => {
                 const disabled = isShiftDisabled(shift.key);
+                const status = getShiftBadgeStatus(shift.key);
 
                 return (
                   <tr
@@ -525,7 +541,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
                           <span className={`text-xs font-mono px-2.5 py-1 rounded shadow-2xs inline-block text-center ${shift.badgeStyle}`}>
                             {shift.label}
                           </span>
-                          {getShiftBadge(shift.key)}
+                          <RecordStatusBadge status={status} />
                         </div>
                         <span className="text-[10px] text-slate-500 font-medium">
                           {shift.desc}
@@ -535,14 +551,16 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
 
                     {/* Parameter Input Cells */}
                     {PARAMETERS.map((param) => {
-                      const fieldKey = `${shift.key}_${param.key}`;
                       const cellVal = data[shift.key]?.[param.key] || '';
-                      const isInvalid = !!errors[fieldKey];
-                      const errorMessage = errors[fieldKey];
+                      const isInvalid = !!errors[`${shift.key}_${param.key}`];
+                      const errorMessage = errors[`${shift.key}_${param.key}`];
                       const limit = getCellLimit('offset', 'cbd', 'day', param.key);
                       const validation = limit && cellVal !== '' ? validateCellValue(cellVal, limit) : { isOutOfLimit: false };
                       const isOutOfLimit = validation.isOutOfLimit;
-                      const isEdited = Boolean(editedFields[`${shift.key}_${param.key}`]);
+                      const isEdited = Boolean(
+                        editedFields[`${shift.key}_${param.key}`] ||
+                        editedFields[`${shift.lockKey}_${param.key}`]
+                      );
 
                       return (
                         <td key={param.key} className="px-3 py-2.5 text-center align-middle border-r border-slate-100">
@@ -601,7 +619,7 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
         {/* Bottom helper bar */}
         <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
           <p className="text-xs text-slate-500 font-medium">
-            Sequential Shift Workflow: <strong>I SHIFT</strong> must be saved first → enables <strong>II SHIFT</strong> → enables <strong>III SHIFT</strong> (locks preceding shifts).
+            One correction allowed after first save; saving the next slot/shift locks the previous one.
           </p>
         </div>
       </div>
