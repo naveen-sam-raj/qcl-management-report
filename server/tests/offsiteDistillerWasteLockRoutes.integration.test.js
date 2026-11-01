@@ -248,7 +248,7 @@ async function run() {
       readings: [Object.assign({}, BASE_ROW_T0630, { fnh3: '290' })],
     });
     assert.strictEqual(corr2.status, 400);
-    assert.ok(corr2.body.message.includes('locked'));
+    assert.strictEqual(corr2.body.message, 'Cannot edit t0630 because it is permanently locked.');
     pass('T5: second correction attempt rejected with 400');
 
     // T2b: Second slot save (t0730) when t0630 is saved succeeds
@@ -355,7 +355,7 @@ async function run() {
       readings: [BASE_ROW_T0730],
     });
     assert.strictEqual(b601Past.status, 400);
-    assert.ok(b601Past.body.message.includes('Date restriction enforced'));
+    assert.strictEqual(b601Past.body.message, "Date restriction enforced: Distiller Waste Analysis records can only be created or modified for today's operating date (2026-10-29). Historical or future modifications are not permitted.");
     pass('T10: 06:00-06:00 IST operating day boundary strictly enforced');
 
     // T10b: Client date spoofing (past AND future) strictly ignored -> 400
@@ -372,7 +372,7 @@ async function run() {
       'x-test-mode': 'true',
     });
     assert.strictEqual(pastSpoof.status, 400);
-    assert.ok(pastSpoof.body.message.includes('Date restriction enforced'));
+    assert.strictEqual(pastSpoof.body.message, "Date restriction enforced: Distiller Waste Analysis records can only be created or modified for today's operating date (2026-10-28). Historical or future modifications are not permitted.");
 
     // Future date spoof
     var futureSpoof = await postReq(port, '/api/distiller-waste-analysis', {
@@ -386,7 +386,7 @@ async function run() {
       'x-test-mode': 'true',
     });
     assert.strictEqual(futureSpoof.status, 400);
-    assert.ok(futureSpoof.body.message.includes('Date restriction enforced'));
+    assert.strictEqual(futureSpoof.body.message, "Date restriction enforced: Distiller Waste Analysis records can only be created or modified for today's operating date (2026-10-28). Historical or future modifications are not permitted.");
     pass('T10b: client date spoofing (past and future) strictly ignored -> 400');
 
     // T11: Role user returns 403 on GET and POST
@@ -427,7 +427,7 @@ async function run() {
       readings: [Object.assign({}, BASE_ROW_T0630, { fnh3: '290' })],
     });
     assert.strictEqual(adminOverride.status, 400);
-    assert.ok(adminOverride.body.message.includes('locked'));
+    assert.strictEqual(adminOverride.body.message, 'Cannot edit t0630 because it is permanently locked.');
     pass('T12: admin override attempts rejected (no admin override)');
 
     // T12b: payload.now, body.now and x-test headers strictly ignored -> 400
@@ -442,7 +442,7 @@ async function run() {
       'x-test-mode': 'true',
     });
     assert.strictEqual(t12bRes.status, 400);
-    assert.ok(t12bRes.body.message.includes('Date restriction enforced'));
+    assert.strictEqual(t12bRes.body.message, "Date restriction enforced: Distiller Waste Analysis records can only be created or modified for today's operating date (2026-10-28). Historical or future modifications are not permitted.");
     pass('T12b: payload.now, body.now and x-test headers strictly ignored -> 400');
 
     // T13: Stored shape data.readings preserved with visual order and all 5 fields
@@ -492,6 +492,42 @@ async function run() {
     assert.strictEqual(t14Get.body.lockedSlots.t0730.isSaved, true);
     assert.strictEqual(t14Get.body.lockedSlots.t0730.isLocked, false);
     pass('T14: legacy document lock derivation maps correctly');
+
+    // T14b: Legacy doc with lockedSlots where later slot is saved sequentially propagates isLocked to earlier slot
+    await PlantAnalysisRecord.deleteMany({});
+    await PlantAnalysisRecord.create({
+      plantName: 'OFFSITE Plant',
+      plantCode: 'OFFSITE',
+      analysisType: 'Distiller Waste Analysis',
+      unit: 'Distiller waste',
+      date: OP_DATE,
+      data: {
+        readings: [
+          BASE_ROW_T0630,
+          BASE_ROW_T0730,
+        ],
+        lockedSlots: {
+          t0630: { initialSaved: true, editCount: 0, isLocked: false },
+          t0730: { initialSaved: true, editCount: 0, isLocked: false },
+        },
+      },
+    });
+
+    var t14bGet = await getReq(port, '/api/distiller-waste-analysis?date=' + OP_DATE);
+    assert.strictEqual(t14bGet.status, 200);
+    assert.strictEqual(t14bGet.body.lockedSlots.t0630.isSaved, true);
+    assert.strictEqual(t14bGet.body.lockedSlots.t0630.isLocked, true);
+    assert.strictEqual(t14bGet.body.lockedSlots.t0730.isSaved, true);
+    assert.strictEqual(t14bGet.body.lockedSlots.t0730.isLocked, false);
+
+    var t14bPost = await postReq(port, '/api/distiller-waste-analysis', {
+      date: OP_DATE,
+      targetSlot: 't0630',
+      readings: [Object.assign({}, BASE_ROW_T0630, { fnh3: '299' })],
+    });
+    assert.strictEqual(t14bPost.status, 400);
+    assert.strictEqual(t14bPost.body.message, 'Cannot edit t0630 because it is permanently locked.');
+    pass('T14b: legacy doc sequential propagation locks previous saved slot and rejects correction');
 
     // T15: Duplicate docs on OP_DATE: pickCanonicalDoc proven on GET and POST
     await PlantAnalysisRecord.deleteMany({});
@@ -667,8 +703,8 @@ async function run() {
       readings: [Object.assign({}, BASE_ROW_T1130, { fnh3: '460' })],
     });
     assert.strictEqual(corrLastBlocked.status, 400);
-    assert.ok(corrLastBlocked.body.message.includes('locked'));
-    pass('T20: last slot t1130 entry, one correction, and lock verified');
+    assert.strictEqual(corrLastBlocked.body.message, 'Cannot edit t1130 because it is permanently locked.');
+    pass('T20: last slot t1130 entry, one correction, and lock confirmed');
 
     // T21: Full 6-slot sequential cycle (t0630 -> t0730 -> t0830 -> t0930 -> t1030 -> t1130)
     await PlantAnalysisRecord.deleteMany({});
@@ -687,7 +723,7 @@ async function run() {
         assert.strictEqual(sRes.body.lockedSlots[slots[p]].isLocked, true);
       }
     }
-    pass('T21: full 6-slot sequential cycle verified');
+    pass('T21: full 6-slot sequential cycle confirmed');
 
     // T22: Server does not auto-mutate TNH3 (stores what client posts)
     await PlantAnalysisRecord.deleteMany({});

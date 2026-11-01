@@ -109,10 +109,19 @@ function deriveDistillerWasteLocks(existingDoc) {
   const lockedSlots = {};
   SLOT_KEYS.forEach((sk, idx) => {
     if (storedSlots[sk] && typeof storedSlots[sk] === 'object' && ('isSaved' in storedSlots[sk] || 'initialSaved' in storedSlots[sk])) {
+      const isSaved = Boolean(storedSlots[sk].isSaved || storedSlots[sk].initialSaved);
+      const corr = Boolean(storedSlots[sk].correctionUsed);
+      let isLocked = Boolean(storedSlots[sk].isLocked || corr);
+      for (let nextIdx = idx + 1; nextIdx < SLOT_KEYS.length; nextIdx++) {
+        if (slotSavedMap[SLOT_KEYS[nextIdx]]) {
+          isLocked = true;
+          break;
+        }
+      }
       lockedSlots[sk] = {
-        isSaved: Boolean(storedSlots[sk].isSaved || storedSlots[sk].initialSaved),
-        isLocked: Boolean(storedSlots[sk].isLocked),
-        correctionUsed: Boolean(storedSlots[sk].correctionUsed),
+        isSaved,
+        isLocked: Boolean(isLocked),
+        correctionUsed: corr,
       };
     } else {
       const isSaved = Boolean(slotSavedMap[sk]);
