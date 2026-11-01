@@ -1,33 +1,26 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
-  getTodayAsiaKolkata,
-  formatDateDisplay,
+  getOperatingDateIST,
   LockedDateDisplay,
   RecordStatusBadge,
   StatusSaveButton,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
-  retryAnalysisEmail,
-} from '../../utils/offsetAnalysisHelper';
+} from '../../utils/co2AnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
-  Calendar,
-  Save,
   RotateCcw,
-  CheckCircle2,
   ChevronRight,
-  Clock,
   Droplets,
   FlaskConical,
   Gauge,
   Info,
-  AlertCircle,
 } from 'lucide-react';
 
 // Default empty values for Raw Water
@@ -81,13 +74,14 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [time, setTime] = useState('08:00');
+  const [date] = useState(() => getOperatingDateIST());
+  const [time] = useState('08:00');
   const [data, setData] = useState(buildEmptyData);
+  const [originalData, setOriginalData] = useState(buildEmptyData);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed' | 'save_failed'
+  const [savePhase, setSavePhase] = useState('idle');
   const [recordId, setRecordId] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [emailStatusDetail, setEmailStatusDetail] = useState('');
@@ -95,6 +89,9 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [initialSaved, setInitialSaved] = useState(false);
   const [editCount, setEditCount] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
+  const [lockedSlots, setLockedSlots] = useState({
+    parameters: { isSaved: false, isLocked: false, correctionUsed: false },
+  });
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
@@ -108,73 +105,58 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
         const response = await api.get(`/raw-water-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
-
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
           }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
+          if (response.data.editedFields || record?.editedFields) {
+            setEditedFields(response.data.editedFields || record.editedFields);
           } else {
             setEditedFields({});
           }
 
-          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
-          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
-          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
+          const hasSaved = Boolean(response.data.initialSaved ?? (record?.initialSaved || record?.data?.initialSaved));
+          const currentEdits = response.data.editCount ?? record?.editCount ?? 0;
+          const lockStatus = Boolean(response.data.isLocked ?? (record?.isLocked || currentEdits >= 1));
 
           setInitialSaved(hasSaved);
           setEditCount(currentEdits);
           setIsLocked(lockStatus);
 
-          if (record?.time) {
-            setTime(record.time);
+          if (response.data.lockedSlots) {
+            setLockedSlots(response.data.lockedSlots);
           }
-          
-          if (!record) {
-            setData(buildEmptyData());
-          } else if (record.parameters) {
-            setData(record.parameters);
-          } else if (record.shifts) {
-            setData(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setData(record.readings);
-          } else if (record.rows) {
-            setData(record.rows);
-          } else if (record.data && !Array.isArray(record.data)) {
-            setData(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setData(record);
-          } else {
-            setData(buildEmptyData());
-          }
+
+          const fetchedParams = response.data.parameters || record?.parameters || buildEmptyData();
+          setData(fetchedParams);
+          setOriginalData(fetchedParams);
         } else {
           setData(buildEmptyData());
-          setTime('08:00');
+          setOriginalData(buildEmptyData());
           setInitialSaved(false);
           setEditCount(0);
           setIsLocked(false);
+          setLockedSlots({
+            parameters: { isSaved: false, isLocked: false, correctionUsed: false },
+          });
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing Raw Water data', err);
+        if (err.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        }
         setData(buildEmptyData());
-        setTime('08:00');
+        setOriginalData(buildEmptyData());
         setInitialSaved(false);
         setEditCount(0);
         setIsLocked(false);
+        setLockedSlots({
+          parameters: { isSaved: false, isLocked: false, correctionUsed: false },
+        });
         setEditedFields({});
         setRecordId(null);
       }
@@ -202,9 +184,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   // ── Reset ──
   const handleReset = () => {
-    setData(SCREENSHOT_DATA);
-    setTime('08:00');
-    setDate(getTodayAsiaKolkata());
+    setData(originalData);
     setErrors({});
     setSaveSuccess(false);
     showToast?.('Values reset to defaults.', 'info');
@@ -249,63 +229,55 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
     try {
       const payload = {
         date,
-        time,
         plant: 'OFFSET',
         unit: 'Raw Water',
+        targetSlot: 'parameters',
         parameters: data,
         submittedBy: user?.name || 'Shift Chemist',
       };
 
       const res = await api.post('/raw-water-analysis', payload);
+
+      if (res.data?.noChange) {
+        showToast?.('No changes', 'info');
+        setSaving(false);
+        setSavePhase('idle');
+        return;
+      }
+
       setSaveSuccess(true);
       const savedDoc = res.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
         setRecordId(savedDoc._id || savedDoc.id);
       }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
+      if (res.data?.editedFields) {
+        setEditedFields(res.data.editedFields);
       }
-      if (res.data?.emailRecipient) {
-        setRecipientEmail(res.data.emailRecipient);
+      if (res.data?.parameters) {
+        setData(res.data.parameters);
+        setOriginalData(res.data.parameters);
       }
-
-      // Update one-time edit state
-      const nextEdits = initialSaved ? editCount + 1 : 0;
-      setInitialSaved(true);
-      setEditCount(nextEdits);
-      if (initialSaved || nextEdits >= 1) {
-        setIsLocked(true);
+      if (res.data?.lockedSlots) {
+        setLockedSlots(res.data.lockedSlots);
       }
 
-      const emailStatus = res.data?.emailStatus;
-      if (emailStatus === 'sent' || res.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail('Delivered to SMTP server ✓');
-        showToast?.('Saved & Emailed Successfully ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(res.data?.emailError || 'Email delivery failed');
-        showToast?.('Data saved to database. Email delivery failed: ' + (res.data?.emailError || 'Server error'), 'warning');
-      }
+      const nextInitialSaved = Boolean(res.data?.initialSaved);
+      const nextEditCount = res.data?.editCount || 0;
+      const nextIsLocked = Boolean(res.data?.isLocked || res.data?.lockedSlots?.parameters?.isLocked);
+
+      setInitialSaved(nextInitialSaved);
+      setEditCount(nextEditCount);
+      setIsLocked(nextIsLocked);
+
+      setSavePhase('completed');
+      showToast?.('Saved ✓', 'success');
     } catch (err) {
       setSavePhase('save_failed');
-      console.error('[RawWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/api/raw-water-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
   };
 
   return (
@@ -344,20 +316,14 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
         {/* Right: Date/Time + Action Buttons */}
         <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          <LockedDateDisplay date={date} id="rawwater-locked-date" />
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="rawwater-locked-date" />
 
-          {/* Time input */}
+          {/* Time display (read-only 08:00 routine) */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
             <span className="text-xs font-bold text-slate-600">Time:</span>
-            <input
-              id="rawwater-time-input"
-              type="text"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              disabled={isLocked}
-              placeholder="HH:mm"
-              className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-0.5 px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-            />
+            <span className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-0.5 px-1">
+              08:00
+            </span>
           </div>
 
           <RecordStatusBadge
@@ -382,6 +348,7 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
               isLocked={isLocked}
               savePhase={savePhase}
               onClick={handleSaveClick}
+              alwaysShowSaveText={true}
               title="Save Raw Water analysis"
             />
           ) : (
@@ -400,7 +367,6 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
         analysisName="Raw Water Analysis"
         recipientEmail={recipientEmail}
         emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => setSaveSuccess(false)}
         saving={saving}
       />
@@ -574,11 +540,15 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <Info className="w-3.5 h-3.5 text-blue-600" />
             <span>
               All parameters measured for date <strong className="text-slate-800">{date}</strong> at{' '}
-              <strong className="text-slate-800">{time || '—'}</strong>
+              <strong className="text-slate-800">08:00</strong>
             </span>
           </div>
 
           <div className="flex items-center gap-3">
+            <span className="text-[11px] text-slate-500 font-medium">
+              One correction allowed after first save; saving the next slot/shift locks the previous one.
+            </span>
+            <span className="text-slate-300">|</span>
             <span className="font-semibold">
               pH: <strong className="text-blue-700 font-mono">{data.ph || '—'}</strong>
             </span>

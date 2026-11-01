@@ -1,101 +1,127 @@
 const express = require('express');
-const router = express.Router();
-const mongoose = require('mongoose');
+const { PlantAnalysisRecord } = require('../models');
 const { protect } = require('../middleware/auth');
-const { ActivityLog, PlantAnalysisRecord } = require('../models');
-const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const {
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isUnitEmpty,
+  isValueDifferent,
+} = require('../services/analysisLockEngine');
+const { getOperatingDateIST } = require('../utils/operatingDate');
+const { getPlantAssignedUser } = require('../services/plantNotificationService');
 
-/**
- * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-};
+const CANONICAL_ANALYSIS_TYPE = 'Raw Water Analysis';
+const ANALYSIS_TYPES = ['Raw Water Analysis'];
+const PLANT_CODES = ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'];
+const CANONICAL_PLANT_CODE = 'OFFSITE';
+const CANONICAL_PLANT_NAME = 'OFFSITE Plant';
+const CANONICAL_UNIT = 'Raw Water';
 
-/**
- * Compares two values for differences, preserving decimal precision
- */
-const isValDiff = (o, n) => {
-  if (o === undefined || o === null || o === '') o = null;
-  if (n === undefined || n === null || n === '') n = null;
-  if (o === null && n === null) return false;
-  if (o === null || n === null) return true;
-  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-    return Number(o) !== Number(n);
-  }
-  return String(o) !== String(n);
-};
+const PARAM_FIELDS = [
+  'ph', 'cond', 'turbidity', 'tds', 'freeCl2', 'fe',
+  'sio2', 'mAlk', 'th', 'caH', 'mgH', 'cl', 'so4', 'ema',
+];
+const NUMERIC_FIELDS = [...PARAM_FIELDS];
+const SLOT_KEYS = ['parameters'];
 
-// Seed/reference initial parameters
-const SEED_PARAMETERS = {
-  ph: '7.6',
-  cond: '211',
-  turbidity: '8',
-  tds: '137',
-  freeCl2: '0',
-  fe: '0.30',
-  sio2: '5',
-  mAlk: '56',
-  th: '60',
-  caH: '36',
-  mgH: '24',
-  cl: '30',
-  so4: '15',
-  ema: '45',
-};
-
-// In-memory fallback cache
-const rawWaterRecords = [];
-
-// Apply authentication middleware
-router.use(protect);
-
-/**
- * @desc    Get Raw Water Analysis data
- * @route   GET /api/raw-water-analysis
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date, startDate, endDate, plant } = req.query;
-
-    // Resolve assigned OFFSITE Plant operator email dynamically from registered database records
-    let assignedOperatorEmail = null;
-    try {
-      const companyId = req.user?.company?._id || req.user?.company || null;
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE', { company: companyId });
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (recipErr) {
-      console.warn('[RawWater GET] Operator recipient resolution note:', recipErr.message);
-      assignedOperatorEmail = null;
+function cleanParamValues(params = {}) {
+  const cleaned = {};
+  for (const f of PARAM_FIELDS) {
+    const v = params[f];
+    if (v === '' || v === null || v === undefined) {
+      cleaned[f] = '';
+    } else {
+      cleaned[f] = String(v).trim();
     }
+  }
+  return cleaned;
+}
 
-    if (date) {
+function deriveRawWaterLocks(existingDoc) {
+  const existingData = existingDoc?.data || {};
+  const storedSlots = existingData.lockedSlots || {};
+  const pObj = existingData.parameters || existingData.data || {};
+
+  const hasData = !isUnitEmpty(pObj);
+  const isSaved = Boolean(existingData.initialSaved || storedSlots.parameters?.isSaved || hasData);
+  const editCount = existingData.editCount || 0;
+  const isLocked = Boolean(existingData.isLocked || storedSlots.parameters?.isLocked || editCount >= 1);
+  const correctionUsed = Boolean(storedSlots.parameters?.correctionUsed || editCount >= 1 || isLocked);
+
+  return {
+    lockedSlots: {
+      parameters: {
+        isSaved,
+        isLocked,
+        correctionUsed,
+      },
+    },
+    initialSaved: isSaved,
+    editCount: correctionUsed ? 1 : 0,
+    isLocked,
+  };
+}
+
+function createRawWaterRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+  router.use(protect);
+
+  /**
+   * @desc    Get Raw Water Analysis data
+   * @route   GET /api/raw-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.get('/', async (req, res) => {
+    try {
+      const { date, startDate, endDate } = req.query;
+
+      let assignedOperatorEmail = null;
       try {
-        const query = {
-          date,
-          analysisType: 'Raw Water Analysis',
-          plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-        };
-        if (req.user && req.user.company) {
-          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        const companyId = req.user?.company?._id || req.user?.company || null;
+        const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE', { company: companyId });
+        assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
+      } catch (recipErr) {
+        assignedOperatorEmail = null;
+      }
+
+      if (date) {
+        if (req.user?.role === 'user') {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: Raw Water Analysis data access is restricted to authorized Admins.',
+          });
         }
 
-        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        const query = {
+          date,
+          analysisType: { $in: ANALYSIS_TYPES },
+          plantCode: { $in: PLANT_CODES },
+        };
+        if (req.user?.company) {
+          const companyVal = req.user.company._id || req.user.company;
+          query.$or = [{ company: companyVal }, { company: null }];
+        }
+
+        const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        const doc = pickCanonicalDoc(matchingDocs);
+
         if (doc && doc.data) {
           const payloadData = doc.data;
-          const params = payloadData.parameters || payloadData.data || payloadData;
+          const currentLocks = deriveRawWaterLocks(doc);
+          const params = cleanParamValues(payloadData.parameters || payloadData.data || {});
+
           return res.status(200).json({
             success: true,
             recordId: doc._id,
-            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            emailStatus: doc.emailStatus || 'pending',
             assignedOperatorEmail,
+            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+            emailStatus: 'disabled',
+            emailSent: false,
+            parameters: params,
+            lockedSlots: currentLocks.lockedSlots,
+            initialSaved: currentLocks.initialSaved,
+            editCount: currentLocks.editCount,
+            isLocked: currentLocks.isLocked,
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             data: {
@@ -103,328 +129,411 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              time: payloadData.time || '08:00',
-              parameters: params || {},
+              time: '08:00',
+              parameters: params,
+              lockedSlots: currentLocks.lockedSlots,
+              initialSaved: currentLocks.initialSaved,
+              editCount: currentLocks.editCount,
+              isLocked: currentLocks.isLocked,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
-              emailStatus: doc.emailStatus || 'pending',
-              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+              emailStatus: 'disabled',
+              emailRecipient: null,
             },
           });
         }
-      } catch (dbErr) {
-        console.warn('[RawWater GET] MongoDB lookup note:', dbErr.message);
-      }
 
-      const match = rawWaterRecords.find((r) => r.date === date);
-      if (match) {
+        const initialLocks = {
+          parameters: { isSaved: false, isLocked: false, correctionUsed: false },
+        };
+
         return res.status(200).json({
           success: true,
           assignedOperatorEmail,
-          data: match,
+          data: null,
+          parameters: cleanParamValues({}),
+          lockedSlots: initialLocks,
+          initialSaved: false,
+          editCount: 0,
+          isLocked: false,
+          editedFields: {},
+          editAuditHistory: [],
+          message: `No record found for date ${date}`,
         });
       }
 
-      return res.status(200).json({
-        success: true,
-        assignedOperatorEmail,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
-    }
-
-    // Listing query
-    try {
+      // Listing query
       const query = {
-        analysisType: 'Raw Water Analysis',
-        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
       };
       if (startDate && endDate) {
         query.date = { $gte: startDate, $lte: endDate };
       }
-      if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+      if (req.user?.company) {
+        const companyVal = req.user.company._id || req.user.company;
+        query.$or = [{ company: companyVal }, { company: null }];
       }
 
       const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      if (docs && docs.length > 0) {
-        const results = docs.map((d) => ({
-          ...d.data,
-          _id: d._id,
-          id: d._id,
-          date: d.date,
-          emailStatus: d.emailStatus,
-          emailRecipient: d.emailRecipient,
-        }));
-        return res.status(200).json({
-          success: true,
-          count: results.length,
-          data: results,
-        });
-      }
-    } catch (listErr) {
-      console.warn('[RawWater GET list] MongoDB note:', listErr.message);
-    }
+      const results = docs.map((d) => ({
+        ...d.data,
+        _id: d._id,
+        id: d._id,
+        date: d.date,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      }));
 
-    return res.status(200).json({
-      success: true,
-      count: rawWaterRecords.length,
-      data: rawWaterRecords,
-    });
-  } catch (error) {
-    console.error('[RawWater GET] Error fetching records:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while retrieving Raw Water records: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Save Raw Water Analysis data
- * @route   POST /api/raw-water-analysis
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const todayKolkata = getTodayKolkata();
-
-    if (!payload.date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis Date is required to save Raw Water Analysis.',
+      return res.status(200).json({
+        success: true,
+        count: results.length,
+        data: results,
       });
-    }
-
-    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || req.headers['x-test-mode'] === 'true';
-
-    // Backend Date Restriction Enforcement (Asia/Kolkata)
-    if (payload.date !== todayKolkata && !isTestMode) {
-      return res.status(400).json({
-        success: false,
-        message: `Date restriction policy: Raw Water Analysis can only be submitted for today (${todayKolkata}). Historical or future date entry (${payload.date}) is not permitted.`,
-      });
-    }
-
-    const params = payload.parameters || payload.data || {};
-    const errors = [];
-    const numericKeys = [
-      'ph', 'cond', 'turbidity', 'tds', 'freeCl2', 'fe',
-      'sio2', 'mAlk', 'th', 'caH', 'mgH', 'cl', 'so4', 'ema'
-    ];
-
-    numericKeys.forEach((key) => {
-      const val = params[key];
-      if (val !== '' && val !== null && val !== undefined) {
-        if (isNaN(Number(val))) {
-          errors.push(`${key.toUpperCase()} must be a valid number.`);
-        }
-      }
-    });
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed. Enter numeric values only.',
-        errors,
-      });
-    }
-
-    // Query existing record in MongoDB to perform field-level diff and audit
-    const query = {
-      date: payload.date,
-      analysisType: 'Raw Water Analysis',
-      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-    };
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
-    }
-
-    const existingDoc = await PlantAnalysisRecord.findOne(query);
-
-    // Check one-time edit restriction policy
-    if (existingDoc && existingDoc.data) {
-      const isLockedAlready = Boolean(existingDoc.data.isLocked || (existingDoc.data.editCount || 0) >= 1);
-      if (isLockedAlready) {
-        return res.status(400).json({
-          success: false,
-          message: 'One-time edit restriction policy: This Raw Water record has already utilized its single permitted edit and is permanently LOCKED.',
-        });
-      }
-    }
-
-    const isEdit = Boolean(existingDoc && existingDoc.data?.initialSaved);
-    const editCount = isEdit ? (existingDoc.data.editCount || 0) + 1 : 0;
-    const isLocked = isEdit && editCount >= 1;
-    const initialSaved = true;
-
-    let editedFields = {};
-    let editAuditHistory = [];
-
-    if (existingDoc && existingDoc.data) {
-      editedFields = { ...(existingDoc.data.editedFields || {}) };
-      editAuditHistory = [...(existingDoc.data.editAuditHistory || [])];
-
-      const oldParams = existingDoc.data.parameters || existingDoc.data.data || {};
-      const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
-      const nowIso = new Date().toISOString();
-
-      numericKeys.forEach((key) => {
-        const oldVal = oldParams[key];
-        const newVal = params[key];
-
-        if (isValDiff(oldVal, newVal)) {
-          editedFields[key] = true;
-          editAuditHistory.push({
-            field: key,
-            oldValue: oldVal !== undefined && oldVal !== null ? String(oldVal) : '',
-            newValue: newVal !== undefined && newVal !== null ? String(newVal) : '',
-            editedBy: editorName,
-            timestamp: nowIso,
-          });
-        }
-      });
-    }
-
-    const recordData = {
-      id: existingDoc ? String(existingDoc._id) : `rawwater_${Date.now()}`,
-      date: payload.date,
-      time: payload.time || '08:00',
-      plant: 'OFFSET',
-      plantCode: 'OFFSITE',
-      plantName: 'OFFSITE Plant',
-      unit: 'Raw Water',
-      analysisType: 'Raw Water Analysis',
-      parameters: params,
-      editedFields,
-      editAuditHistory,
-      initialSaved,
-      editCount,
-      isLocked,
-      submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
-      submittedById: req.user?._id,
-      submittedAt: new Date().toISOString(),
-      company: req.user?.company?._id || req.user?.company || null,
-    };
-
-    // Update in-memory fallback
-    const memIdx = rawWaterRecords.findIndex((r) => r.date === payload.date);
-    if (memIdx >= 0) {
-      rawWaterRecords[memIdx] = { ...rawWaterRecords[memIdx], ...recordData };
-    } else {
-      rawWaterRecords.unshift(recordData);
-    }
-
-    // Persist to MongoDB PlantAnalysisRecord
-    let savedRecord = null;
-    try {
-      savedRecord = await PlantAnalysisRecord.findOneAndUpdate(
-        query,
-        {
-          plantName: 'OFFSITE Plant',
-          plantCode: 'OFFSITE',
-          analysisType: 'Raw Water Analysis',
-          unit: 'Raw Water',
-          date: payload.date,
-          shift: 'Day',
-          data: recordData,
-          submittedBy: recordData.submittedBy,
-          submittedById: recordData.submittedById,
-          company: recordData.company,
-          savedAt: new Date(),
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-      recordData.id = String(savedRecord._id);
-      recordData._id = savedRecord._id;
-    } catch (dbErr) {
-      console.error('[RawWater POST] MongoDB save error:', dbErr);
+    } catch (error) {
       return res.status(500).json({
         success: false,
-        message: 'Database persistence failed: ' + dbErr.message,
+        message: 'Server error while retrieving Raw Water records: ' + error.message,
       });
     }
+  });
 
-    // Execute Email Workflow
-    const saveEventId = `save_rawwater_${Date.now()}`;
-    let emailResult = { success: false, emailStatus: 'pending' };
-
+  /**
+   * @desc    Save Raw Water Analysis data
+   * @route   POST /api/raw-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.post('/', async (req, res) => {
     try {
-      emailResult = await executeSaveAndEmailWorkflow({
-        plantIdentifier: 'OFFSITE',
-        analysisType: 'Raw Water Analysis',
-        unit: 'Raw Water',
-        shift: 'Day',
-        date: payload.date,
-        data: recordData,
-        submittedBy: recordData.submittedBy,
-        submittedById: recordData.submittedById,
-        company: recordData.company,
-        explicitRecord: savedRecord,
-        rawBody: { ...payload, ...recordData },
-        saveEventId,
-        isTestMode,
-      });
-    } catch (notifyErr) {
-      console.warn('[RawWater POST] Email notification dispatch note:', notifyErr.message);
-      emailResult = {
-        success: false,
-        emailStatus: 'failed',
-        error: notifyErr.message,
-      };
-    }
-
-    const isEmailDelivered = emailResult.emailSent === true || (emailResult.success === true && emailResult.emailStatus === 'sent');
-    const emailStatus = emailResult.emailStatus || (isEmailDelivered ? 'sent' : 'failed');
-    const emailRecipient = emailResult.recipient || savedRecord.emailRecipient || null;
-
-    // Activity Log
-    try {
-      if (ActivityLog && typeof ActivityLog.create === 'function') {
-        await ActivityLog.create({
-          action: 'RAW_WATER_ANALYSIS_SAVED',
-          user: req.user?._id,
-          userName: req.user?.name,
-          details: `Raw Water Analysis saved for date: ${payload.date}. Email ${emailStatus} to ${emailRecipient || 'N/A'}.`,
-          timestamp: new Date(),
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Raw Water Analysis data entry and modification is restricted to authorized Admins.',
         });
       }
-    } catch (logErr) {}
 
+      const payload = req.body || {};
+
+      if (!payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save Raw Water Analysis.',
+        });
+      }
+
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
+
+      if (payload.date !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: Raw Water Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
+        });
+      }
+
+      const rawParams = payload.parameters || payload.data;
+      if (!rawParams || (typeof rawParams === 'object' && Object.keys(rawParams).length === 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one analytical reading row is required.',
+        });
+      }
+
+      const incomingParameters = cleanParamValues(rawParams);
+
+      // Validate numeric fields
+      const errors = [];
+      PARAM_FIELDS.forEach((f) => {
+        const val = rawParams[f];
+        if (val !== '' && val !== null && val !== undefined) {
+          if (isNaN(Number(val))) {
+            errors.push(`${f.toUpperCase()} must be a valid number.`);
+          }
+        }
+      });
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed. Enter numeric values only.',
+          errors,
+        });
+      }
+
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: payload.date,
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+      const existingParameters = cleanParamValues(existingData.parameters || existingData.data || {});
+
+      const currentLocks = deriveRawWaterLocks(existingDoc);
+      const currentLockedSlots = currentLocks.lockedSlots;
+
+      if (!currentLockedSlots.parameters?.isSaved && isUnitEmpty(incomingParameters)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot save empty slot parameters. At least one non-empty value is required.',
+        });
+      }
+
+      // Compute slot transition via Universal Lock Engine
+      const transition = computeSlotTransition({
+        unitsOrder: SLOT_KEYS,
+        lockedSlots: currentLockedSlots,
+        storedRows: { parameters: existingParameters },
+        incomingRows: { parameters: incomingParameters },
+        now,
+      });
+
+      if (transition.noChange) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          parameters: existingParameters,
+          lockedSlots: currentLockedSlots,
+          initialSaved: currentLocks.initialSaved,
+          editCount: currentLocks.editCount,
+          isLocked: currentLocks.isLocked,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
+
+      const isCorrection = transition.isCorrection;
+      const targetSlot = transition.targetUnit || 'parameters';
+      const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
+      const editorId = req.user?._id || null;
+      const nowIso = now.toISOString();
+
+      const updatedLockedSlots = JSON.parse(JSON.stringify(currentLockedSlots));
+      if (!isCorrection) {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: false,
+          correctionUsed: false,
+        };
+      } else {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: true,
+          correctionUsed: true,
+        };
+      }
+
+      const updatedEditedFields = { ...(existingData.editedFields || {}) };
+      const updatedAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      if (isCorrection) {
+        const rowId = 'parameters';
+        const timeVal = 'parameters';
+        const shiftLabel = 'Day';
+        const targetExisting = existingParameters || {};
+        const targetIncoming = incomingParameters || {};
+
+        PARAM_FIELDS.forEach((f) => {
+          const ov = targetExisting[f];
+          const nv = targetIncoming[f];
+          if (isValueDifferent(ov, nv)) {
+            updatedEditedFields[f] = true;
+            updatedEditedFields[`parameters_${f}`] = true;
+            updatedAuditHistory.push({
+              date: payload.date,
+              rowId,
+              shift: shiftLabel,
+              time: timeVal,
+              field: f,
+              oldValue: ov !== undefined && ov !== null ? String(ov) : '',
+              newValue: nv !== undefined && nv !== null ? String(nv) : '',
+              editedBy: editorName,
+              editedById: editorId,
+              timestamp: nowIso,
+            });
+          }
+        });
+      }
+
+      const nextInitialSaved = true;
+      const nextEditCount = isCorrection ? 1 : 0;
+      const nextIsLocked = Boolean(updatedLockedSlots.parameters.isLocked);
+
+      const recordData = {
+        id: existingDoc ? String(existingDoc._id) : `rawwater_${Date.now()}`,
+        date: payload.date,
+        time: '08:00',
+        plant: 'OFFSET',
+        plantCode: CANONICAL_PLANT_CODE,
+        plantName: CANONICAL_PLANT_NAME,
+        unit: CANONICAL_UNIT,
+        analysisType: CANONICAL_ANALYSIS_TYPE,
+        parameters: incomingParameters,
+        lockedSlots: updatedLockedSlots,
+        initialSaved: nextInitialSaved,
+        editCount: nextEditCount,
+        isLocked: nextIsLocked,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        submittedBy: editorName,
+        submittedById: editorId,
+        submittedAt: nowIso,
+        company: companyVal,
+      };
+
+      const docUpdatePayload = {
+        plantName: CANONICAL_PLANT_NAME,
+        plantCode: CANONICAL_PLANT_CODE,
+        analysisType: CANONICAL_ANALYSIS_TYPE,
+        unit: CANONICAL_UNIT,
+        date: payload.date,
+        shift: 'Day',
+        status: 'completed',
+        data: recordData,
+        submittedBy: editorName,
+        submittedById: editorId,
+        company: companyVal,
+        savedAt: now,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      };
+
+      let savedDoc = null;
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+              $or: [
+                {
+                  [`data.lockedSlots.${targetSlot}.isSaved`]: true,
+                  [`data.lockedSlots.${targetSlot}.correctionUsed`]: false,
+                  [`data.lockedSlots.${targetSlot}.isLocked`]: false,
+                },
+                {
+                  [`data.lockedSlots.${targetSlot}`]: { $exists: false },
+                  'data.isLocked': { $ne: true },
+                  'data.editCount': { $not: { $gte: 1 } },
+                },
+                {
+                  [`data.lockedSlots`]: { $exists: false },
+                  'data.isLocked': { $ne: true },
+                  'data.editCount': { $not: { $gte: 1 } },
+                },
+              ],
+            }
+            : {
+              $or: [
+                { [`data.lockedSlots.${targetSlot}.isSaved`]: { $ne: true } },
+                { [`data.lockedSlots.${targetSlot}`]: { $exists: false } },
+                { [`data.lockedSlots`]: { $exists: false } },
+              ],
+            }),
+        };
+
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This shift was locked or updated concurrently by another user.',
+          });
+        }
+        savedDoc = await PlantAnalysisRecord.findById(existingDoc._id).lean();
+      } else {
+        try {
+          const insertDoc = {
+            plantName: CANONICAL_PLANT_NAME,
+            plantCode: CANONICAL_PLANT_CODE,
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            unit: CANONICAL_UNIT,
+            date: payload.date,
+            shift: 'Day',
+            status: 'completed',
+            submittedBy: editorName,
+            submittedById: editorId,
+            company: companyVal,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+            data: recordData,
+            savedAt: now,
+          };
+          const created = await PlantAnalysisRecord.create(insertDoc);
+          savedDoc = created ? created.toObject() : insertDoc;
+        } catch (insertErr) {
+          if (insertErr.code === 11000) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently.',
+            });
+          }
+          throw insertErr;
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Raw Water Analysis saved successfully in MongoDB ✓',
+        recordId: savedDoc?._id || recordData.id,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+        emailSent: false,
+        emailPending: false,
+        parameters: incomingParameters,
+        lockedSlots: updatedLockedSlots,
+        initialSaved: nextInitialSaved,
+        editCount: nextEditCount,
+        isLocked: nextIsLocked,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        data: recordData,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while processing Raw Water analysis: ' + error.message,
+      });
+    }
+  });
+
+  /**
+   * @desc    Retry email notification (disabled)
+   * @route   POST /api/raw-water-analysis/:id/retry-email
+   * @access  Private
+   */
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      message: 'Raw Water Analysis saved successfully in MongoDB ✓',
-      recordId: savedRecord._id,
-      emailStatus: 'disabled',
-      emailRecipient: null,
       emailSent: false,
-      emailPending: false,
-      editedFields,
-      editAuditHistory,
-      data: recordData,
+      emailStatus: 'disabled',
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('[RawWater POST] Uncaught error saving data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while processing Raw Water analysis: ' + error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retry email notification for Raw Water Analysis
- * @route   POST /api/raw-water-analysis/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-module.exports = router;
+  return router;
+}
+
+const defaultRouter = createRawWaterRouter();
+defaultRouter.createRouter = createRawWaterRouter;
+module.exports = defaultRouter;
