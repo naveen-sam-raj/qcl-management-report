@@ -14,10 +14,8 @@ import {
   RefreshCw,
   Calendar,
   AlertTriangle,
-  CheckCircle2,
   Info,
   Clock,
-  HelpCircle,
 } from 'lucide-react';
 import api from '../../services/api';
 import { useToast } from '../../components/common/Toast';
@@ -59,6 +57,23 @@ const STATUS_COLORS = {
   inLimit: '#10b981',    // Emerald Green
   noRange: '#94a3b8',    // Slate Grey
 };
+
+function formatDisplayDate(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr || "";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const [year, month, day] = dateStr.split("-");
+  const monthIdx = parseInt(month, 10) - 1;
+  const monthName = months[monthIdx] || month;
+  return `${day}-${monthName}-${year}`;
+}
+
+function formatDateRange(from, to) {
+  const f = formatDisplayDate(from);
+  const t = formatDisplayDate(to);
+  if (!f) return "";
+  if (!t || f === t) return f;
+  return `${f} to ${t}`;
+}
 
 /**
  * Returns today's date in IST format: YYYY-MM-DD
@@ -229,69 +244,20 @@ const CustomDonutTooltip = ({ active, payload, plantName }) => {
     if (!a) return null;
 
     return (
-      <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs min-w-[230px] max-w-[300px] z-50">
+      <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs min-w-[200px] max-w-[280px] z-50">
         <div className="font-bold text-slate-300 border-b border-slate-700 pb-1.5 mb-2 flex items-center justify-between">
           <span className="truncate">{plantName}</span>
           <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-2">
             {a.percentageOfPlant}% of Plant
           </span>
         </div>
-        <div className="mb-2">
+        <div>
           <p className="font-extrabold text-sm text-white tracking-tight leading-snug">
             {a.title}
           </p>
-          {data.isOuter && (
-            <p className="text-[11px] font-semibold text-slate-300 mt-1 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: data.color }} />
-              <span>Segment: {data.statusLabel} ({data.value} values)</span>
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5 pt-1.5 border-t border-slate-800 text-[11px]">
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-slate-400">Total Entered:</span>
-            <span className="font-bold font-mono text-white">{a.totalEntered}</span>
-          </div>
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-red-400 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" /> Out of Limit:
-            </span>
-            <span className="font-bold font-mono text-red-400">{a.outOfLimit} ({a.outPercent}%)</span>
-          </div>
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-emerald-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> Normal (In Limit):
-            </span>
-            <span className="font-bold font-mono text-emerald-400">{a.inLimit}</span>
-          </div>
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-slate-300 flex items-center gap-1">
-              <Info className="w-3 h-3" /> No Range:
-            </span>
-            <span className="font-bold font-mono text-slate-300">{a.noRange}</span>
-          </div>
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-slate-400 flex items-center gap-1">
-              <HelpCircle className="w-3 h-3" /> No Data:
-            </span>
-            <span className="font-mono text-slate-400">{a.noData}</span>
-          </div>
-        </div>
-        <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between">
-          <span className="text-[10px] text-slate-400 font-medium">Compliance:</span>
-          {a.totalEntered === 0 ? (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-              No Data
-            </span>
-          ) : a.isPureNoRange ? (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
-              No Standard Range
-            </span>
-          ) : (
-            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${a.outPercent > 0 ? 'bg-red-950/80 text-red-300 border border-red-800/60' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'}`}>
-              {a.outPercent}% Out of Limit
-            </span>
-          )}
+          <p className="text-[11px] text-slate-300 font-mono mt-1">
+            {a.totalEntered} {a.totalEntered === 1 ? "value" : "values"}
+          </p>
         </div>
       </div>
     );
@@ -303,7 +269,7 @@ const CustomDonutTooltip = ({ active, payload, plantName }) => {
  * Small percentage labels on large slices of the inner ring (>= 8% share)
  */
 const renderInnerSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-  if (percent < 0.08) return null;
+  if (percent < 0.04) return null;
   const RADIAN = Math.PI / 180;
   const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
@@ -568,18 +534,15 @@ const TFLAdminDashboard = () => {
           const pData = dashboardData?.plants?.[plantCode];
           const isAccessible = pData?.accessible !== false;
 
-          const currentSort = sortModes[plantCode] || 'count';
-          const computed = computePlantDonutData(pData, currentSort);
-
-          // Status summary counts directly from plant payload
-          const statusSummary = pData?.statusSummary || { inLimit: 0, outOfLimit: 0, noRange: 0, noData: 0 };
+          const computed = computePlantDonutData(pData, "count");
+          const activeAnalyses = computed.analysesList.filter((a) => a.totalEntered > 0);
 
           return (
             <div
               key={plantCode}
               className="bg-white rounded-xl border border-slate-200/90 shadow-xs flex flex-col justify-between overflow-hidden"
             >
-              {/* Card Header: Plant info + Compliance Strip */}
+              {/* Card Header: Plant info + Subtitle + Date range */}
               <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2.5">
                   <div className={`w-8 h-8 rounded-lg ${cfg.bg} ${cfg.border} border flex items-center justify-center ${cfg.color} shrink-0`}>
@@ -589,61 +552,12 @@ const TFLAdminDashboard = () => {
                     <h2 className="font-extrabold text-sm sm:text-base text-slate-900 tracking-tight">
                       {cfg.name}
                     </h2>
-                    <p className="text-[11px] text-slate-500">Live operational parameter status</p>
+                    <p className="text-[11px] text-slate-500">Analysis-wise Data Entered</p>
                   </div>
                 </div>
 
-                {/* Status Summary Strip (Plant Badge Totals) */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>{statusSummary.inLimit} In Limit</span>
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 inline-flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    <span>{statusSummary.outOfLimit} Out of Limit</span>
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 inline-flex items-center gap-1">
-                    <Info className="w-3 h-3" />
-                    <span>{statusSummary.noRange} No Range</span>
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-400 border border-slate-200 inline-flex items-center gap-1">
-                    <span>— {statusSummary.noData} No Data</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Sub-header Controls Bar: Section title + Sort Toggle */}
-              <div className="bg-slate-50/70 px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                  Analysis Distribution & Compliance
-                </span>
-
-                {/* Sort Toggle: By Count vs By Out % */}
-                <div className="flex items-center gap-1.5 text-xs">
-                  <span className="text-[11px] font-semibold text-slate-500">Sort:</span>
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px] font-semibold">
-                    <button
-                      onClick={() => setSortModes((prev) => ({ ...prev, [plantCode]: 'count' }))}
-                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                        currentSort === 'count'
-                          ? 'bg-white text-blue-700 shadow-2xs font-bold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      By Count
-                    </button>
-                    <button
-                      onClick={() => setSortModes((prev) => ({ ...prev, [plantCode]: 'outPercent' }))}
-                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                        currentSort === 'outPercent'
-                          ? 'bg-white text-blue-700 shadow-2xs font-bold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      By Out %
-                    </button>
-                  </div>
+                <div className="text-[11px] font-medium text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200/80 shrink-0 self-start sm:self-center font-mono">
+                  {formatDateRange(fromDate, toDate)}
                 </div>
               </div>
 
@@ -671,39 +585,19 @@ const TFLAdminDashboard = () => {
                   </div>
                 ) : (
                   <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 w-full">
-                    {/* ── Left: Dual-Ring Concentric Donut Chart + Center Summary ── */}
+                    {/* ── Left: Single-Ring Donut Chart + Center Summary ── */}
                     <div className="shrink-0 flex flex-col items-center justify-center self-center lg:self-start pt-2">
-                      <div className="relative flex items-center justify-center" style={{ width: 280, height: 280 }}>
-                        <ResponsiveContainer width={280} height={280}>
+                      <div className="relative flex items-center justify-center" style={{ width: 300, height: 300 }}>
+                        <ResponsiveContainer width={300} height={300}>
                           <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                            {/* Outer Ring: Compliance status breakdown (Thick 24px) */}
-                            <Pie
-                              data={computed.outerRingData}
-                              dataKey="value"
-                              nameKey="name"
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={90}
-                              outerRadius={114}
-                              paddingAngle={1}
-                              stroke="#ffffff"
-                              strokeWidth={1.5}
-                              animationDuration={400}
-                            >
-                              {computed.outerRingData.map((entry, index) => (
-                                <Cell key={`outer-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-
-                            {/* Inner Ring: Analysis distribution (Distinct colors) */}
                             <Pie
                               data={computed.innerRingData}
                               dataKey="value"
                               nameKey="name"
                               cx="50%"
                               cy="50%"
-                              innerRadius={60}
-                              outerRadius={84}
+                              innerRadius={75}
+                              outerRadius={125}
                               paddingAngle={1}
                               stroke="#ffffff"
                               strokeWidth={1.5}
@@ -712,7 +606,7 @@ const TFLAdminDashboard = () => {
                               animationDuration={400}
                             >
                               {computed.innerRingData.map((entry, index) => (
-                                <Cell key={`inner-${index}`} fill={entry.color} />
+                                <Cell key={`slice-${index}`} fill={entry.color} />
                               ))}
                             </Pie>
 
@@ -728,98 +622,33 @@ const TFLAdminDashboard = () => {
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
                             values entered
                           </span>
-                          <span
-                            className={`mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                              computed.totalEntered === 0
-                                ? 'bg-slate-100 text-slate-500 border-slate-200'
-                                : computed.plantOutPercent > 0
-                                ? 'bg-red-50 text-red-700 border-red-200 shadow-2xs'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-2xs'
-                            }`}
-                          >
-                            {computed.plantOutPercent}% Out of Limit
-                          </span>
                         </div>
-                      </div>
-
-                      {/* Small visual guide underneath donut */}
-                      <div className="mt-3 flex items-center justify-center gap-3 text-[10px] font-semibold text-slate-500">
-                        <span className="inline-flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-red-500" /> Out of Limit
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500" /> Normal
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-slate-400" /> No Range
-                        </span>
                       </div>
                     </div>
 
-                    {/* ── Right: Comprehensive Interactive Legend (No inner scroll, card grows) ── */}
-                    <div className="w-full flex-1">
-                      <div className="space-y-1.5">
-                        {computed.analysesList.map((a) => (
+                    {/* ── Right: Legend ── */}
+                    <div className="w-full flex-1 min-w-0">
+                      <div className="pb-2 mb-2 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        <span>{activeAnalyses.length} {activeAnalyses.length === 1 ? "analysis" : "analyses"}</span>
+                      </div>
+                      <div className="space-y-2">
+                        {activeAnalyses.map((a) => (
                           <div
                             key={a.analysisType}
-                            className={`p-2 rounded-lg border transition flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
-                              a.totalEntered === 0
-                                ? 'bg-slate-50/60 border-dashed border-slate-200 opacity-60'
-                                : 'bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-2xs'
-                            }`}
+                            className="flex items-center gap-2 text-xs min-w-0 py-0.5"
                           >
-                            {/* Left: Color dot + Analysis Name + Count (%) */}
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <span
-                                className="w-2.5 h-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: a.color }}
-                              />
-                              <div className="truncate">
-                                <span className="font-bold text-slate-800 text-[12px] truncate block">
-                                  {a.title}
-                                </span>
-                                <span className="text-[11px] text-slate-500 font-mono">
-                                  {a.totalEntered} {a.totalEntered === 1 ? 'value' : 'values'} ({a.percentageOfPlant}%)
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Right: Out | Normal | No Range + Out % Badge */}
-                            <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
-                              <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                                <span className="text-red-600 font-semibold">
-                                  Out <strong className="font-bold">{a.outOfLimit}</strong>
-                                </span>
-                                <span className="text-slate-300">|</span>
-                                <span className="text-emerald-600 font-semibold">
-                                  Normal <strong className="font-bold">{a.inLimit}</strong>
-                                </span>
-                                <span className="text-slate-300">|</span>
-                                <span className="text-slate-500">
-                                  No range <strong className="font-semibold text-slate-700">{a.noRange}</strong>
-                                </span>
-                              </div>
-
-                              {/* Out % Badge */}
-                              <div className="shrink-0 min-w-[72px] text-right">
-                                {a.totalEntered === 0 ? (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200">
-                                    No data
-                                  </span>
-                                ) : a.isPureNoRange ? (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                    No range
-                                  </span>
-                                ) : a.outPercent > 0 ? (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-red-50 text-red-700 border border-red-200">
-                                    {a.outPercent}% Out
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    0% Out
-                                  </span>
-                                )}
-                              </div>
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: a.color }}
+                            />
+                            <div className="flex items-baseline gap-1.5 min-w-0 flex-wrap">
+                              <span className="font-semibold text-slate-800 text-[12px] truncate">
+                                {a.title}
+                              </span>
+                              <span className="text-slate-400 font-normal">-</span>
+                              <span className="text-[11px] text-slate-600 font-mono">
+                                {a.totalEntered} ({a.percentageOfPlant}%)
+                              </span>
                             </div>
                           </div>
                         ))}
@@ -827,6 +656,11 @@ const TFLAdminDashboard = () => {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Card Footer */}
+              <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50 text-[10px] text-slate-400">
+                Source: Dashboard live values
               </div>
             </div>
           );
