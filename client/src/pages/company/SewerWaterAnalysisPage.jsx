@@ -1,12 +1,11 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import {
-  getTodayAsiaKolkata,
   formatDateDisplay,
   SaveStatusBanner,
   SaveConfirmationModal,
   EditedBadge,
-  retryAnalysisEmail,
   LockedDateDisplay,
   StatusSaveButton,
   RecordStatusBadge,
@@ -18,61 +17,34 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  Calendar,
-  Save,
   RotateCcw,
-  CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   Waves,
+  Lock,
 } from 'lucide-react';
 
-// Default initial readings with empty measurement fields
+const SLOTS = ['t11', 't13', 't15', 't17', 't19', 't21'];
+
 const DEFAULT_READINGS = [
-  {
-    id: 't11',
-    time: '11:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
-  {
-    id: 't13',
-    time: '13:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
-  {
-    id: 't15',
-    time: '15:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
-  {
-    id: 't17',
-    time: '17:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
-  {
-    id: 't19',
-    time: '19:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
-  {
-    id: 't21',
-    time: '21:00',
-    sec200: { fnh3: '', cnh3: '' },
-    sec400: { fnh3: '', cnh3: '', hco3: '' },
-    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-  },
+  { id: 't11', time: '11:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't13', time: '13:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't15', time: '15:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't17', time: '17:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't19', time: '19:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't21', time: '21:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+];
+
+const SEWER_PARAMS = [
+  ['sec200', 'fnh3'],
+  ['sec200', 'cnh3'],
+  ['sec400', 'fnh3'],
+  ['sec400', 'cnh3'],
+  ['sec400', 'hco3'],
+  ['finalOutlet', 'fnh3'],
+  ['finalOutlet', 'cnh3'],
+  ['finalOutlet', 'hco3'],
+  ['finalOutlet', 'pcl'],
 ];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
@@ -86,15 +58,14 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [date] = useState(() => getOperatingDateIST());
   const [readings, setReadings] = useState(() => DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
+  const [originalReadings, setOriginalReadings] = useState(() => DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
+  const [savePhase, setSavePhase] = useState('idle');
   const [recordId, setRecordId] = useState(null);
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
   const [lockedSlots, setLockedSlots] = useState({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -110,55 +81,63 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         const response = await api.get(`/sewer-water-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
-
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          if (record && (record._id || record.id)) {
-            setRecordId(record._id || record.id);
-          }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
-          } else {
-            setEditedFields({});
-          }
-          if (record?.lockedSlots || record?.data?.lockedSlots) {
-            setLockedSlots(record.lockedSlots || record.data.lockedSlots);
-          } else {
-            setLockedSlots({});
-          }
+          setRecordId(response.data.recordId || payloadData._id || payloadData.id || null);
+          setEditedFields(response.data.editedFields || payloadData.editedFields || {});
+          setLockedSlots(response.data.lockedSlots || payloadData.lockedSlots || {});
 
-          if (!record) {
-            setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
-          } else if (record.shifts) {
-            setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
-          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            setReadings(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setReadings(record);
-          } else {
-            setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
-          }
+          const rawReadings = Array.isArray(response.data.readings)
+            ? response.data.readings
+            : Array.isArray(payloadData.readings)
+              ? payloadData.readings
+              : [];
+
+          const bySlot = {};
+          rawReadings.forEach((r) => {
+            const sk = r?.id || r?.time;
+            if (sk) bySlot[sk] = r;
+          });
+
+          const fetchedReadings = DEFAULT_READINGS.map((def) => {
+            const match = bySlot[def.id] || bySlot[def.time] || {};
+            return {
+              id: def.id,
+              time: def.time,
+              sec200: {
+                fnh3: match.sec200?.fnh3 !== undefined && match.sec200?.fnh3 !== null ? String(match.sec200.fnh3) : '',
+                cnh3: match.sec200?.cnh3 !== undefined && match.sec200?.cnh3 !== null ? String(match.sec200.cnh3) : '',
+              },
+              sec400: {
+                fnh3: match.sec400?.fnh3 !== undefined && match.sec400?.fnh3 !== null ? String(match.sec400.fnh3) : '',
+                cnh3: match.sec400?.cnh3 !== undefined && match.sec400?.cnh3 !== null ? String(match.sec400.cnh3) : '',
+                hco3: match.sec400?.hco3 !== undefined && match.sec400?.hco3 !== null ? String(match.sec400.hco3) : '',
+              },
+              finalOutlet: {
+                fnh3: match.finalOutlet?.fnh3 !== undefined && match.finalOutlet?.fnh3 !== null ? String(match.finalOutlet.fnh3) : '',
+                cnh3: match.finalOutlet?.cnh3 !== undefined && match.finalOutlet?.cnh3 !== null ? String(match.finalOutlet.cnh3) : '',
+                hco3: match.finalOutlet?.hco3 !== undefined && match.finalOutlet?.hco3 !== null ? String(match.finalOutlet.hco3) : '',
+                pcl: match.finalOutlet?.pcl !== undefined && match.finalOutlet?.pcl !== null ? String(match.finalOutlet.pcl) : '',
+              },
+            };
+          });
+
+          setReadings(fetchedReadings);
+          setOriginalReadings(fetchedReadings);
         } else {
           setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
+          setOriginalReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
           setLockedSlots({});
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing Sewer Water data', err);
+        if (err.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        }
         setReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
+        setOriginalReadings(DEFAULT_READINGS.map((r) => JSON.parse(JSON.stringify(r))));
         setLockedSlots({});
         setEditedFields({});
         setRecordId(null);
@@ -169,18 +148,16 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, showToast]);
 
-  // ── Handle reading cell change ──
+  // ── Handle cell change ──
   const handleCellChange = useCallback((id, section, field, value) => {
-    if (section === 'time') {
-      setReadings((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, time: value } : r))
-      );
-      return;
+    if (field === 'pcl') {
+      const isNil = ['nil', 'n', 'ni', 'none', '-'].includes(String(value).toLowerCase().trim());
+      if (!isNil && !isValidDecimal(value)) return;
+    } else {
+      if (!isValidDecimal(value)) return;
     }
-
-    if (field !== 'pcl' && !isValidDecimal(value)) return;
 
     setReadings((prev) =>
       prev.map((r) => {
@@ -203,33 +180,9 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
     });
   }, []);
 
-  // ── Add new reading row ──
-  const handleAddRow = () => {
-    const nextId = String(Date.now());
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        time: '23:00',
-        sec200: { fnh3: '', cnh3: '' },
-        sec400: { fnh3: '', cnh3: '', hco3: '' },
-        finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
-      },
-    ]);
-  };
-
-  // ── Remove reading row ──
-  const handleRemoveRow = (id) => {
-    if (readings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
-    }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-  };
-
   // ── Reset ──
   const handleReset = () => {
-    setReadings(DEFAULT_READINGS);
+    setReadings(originalReadings.map((r) => JSON.parse(JSON.stringify(r))));
     setErrors({});
     showToast?.('Values reset to defaults.', 'info');
   };
@@ -239,7 +192,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
     const newErrors = {};
 
     readings.forEach((r) => {
-      const validate = (section, field) => {
+      SEWER_PARAMS.forEach(([section, field]) => {
         const val = r[section]?.[field];
         if (field === 'pcl') {
           if (val !== '' && val !== null && val !== undefined) {
@@ -251,17 +204,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         } else if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
           newErrors[`${r.id}_${section}_${field}`] = 'Invalid';
         }
-      };
-
-      validate('sec200', 'fnh3');
-      validate('sec200', 'cnh3');
-      validate('sec400', 'fnh3');
-      validate('sec400', 'cnh3');
-      validate('sec400', 'hco3');
-      validate('finalOutlet', 'fnh3');
-      validate('finalOutlet', 'cnh3');
-      validate('finalOutlet', 'hco3');
-      validate('finalOutlet', 'pcl');
+      });
     });
 
     if (Object.keys(newErrors).length > 0) {
@@ -270,10 +213,37 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
+    // Detect which slot was entered or changed relative to originalReadings
+    const modifiedSlots = [];
+    SLOTS.forEach((sk) => {
+      const orig = originalReadings.find((r) => r.id === sk) || {};
+      const curr = readings.find((r) => r.id === sk) || {};
+      const slotChanged = SEWER_PARAMS.some(([sec, field]) => {
+        const ov = String(orig[sec]?.[field] || '').trim();
+        const cv = String(curr[sec]?.[field] || '').trim();
+        return ov !== cv;
+      });
+      if (slotChanged) {
+        modifiedSlots.push(sk);
+      }
+    });
+
+    if (modifiedSlots.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
+
+    if (modifiedSlots.length > 1) {
+      showToast?.('Only one slot can be saved per submission.', 'warning');
+      return;
+    }
+
+    const targetSlot = modifiedSlots[0];
     const payload = {
       date,
       plant: 'OFFSET',
       unit: 'Sewer Water',
+      targetSlot,
       readings,
       submittedBy: user?.name || 'Shift Chemist',
     };
@@ -286,9 +256,17 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
     if (!confirmData) return;
     setSaving(true);
     setSavePhase('saving');
+    setShowConfirmModal(false);
 
     try {
       const res = await api.post('/sewer-water-analysis', confirmData);
+
+      if (res.data?.noChange) {
+        showToast?.('No changes', 'info');
+        setSaving(false);
+        setSavePhase('idle');
+        return;
+      }
 
       if (res.data?.success) {
         setSaveSuccess(true);
@@ -296,60 +274,71 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         if (record?._id || record?.id) {
           setRecordId(record._id || record.id);
         }
-        if (record?.editedFields) {
-          setEditedFields(record.editedFields);
+        if (res.data.editedFields || record?.editedFields) {
+          setEditedFields(res.data.editedFields || record.editedFields);
+        }
+        if (res.data.lockedSlots || record?.lockedSlots) {
+          setLockedSlots(res.data.lockedSlots || record.lockedSlots);
+        }
+        if (res.data.readings || record?.readings) {
+          const nextReadings = res.data.readings || record.readings;
+          setReadings(nextReadings);
+          setOriginalReadings(nextReadings);
         }
 
-        const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
-        const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
-        if (operatorEmail) setRecipientEmail(operatorEmail);
-
-        if (emailSuccess) {
-          setSavePhase('completed');
-          showToast?.(`Sewer Water Analysis saved & notification sent to ${operatorEmail || 'operator'}!`, 'success');
-        } else if (res.data.emailStatus === 'failed') {
-          setSavePhase('email_failed');
-          setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
-          showToast?.('Sewer Water Analysis saved to MongoDB. Email dispatch failed.', 'warning');
-        } else {
-          setSavePhase('idle');
-          showToast?.('Sewer Water Analysis saved to MongoDB. Email dispatch pending.', 'info');
-        }
-      } else {
-        showToast?.(res.data?.message || 'Error saving Sewer Water data.', 'error');
-        setSavePhase('idle');
+        setSavePhase('completed');
+        showToast?.('Saved ✓', 'success');
       }
     } catch (err) {
-      console.error('API save error:', err);
-      const errMsg = err.response?.data?.message || 'Failed to save Sewer Water Analysis to database.';
-      showToast?.(errMsg, 'error');
-      setSavePhase('idle');
+      setSavePhase('save_failed');
+      const serverMessage = err.response?.data?.message || err.message;
+      showToast?.('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
-      setShowConfirmModal(false);
     }
   };
 
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/sewer-water-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
-  };
-
+  // Summary items for save modal
   const summaryItems = useMemo(() => {
     return [
-      { label: 'Time Slots Recorded', value: readings.length },
-      { label: 'Latest Slot Time', value: readings[readings.length - 1]?.time || '—' },
-      { label: '200# Latest FNH3', value: readings[readings.length - 1]?.sec200?.fnh3 || '0' },
-      { label: '400# Latest FNH3', value: readings[readings.length - 1]?.sec400?.fnh3 || '0' },
-      { label: 'Outlet Latest PCl', value: readings[readings.length - 1]?.finalOutlet?.pcl || '0' },
+      { label: 'Total Scheduled Slots', value: '6 Slots (Bi-hourly 11:00 - 21:00)' },
+      { label: 'Plant', value: 'OFFSET Plant' },
+      { label: 'Unit', value: 'Sewer Water' },
     ];
-  }, [readings]);
+  }, []);
+
+  const isSlotDisabled = useCallback(
+    (slotId, idx) => {
+      if (isViewOnly) return true;
+      if (lockedSlots[slotId]?.isLocked) return true;
+      if (idx > 0 && !lockedSlots[SLOTS[idx - 1]]?.isSaved) return true;
+      return false;
+    },
+    [isViewOnly, lockedSlots]
+  );
+
+  const getSlotBadgeStatus = useCallback(
+    (slotId, idx) => {
+      if (lockedSlots[slotId]?.isLocked) return 'LOCKED';
+      if (idx > 0 && !lockedSlots[SLOTS[idx - 1]]?.isSaved) return 'WAITING';
+      if (lockedSlots[slotId]?.isSaved) return 'EDITABLE';
+      return 'OPEN';
+    },
+    [lockedSlots]
+  );
+
+  const isAllLocked = useMemo(() => {
+    return (
+      Boolean(lockedSlots['t21']?.isLocked) ||
+      (SLOTS.length > 0 && SLOTS.every((sk) => lockedSlots[sk]?.isLocked))
+    );
+  }, [lockedSlots]);
+
+  const overallBadgeStatus = useMemo(() => {
+    if (isAllLocked) return 'LOCKED';
+    if (SLOTS.some((sk) => lockedSlots[sk]?.isSaved)) return 'EDITABLE';
+    return 'NEW';
+  }, [isAllLocked, lockedSlots]);
 
   return (
     <div className="space-y-5 animate-fadeIn">
@@ -359,9 +348,6 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         savePhase={savePhase}
         date={date}
         analysisName="Sewer Water Analysis"
-        recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
         onDismiss={() => {
           setSaveSuccess(false);
           setSavePhase('idle');
@@ -369,7 +355,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         saving={saving}
       />
 
-      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
+      {/* ── TOP HEADER BAR ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <button
@@ -387,46 +373,56 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
               </span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-xs font-semibold text-slate-500">
-                Utilities & Facilities
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200/60">
                 Sewer Water
               </span>
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Waves className="w-5 h-5 text-teal-600" />
+              <Waves className="w-5 h-5 text-blue-600" />
               SEWER WATER ANALYSIS
             </h1>
           </div>
         </div>
 
         {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="sewer-locked-date" />
+
+          <RecordStatusBadge
+            status={overallBadgeStatus}
+            subLabel={isAllLocked ? 'all slots locked' : lockedSlots['t11']?.isSaved ? 'in progress' : 'first slot ready'}
+          />
+
           {!isViewOnly && (
             <button
               onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+              disabled={saving || isAllLocked}
+              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Reset
             </button>
           )}
 
-          {!isViewOnly && (
+          {!isViewOnly ? (
             <StatusSaveButton
+              id="btn-sewer-save"
               saving={saving}
-              isLocked={readings.length > 0 && readings.every((r) => lockedSlots[r.id || r.time]?.isLocked)}
+              isLocked={isAllLocked}
               savePhase={savePhase}
               onClick={initiateSave}
-              className="px-4 py-2 text-xs"
+              alwaysShowSaveText={true}
+              title="Save Sewer Water Analysis"
             />
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              Read-Only
+            </span>
           )}
         </div>
       </div>
 
-      {/* ── MAIN CONTENT: Grouped Parameter Measurements Table ── */}
+      {/* ── MAIN CONTENT: Sewer Water Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="px-5 py-2.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70">
           <div className="flex items-center gap-4 flex-wrap">
@@ -436,20 +432,8 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 Sewer Water Plant Section Measurements
               </h2>
             </div>
-
-            {/* Read-Only Date Badge */}
             <LockedDateDisplay date={date} id="sewerwater-date-display" />
           </div>
-
-          {!isViewOnly && (
-            <button
-              onClick={handleAddRow}
-              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Time Slot
-            </button>
-          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -494,12 +478,6 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 <th rowSpan={2} className="py-2.5 px-3 w-24 text-center border-r border-slate-800">
                   STATUS
                 </th>
-
-                {!isViewOnly && (
-                  <th rowSpan={2} className="py-2.5 px-2 w-14 text-center">
-                    ACTION
-                  </th>
-                )}
               </tr>
 
               {/* Sub Header Row: Parameters */}
@@ -543,7 +521,7 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((row, idx) => {
                 const getLimit = (category, param) => getCellLimit('offset', 'sewer-water', 'Shift', `${category}_${param}`);
-                
+
                 const sec200Fnh3Limit = getLimit('sec200', 'fnh3');
                 const sec200Cnh3Limit = getLimit('sec200', 'cnh3');
                 const sec400Fnh3Limit = getLimit('sec400', 'fnh3');
@@ -553,7 +531,6 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 const pclLimit = getLimit('finalOutlet', 'pcl');
 
                 const isValid = (val, limit) => limit && val !== '' ? validateCellValue(val, limit) : { isOutOfLimit: false };
-                
                 const vSec200Fnh3 = isValid(row.sec200?.fnh3, sec200Fnh3Limit);
                 const vSec200Cnh3 = isValid(row.sec200?.cnh3, sec200Cnh3Limit);
                 const vSec400Fnh3 = isValid(row.sec400?.fnh3, sec400Fnh3Limit);
@@ -565,320 +542,288 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
                 const vPcl = pclLimit && row.finalOutlet?.pcl !== '' ? (isPclNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
 
                 const rowKey = row.id || row.time;
-                const slotLockInfo = lockedSlots[rowKey] || lockedSlots[row.time] || {};
-                const isSlotLocked = Boolean(slotLockInfo.isLocked || (slotLockInfo.editCount >= 1));
-                const isSlotEditable = Boolean(slotLockInfo.initialSaved && !isSlotLocked);
-                const isSlotNew = !slotLockInfo.initialSaved;
-                const slotDisabled = isViewOnly || isSlotLocked;
+                const slotDisabled = isSlotDisabled(row.id, idx);
+                const badgeStatus = getSlotBadgeStatus(row.id, idx);
 
                 return (
                   <tr
                     key={row.id}
-                    className={`transition-colors ${slotDisabled ? 'bg-slate-50/60' : 'hover:bg-teal-50/30'}`}
+                    className={`hover:bg-blue-50/20 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}`}
                   >
-                    {/* Row index */}
-                    <td className="py-2.5 px-2 text-center font-bold text-slate-500 bg-slate-50/50 border-r border-slate-100">
+                    <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px] border-r border-slate-100 font-medium">
                       {idx + 1}
                     </td>
 
-                    {/* TIME */}
-                    <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/30">
-                      <input
-                        type="text"
-                        value={row.time}
-                        disabled={slotDisabled}
-                        onChange={(e) => handleCellChange(row.id, 'time', null, e.target.value)}
-                        placeholder="HH:mm"
-                        className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-md py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
-                      />
+                    {/* Time (Read-only) */}
+                    <td className="py-2 px-2 text-center border-r border-slate-100">
+                      <span className="font-mono text-xs font-bold text-slate-700">
+                        {row.time}
+                      </span>
                     </td>
 
-                    {/* ── 200 # Columns ── */}
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* 200 # FNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.sec200?.fnh3 ?? ''}
-                        disabled={isViewOnly}
+                        disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec200', 'fnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_sec200_fnh3`] || vSec200Fnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.sec200?.fnh3 !== '' && row.sec200?.fnh3 !== '0'
-                            ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-sky-50/50 border-sky-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_sec200_fnh3`] || editedFields[`${row.time}_sec200_fnh3`])} />
                       {vSec200Fnh3.isOutOfLimit && !errors[`${row.id}_sec200_fnh3`] && sec200Fnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {sec200Fnh3Limit.formattedLabel || `Limit: ${sec200Fnh3Limit.min}-${sec200Fnh3Limit.max}`}
                         </div>
                       )}
                       {!vSec200Fnh3.isOutOfLimit && !errors[`${row.id}_sec200_fnh3`] && sec200Fnh3Limit && (row.sec200?.fnh3 === '' || row.sec200?.fnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {sec200Fnh3Limit.formattedRange || `${sec200Fnh3Limit.min}-${sec200Fnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-200">
+                    {/* 200 # CNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.sec200?.cnh3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec200', 'cnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_sec200_cnh3`] || vSec200Cnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.sec200?.cnh3 !== '' && row.sec200?.cnh3 !== '0'
-                            ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-sky-50/50 border-sky-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_sec200_cnh3`] || editedFields[`${row.time}_sec200_cnh3`])} />
                       {vSec200Cnh3.isOutOfLimit && !errors[`${row.id}_sec200_cnh3`] && sec200Cnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {sec200Cnh3Limit.formattedLabel || `Limit: ${sec200Cnh3Limit.min}-${sec200Cnh3Limit.max}`}
                         </div>
                       )}
                       {!vSec200Cnh3.isOutOfLimit && !errors[`${row.id}_sec200_cnh3`] && sec200Cnh3Limit && (row.sec200?.cnh3 === '' || row.sec200?.cnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {sec200Cnh3Limit.formattedRange || `${sec200Cnh3Limit.min}-${sec200Cnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    {/* ── 400 # Columns ── */}
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* 400 # FNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.sec400?.fnh3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'fnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_sec400_fnh3`] || vSec400Fnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.sec400?.fnh3 !== '' && row.sec400?.fnh3 !== '0'
-                            ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-indigo-50/50 border-indigo-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_sec400_fnh3`] || editedFields[`${row.time}_sec400_fnh3`])} />
                       {vSec400Fnh3.isOutOfLimit && !errors[`${row.id}_sec400_fnh3`] && sec400Fnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {sec400Fnh3Limit.formattedLabel || `Limit: ${sec400Fnh3Limit.min}-${sec400Fnh3Limit.max}`}
                         </div>
                       )}
                       {!vSec400Fnh3.isOutOfLimit && !errors[`${row.id}_sec400_fnh3`] && sec400Fnh3Limit && (row.sec400?.fnh3 === '' || row.sec400?.fnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {sec400Fnh3Limit.formattedRange || `${sec400Fnh3Limit.min}-${sec400Fnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* 400 # CNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.sec400?.cnh3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'cnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_sec400_cnh3`] || vSec400Cnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.sec400?.cnh3 !== '' && row.sec400?.cnh3 !== '0'
-                            ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-indigo-50/50 border-indigo-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_sec400_cnh3`] || editedFields[`${row.time}_sec400_cnh3`])} />
                       {vSec400Cnh3.isOutOfLimit && !errors[`${row.id}_sec400_cnh3`] && sec400Cnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {sec400Cnh3Limit.formattedLabel || `Limit: ${sec400Cnh3Limit.min}-${sec400Cnh3Limit.max}`}
                         </div>
                       )}
                       {!vSec400Cnh3.isOutOfLimit && !errors[`${row.id}_sec400_cnh3`] && sec400Cnh3Limit && (row.sec400?.cnh3 === '' || row.sec400?.cnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {sec400Cnh3Limit.formattedRange || `${sec400Cnh3Limit.min}-${sec400Cnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-200">
+                    {/* 400 # HCO3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.sec400?.hco3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'sec400', 'hco3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : errors[`${row.id}_sec400_hco3`]
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.sec400?.hco3 !== '' && row.sec400?.hco3 !== '0'
-                            ? 'border-indigo-300 bg-indigo-50/30 font-bold text-indigo-950 focus:border-indigo-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-indigo-50/50 border-indigo-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_sec400_hco3`] || editedFields[`${row.time}_sec400_hco3`])} />
                     </td>
 
-                    {/* ── FINAL OUTLET Columns ── */}
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* FINAL OUTLET FNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.finalOutlet?.fnh3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'fnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_finalOutlet_fnh3`] || vFinalOutletFnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.finalOutlet?.fnh3 !== '' && row.finalOutlet?.fnh3 !== '0'
-                            ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-emerald-50/50 border-emerald-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_finalOutlet_fnh3`] || editedFields[`${row.time}_finalOutlet_fnh3`])} />
                       {vFinalOutletFnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_fnh3`] && finalOutletFnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {finalOutletFnh3Limit.formattedLabel || `Limit: ${finalOutletFnh3Limit.min}-${finalOutletFnh3Limit.max}`}
                         </div>
                       )}
                       {!vFinalOutletFnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_fnh3`] && finalOutletFnh3Limit && (row.finalOutlet?.fnh3 === '' || row.finalOutlet?.fnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {finalOutletFnh3Limit.formattedRange || `${finalOutletFnh3Limit.min}-${finalOutletFnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* FINAL OUTLET CNH3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.finalOutlet?.cnh3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'cnh3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_finalOutlet_cnh3`] || vFinalOutletCnh3.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.finalOutlet?.cnh3 !== '' && row.finalOutlet?.cnh3 !== '0'
-                            ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-emerald-50/50 border-emerald-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_finalOutlet_cnh3`] || editedFields[`${row.time}_finalOutlet_cnh3`])} />
                       {vFinalOutletCnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_cnh3`] && finalOutletCnh3Limit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
                           {finalOutletCnh3Limit.formattedLabel || `Limit: ${finalOutletCnh3Limit.min}-${finalOutletCnh3Limit.max}`}
                         </div>
                       )}
                       {!vFinalOutletCnh3.isOutOfLimit && !errors[`${row.id}_finalOutlet_cnh3`] && finalOutletCnh3Limit && (row.finalOutlet?.cnh3 === '' || row.finalOutlet?.cnh3 === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
                           {finalOutletCnh3Limit.formattedRange || `${finalOutletCnh3Limit.min}-${finalOutletCnh3Limit.max}`}
                         </div>
                       )}
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-100">
+                    {/* FINAL OUTLET HCO3 */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.finalOutlet?.hco3 ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'hco3', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="—"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : errors[`${row.id}_finalOutlet_hco3`]
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.finalOutlet?.hco3 !== '' && row.finalOutlet?.hco3 !== '0'
-                            ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-emerald-50/50 border-emerald-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_finalOutlet_hco3`] || editedFields[`${row.time}_finalOutlet_hco3`])} />
                     </td>
 
-                    <td className="py-2.5 px-1.5 text-center border-r border-slate-200">
+                    {/* FINAL OUTLET PCl */}
+                    <td className="py-2 px-1 text-center border-r border-slate-100 relative">
                       <input
                         type="text"
-                        inputMode="decimal"
                         value={row.finalOutlet?.pcl ?? ''}
                         disabled={slotDisabled}
                         onChange={(e) => handleCellChange(row.id, 'finalOutlet', 'pcl', e.target.value)}
-                        placeholder="0"
-                        className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                          isViewOnly
-                            ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600'
+                        placeholder="NIL"
+                        className={`w-full text-center py-1.5 px-1 font-mono text-xs rounded border transition focus:outline-none ${
+                          slotDisabled
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none'
                             : (errors[`${row.id}_finalOutlet_pcl`] || vPcl.isOutOfLimit)
-                            ? 'border-red-500 bg-red-50'
+                            ? 'bg-rose-50 border-rose-400 text-rose-800'
                             : row.finalOutlet?.pcl !== '' && row.finalOutlet?.pcl !== '0'
-                            ? 'border-emerald-300 bg-emerald-50/30 font-bold text-emerald-950 focus:border-emerald-600'
-                            : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            ? 'bg-emerald-50/50 border-emerald-300 text-slate-800 font-semibold'
+                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       />
                       <EditedBadge isEdited={Boolean(editedFields[`${rowKey}_finalOutlet_pcl`] || editedFields[`${row.time}_finalOutlet_pcl`])} />
                       {vPcl.isOutOfLimit && !errors[`${row.id}_finalOutlet_pcl`] && pclLimit && (
-                        <div className="text-[9px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-1 mt-1 font-bold whitespace-nowrap mx-auto w-max shadow-2xs">
-                          Limit: NIL
+                        <div className="text-[10px] text-rose-600 font-medium mt-0.5 whitespace-nowrap">
+                          {pclLimit.formattedLabel || `Limit: ${pclLimit.min}-${pclLimit.max}`}
                         </div>
                       )}
                       {!vPcl.isOutOfLimit && !errors[`${row.id}_finalOutlet_pcl`] && pclLimit && (row.finalOutlet?.pcl === '' || row.finalOutlet?.pcl === undefined) && (
-                        <div className="text-[8.5px] text-slate-400 font-semibold mt-1 tracking-tight text-center">
-                          NIL
+                        <div className="text-[9px] text-slate-400 mt-0.5 whitespace-nowrap">
+                          {pclLimit.formattedRange || `${pclLimit.min}-${pclLimit.max}`}
                         </div>
                       )}
                     </td>
 
-                    {/* STATUS */}
-                    <td className="py-2.5 px-3 text-center border-r border-slate-100">
-                      {isSlotLocked ? (
-                        <RecordStatusBadge status="locked" />
-                      ) : isSlotEditable ? (
-                        <RecordStatusBadge status="editable" />
-                      ) : (
-                        <RecordStatusBadge status="new" />
-                      )}
+                    {/* Slot Status Badge */}
+                    <td className="py-2 px-2 text-center border-r border-slate-100">
+                      <RecordStatusBadge status={badgeStatus} />
                     </td>
-
-                    {/* ACTION */}
-                    {!isViewOnly && (
-                      <td className="py-2.5 px-2 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(row.id)}
-                          disabled={readings.length <= 1 || slotDisabled}
-                          className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-                          title="Delete row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -886,25 +831,16 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </table>
         </div>
 
-        {/* Table Footer */}
-        <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+        {/* ── FOOTER NOTE ── */}
+        <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
-            {!isViewOnly && (
-              <button
-                onClick={handleAddRow}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 text-blue-600" />
-                Add Another Time Slot
-              </button>
-            )}
-            <span className="text-slate-500 font-medium">
-              {readings.length} {readings.length === 1 ? 'slot' : 'slots'} recorded
+            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>
+              One correction allowed after first save; saving the next slot/shift locks the previous one.
             </span>
           </div>
-
-          <div className="text-slate-500 text-xs">
-            Sections: <span className="font-semibold text-slate-700">200 # (FNH₃, CNH₃) | 400 # (FNH₃, CNH₃, HCO₃) | Final Outlet (FNH₃, CNH₃, HCO₃, PCl)</span>
+          <div className="font-mono text-[11px] text-slate-400">
+            6 Slots (Bi-hourly 11:00 - 21:00)
           </div>
         </div>
       </div>
@@ -914,12 +850,10 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
         onConfirm={handleConfirmSave}
-        saving={saving}
+        loading={saving}
+        summaryItems={summaryItems}
         analysisName="Sewer Water Analysis"
         date={date}
-        shiftOrTime={readings.length ? `${readings.length} Slots` : 'Daily'}
-        summaryItems={summaryItems}
-        recipientEmail={recipientEmail}
       />
     </div>
   );

@@ -1,128 +1,246 @@
 const express = require('express');
-const router = express.Router();
-const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
-const { ActivityLog, PlantAnalysisRecord } = require('../models');
-const { executeSaveAndEmailWorkflow, getPlantAssignedUser } = require('../services/plantNotificationService');
+const { PlantAnalysisRecord } = require('../models');
+const {
+  computeSlotTransition,
+  pickCanonicalDoc,
+  isValueDifferent,
+} = require('../services/analysisLockEngine');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
-/**
- * Returns today's date in Asia/Kolkata timezone (YYYY-MM-DD)
- */
-const getTodayKolkata = () => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+const CANONICAL_PLANT_CODE = 'OFFSITE';
+const PLANT_CODES = ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'];
+const CANONICAL_PLANT_NAME = 'OFFSITE Plant';
+const CANONICAL_ANALYSIS_TYPE = 'Sewer Water Analysis';
+const ANALYSIS_TYPES = ['Sewer Water Analysis'];
+const CANONICAL_UNIT = 'Sewer Water';
+
+const SLOT_KEYS = ['t11', 't13', 't15', 't17', 't19', 't21'];
+
+const SLOT_META = {
+  t11: { id: 't11', time: '11:00', label: '11:00' },
+  t13: { id: 't13', time: '13:00', label: '13:00' },
+  t15: { id: 't15', time: '15:00', label: '15:00' },
+  t17: { id: 't17', time: '17:00', label: '17:00' },
+  t19: { id: 't19', time: '19:00', label: '19:00' },
+  t21: { id: 't21', time: '21:00', label: '21:00' },
 };
 
-/**
- * Compares two values for differences, preserving decimal precision
- */
-const isValDiff = (o, n) => {
-  if (o === undefined || o === null || o === '') o = null;
-  if (n === undefined || n === null || n === '') n = null;
-  if (o === null && n === null) return false;
-  if (o === null || n === null) return true;
-  if (!isNaN(Number(o)) && !isNaN(Number(n))) {
-    return Number(o) !== Number(n);
-  }
-  return String(o).trim().toLowerCase() !== String(n).trim().toLowerCase();
+const TIME_TO_SLOT = {
+  '11:00': 't11',
+  '13:00': 't13',
+  '15:00': 't15',
+  '17:00': 't17',
+  '19:00': 't19',
+  '21:00': 't21',
 };
 
-const SEED_READINGS = [
-  {
-    id: 't11',
-    time: '11:00',
-    sec200: { fnh3: '3', cnh3: '0' },
-    sec400: { fnh3: '6664', cnh3: '4284', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
-  },
-  {
-    id: 't13',
-    time: '13:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
-  },
-  {
-    id: 't15',
-    time: '15:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
-  },
-  {
-    id: 't17',
-    time: '17:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
-  },
-  {
-    id: 't19',
-    time: '19:00',
-    sec200: { fnh3: '1020', cnh3: '2244' },
-    sec400: { fnh3: '5780', cnh3: '2720', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '38.5' },
-  },
-  {
-    id: 't21',
-    time: '21:00',
-    sec200: { fnh3: '0', cnh3: '0' },
-    sec400: { fnh3: '0', cnh3: '0', hco3: '0' },
-    finalOutlet: { fnh3: '0', cnh3: '0', hco3: '0', pcl: '0' },
-  },
+const SEWER_PARAMS = [
+  ['sec200', 'fnh3'],
+  ['sec200', 'cnh3'],
+  ['sec400', 'fnh3'],
+  ['sec400', 'cnh3'],
+  ['sec400', 'hco3'],
+  ['finalOutlet', 'fnh3'],
+  ['finalOutlet', 'cnh3'],
+  ['finalOutlet', 'hco3'],
+  ['finalOutlet', 'pcl'],
 ];
 
-// In-memory fallback cache
-const sewerWaterRecords = [];
+const DEFAULT_READINGS_TEMPLATE = [
+  { id: 't11', time: '11:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't13', time: '13:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't15', time: '15:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't17', time: '17:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't19', time: '19:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+  { id: 't21', time: '21:00', sec200: { fnh3: '', cnh3: '' }, sec400: { fnh3: '', cnh3: '', hco3: '' }, finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' } },
+];
 
-// Apply authentication middleware
-router.use(protect);
+function getSlotKey(row) {
+  if (!row || typeof row !== 'object') return null;
+  const idStr = String(row.id || '').trim().toLowerCase();
+  if (SLOT_KEYS.includes(idStr)) return idStr;
+  const timeStr = String(row.time || '').trim();
+  if (TIME_TO_SLOT[timeStr]) return TIME_TO_SLOT[timeStr];
+  return null;
+}
 
-/**
- * @desc    Get Sewer Water Analysis data (by date or query)
- * @route   GET /api/sewer-water-analysis
- * @access  Private
- */
-router.get('/', async (req, res) => {
-  try {
-    const { date, startDate, endDate, plant } = req.query;
+function cleanRow(row) {
+  const cleaned = {
+    sec200: { fnh3: '', cnh3: '' },
+    sec400: { fnh3: '', cnh3: '', hco3: '' },
+    finalOutlet: { fnh3: '', cnh3: '', hco3: '', pcl: '' },
+  };
+  if (!row || typeof row !== 'object') return cleaned;
 
-    // Resolve assigned OFFSITE Plant operator email dynamically from registered database records
-    let assignedOperatorEmail = null;
-    try {
-      const companyId = req.user?.company?._id || req.user?.company || null;
-      const { assignedUser, primaryEmail } = await getPlantAssignedUser('OFFSITE', { company: companyId });
-      assignedOperatorEmail = primaryEmail || assignedUser?.email || null;
-    } catch (recipErr) {
-      console.warn('[SewerWater GET] Operator recipient resolution note:', recipErr.message);
-      assignedOperatorEmail = null;
+  SEWER_PARAMS.forEach(([sec, key]) => {
+    const val = row[sec]?.[key];
+    cleaned[sec][key] = val !== undefined && val !== null ? String(val).trim() : '';
+  });
+  return cleaned;
+}
+
+function flattenRow(row) {
+  const flat = {};
+  SEWER_PARAMS.forEach(([sec, key]) => {
+    const val = row?.[sec]?.[key];
+    flat[`${sec}_${key}`] = val !== undefined && val !== null ? String(val).trim() : '';
+  });
+  return flat;
+}
+
+function isUnitEmpty(row) {
+  if (!row || typeof row !== 'object') return true;
+  return SEWER_PARAMS.every(([sec, key]) => {
+    const val = row[sec]?.[key];
+    return val === undefined || val === null || String(val).trim() === '';
+  });
+}
+
+function deriveSewerWaterLocks(existingDoc) {
+  const existingData = existingDoc?.data || {};
+  const storedSlots = existingData.lockedSlots || {};
+  const rawReadings = Array.isArray(existingData.readings)
+    ? existingData.readings
+    : Array.isArray(existingData.shifts)
+      ? existingData.shifts
+      : Array.isArray(existingData.rows)
+        ? existingData.rows
+        : [];
+
+  const rowsBySlot = {};
+  rawReadings.forEach((r) => {
+    const sk = getSlotKey(r);
+    if (sk && !rowsBySlot[sk]) {
+      rowsBySlot[sk] = r;
     }
+  });
 
-    if (date) {
-      try {
-        const query = {
-          date,
-          analysisType: 'Sewer Water Analysis',
-          plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-        };
-        if (req.user && req.user.company) {
-          query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+  const slotSavedMap = {};
+  const slotCorrMap = {};
+
+  SLOT_KEYS.forEach((sk) => {
+    const r = rowsBySlot[sk];
+    const hasData = r && !isUnitEmpty(r);
+    const sSlot = storedSlots[sk] || {};
+    const legacyEdits = sSlot.editCount || 0;
+    const legacyLocked = Boolean(sSlot.isLocked || legacyEdits >= 1);
+    const isSaved = Boolean(sSlot.isSaved || sSlot.initialSaved || hasData);
+    const corrUsed = Boolean(sSlot.correctionUsed || legacyEdits >= 1 || (legacyLocked && isSaved));
+    slotSavedMap[sk] = isSaved;
+    slotCorrMap[sk] = corrUsed;
+  });
+
+  const lockedSlots = {};
+  SLOT_KEYS.forEach((sk, idx) => {
+    if (storedSlots[sk] && typeof storedSlots[sk] === 'object' && ('isSaved' in storedSlots[sk] || 'initialSaved' in storedSlots[sk])) {
+      const isSaved = Boolean(storedSlots[sk].isSaved || storedSlots[sk].initialSaved);
+      const corr = Boolean(storedSlots[sk].correctionUsed);
+      let isLocked = Boolean(storedSlots[sk].isLocked || corr);
+      for (let nextIdx = idx + 1; nextIdx < SLOT_KEYS.length; nextIdx++) {
+        if (slotSavedMap[SLOT_KEYS[nextIdx]]) {
+          isLocked = true;
+          break;
+        }
+      }
+      lockedSlots[sk] = {
+        isSaved,
+        isLocked: Boolean(isLocked),
+        correctionUsed: corr,
+      };
+    } else {
+      const isSaved = Boolean(slotSavedMap[sk]);
+      const corr = Boolean(slotCorrMap[sk]);
+      let isLocked = corr;
+      for (let nextIdx = idx + 1; nextIdx < SLOT_KEYS.length; nextIdx++) {
+        if (slotSavedMap[SLOT_KEYS[nextIdx]]) {
+          isLocked = true;
+          break;
+        }
+      }
+      lockedSlots[sk] = {
+        isSaved,
+        isLocked: Boolean(isLocked),
+        correctionUsed: corr,
+      };
+    }
+  });
+
+  return { lockedSlots };
+}
+
+function createSewerWaterRouter({ getNow = () => new Date() } = {}) {
+  const router = express.Router();
+  router.use(protect);
+
+  /**
+   * @desc    Get Sewer Water Analysis data
+   * @route   GET /api/sewer-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.get('/', async (req, res) => {
+    try {
+      const { date, startDate, endDate } = req.query;
+
+      if (date) {
+        if (req.user?.role === 'user') {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: Sewer Water Analysis data access is restricted to authorized Admins.',
+          });
         }
 
-        const doc = await PlantAnalysisRecord.findOne(query).sort({ createdAt: -1 }).lean();
+        const companyVal = req.user?.company?._id || req.user?.company || null;
+        const query = {
+          date,
+          analysisType: { $in: ANALYSIS_TYPES },
+          plantCode: { $in: PLANT_CODES },
+        };
+        if (companyVal) {
+          query.$or = [{ company: companyVal }, { company: null }];
+        }
+
+        const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+        const doc = pickCanonicalDoc(matchingDocs);
+
         if (doc && doc.data) {
           const payloadData = doc.data;
-          const readings = payloadData.readings || payloadData.shifts || payloadData.rows || [];
+          const { lockedSlots } = deriveSewerWaterLocks(doc);
+          const rawReadings = Array.isArray(payloadData.readings)
+            ? payloadData.readings
+            : Array.isArray(payloadData.shifts)
+              ? payloadData.shifts
+              : Array.isArray(payloadData.rows)
+                ? payloadData.rows
+                : [];
+
+          const readingsMap = {};
+          rawReadings.forEach((r) => {
+            const sk = getSlotKey(r);
+            if (sk && !readingsMap[sk]) {
+              readingsMap[sk] = cleanRow(r);
+            }
+          });
+
+          const canonicalReadings = SLOT_KEYS.map((sk) => {
+            const rowData = readingsMap[sk] || cleanRow({});
+            return {
+              id: SLOT_META[sk].id,
+              time: SLOT_META[sk].time,
+              sec200: rowData.sec200,
+              sec400: rowData.sec400,
+              finalOutlet: rowData.finalOutlet,
+            };
+          });
+
           return res.status(200).json({
             success: true,
             recordId: doc._id,
-            emailRecipient: doc.emailRecipient || assignedOperatorEmail,
-            emailStatus: doc.emailStatus || 'pending',
-            assignedOperatorEmail,
+            emailRecipient: null,
+            emailStatus: 'disabled',
+            assignedOperatorEmail: null,
+            readings: canonicalReadings,
+            lockedSlots,
             editedFields: payloadData.editedFields || {},
             editAuditHistory: payloadData.editAuditHistory || [],
             data: {
@@ -130,406 +248,516 @@ router.get('/', async (req, res) => {
               _id: doc._id,
               id: doc._id,
               date: doc.date,
-              readings: readings || [],
+              readings: canonicalReadings,
+              lockedSlots,
               editedFields: payloadData.editedFields || {},
               editAuditHistory: payloadData.editAuditHistory || [],
-              emailStatus: doc.emailStatus || 'pending',
-              emailRecipient: doc.emailRecipient || assignedOperatorEmail,
+              emailStatus: 'disabled',
+              emailRecipient: null,
             },
           });
         }
-      } catch (dbErr) {
-        console.warn('[SewerWater GET] MongoDB lookup note:', dbErr.message);
-      }
 
-      const match = sewerWaterRecords.find((r) => r.date === date);
-      if (match) {
         return res.status(200).json({
           success: true,
-          assignedOperatorEmail,
-          data: match,
+          assignedOperatorEmail: null,
+          data: null,
+          message: `No record found for date ${date}`,
         });
       }
 
-      return res.status(200).json({
-        success: true,
-        assignedOperatorEmail,
-        data: null,
-        message: `No record found for date ${date}`,
-      });
-    }
+      // List query
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Sewer Water Analysis data access is restricted to authorized Admins.',
+        });
+      }
 
-    // List query
-    try {
       const query = {
-        analysisType: 'Sewer Water Analysis',
-        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
       };
       if (startDate && endDate) {
         query.date = { $gte: startDate, $lte: endDate };
       }
       if (req.user && req.user.company) {
-        query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
+        const companyVal = req.user.company._id || req.user.company;
+        query.$or = [{ company: companyVal }, { company: null }];
       }
 
       const docs = await PlantAnalysisRecord.find(query).sort({ date: -1 }).lean();
-      if (docs && docs.length > 0) {
-        const results = docs.map((d) => ({
-          ...d.data,
-          _id: d._id,
-          id: d._id,
-          date: d.date,
-          emailStatus: d.emailStatus,
-          emailRecipient: d.emailRecipient,
-        }));
-        return res.status(200).json({
-          success: true,
-          count: results.length,
-          data: results,
+      const results = (docs || []).map((d) => ({
+        ...d.data,
+        _id: d._id,
+        id: d._id,
+        date: d.date,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+      }));
+
+      return res.status(200).json({
+        success: true,
+        count: results.length,
+        data: results,
+      });
+    } catch (error) {
+      console.error('[SewerWater GET] Error fetching records:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while retrieving Sewer Water records: ' + error.message,
+      });
+    }
+  });
+
+  /**
+   * @desc    Save Sewer Water Analysis data
+   * @route   POST /api/sewer-water-analysis
+   * @access  Private (Admin only)
+   */
+  router.post('/', async (req, res) => {
+    try {
+      if (req.user?.role === 'user') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Sewer Water Analysis data entry and modification is restricted to authorized Admins.',
         });
       }
-    } catch (listErr) {
-      console.warn('[SewerWater GET list] MongoDB note:', listErr.message);
-    }
 
-    return res.status(200).json({
-      success: true,
-      count: sewerWaterRecords.length,
-      data: sewerWaterRecords,
-    });
-  } catch (error) {
-    console.error('[SewerWater GET] Error fetching records:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while retrieving Sewer Water records: ' + error.message,
-    });
-  }
-});
+      const payload = req.body || {};
 
-/**
- * @desc    Save Sewer Water Analysis data (Time-Slot Hourly Sampling)
- * @route   POST /api/sewer-water-analysis
- * @access  Private
- */
-router.post('/', async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const todayKolkata = getTodayKolkata();
+      if (!payload.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Analysis Date is required to save Sewer Water Analysis.',
+        });
+      }
 
-    if (!payload.date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Analysis Date is required to save Sewer Water Analysis.',
-      });
-    }
+      const now = getNow();
+      const operatingDate = getOperatingDateIST(now);
 
-    const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true' || req.headers['x-test-mode'] === 'true';
+      if (payload.date !== operatingDate) {
+        return res.status(400).json({
+          success: false,
+          message: `Date restriction enforced: Sewer Water Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
+        });
+      }
 
-    // Backend Date Restriction Enforcement (Asia/Kolkata)
-    if (payload.date !== todayKolkata && !isTestMode) {
-      return res.status(400).json({
-        success: false,
-        message: `Date restriction policy: Sewer Water Analysis can only be submitted for today (${todayKolkata}). Historical or future date entry (${payload.date}) is not permitted.`,
-      });
-    }
+      const readings = Array.isArray(payload.readings) ? payload.readings : [];
+      if (readings.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one analytical reading row is required.',
+        });
+      }
 
-    const readings = Array.isArray(payload.readings) ? payload.readings : [];
-    if (readings.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one analytical reading row is required.',
-      });
-    }
-
-    const errors = [];
-    readings.forEach((reading, idx) => {
-      const rowNum = idx + 1;
-      const checkVal = (section, key) => {
-        const val = reading[section]?.[key];
-        if (val !== '' && val !== null && val !== undefined) {
-          if (key === 'pcl') {
-            const isNil = ['nil', 'n', 'ni', 'none', '-'].includes(String(val).toLowerCase().trim());
-            if (!isNil && isNaN(Number(val))) {
-              errors.push(`Row #${rowNum} (${reading.time || ''}) [${section}.${key}]: must be a valid number or 'NIL'.`);
+      const errors = [];
+      readings.forEach((reading, idx) => {
+        const rowNum = idx + 1;
+        SEWER_PARAMS.forEach(([sec, key]) => {
+          const val = reading[sec]?.[key];
+          if (val !== '' && val !== null && val !== undefined) {
+            if (key === 'pcl') {
+              const isNil = ['nil', 'n', 'ni', 'none', '-'].includes(String(val).toLowerCase().trim());
+              if (!isNil && isNaN(Number(val))) {
+                errors.push(`Row #${rowNum} (${reading.time || ''}) [${sec}.${key}]: must be a valid number or 'NIL'.`);
+              }
+            } else if (isNaN(Number(val))) {
+              errors.push(`Row #${rowNum} (${reading.time || ''}) [${sec}.${key}]: must be a valid number.`);
             }
-          } else if (isNaN(Number(val))) {
-            errors.push(`Row #${rowNum} (${reading.time || ''}) [${section}.${key}]: must be a valid number.`);
+          }
+        });
+      });
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed. Enter numeric values only.',
+          errors,
+        });
+      }
+
+      // Prevent duplicate time slots within submission
+      const timeSlots = readings.map((r) => String(r.time || '').trim()).filter(Boolean);
+      const uniqueSlots = new Set(timeSlots);
+      if (timeSlots.length !== uniqueSlots.size) {
+        return res.status(400).json({
+          success: false,
+          message: 'Duplicate sampling time slots detected. Each observation must have a unique time slot.',
+        });
+      }
+
+      const companyVal = req.user?.company?._id || req.user?.company || null;
+      const query = {
+        date: payload.date,
+        analysisType: { $in: ANALYSIS_TYPES },
+        plantCode: { $in: PLANT_CODES },
+      };
+      if (companyVal) {
+        query.$or = [{ company: companyVal }, { company: null }];
+      }
+
+      const matchingDocs = await PlantAnalysisRecord.find(query).lean();
+      const existingDoc = pickCanonicalDoc(matchingDocs);
+      const existingData = existingDoc?.data || {};
+
+      const currentLocks = deriveSewerWaterLocks(existingDoc);
+      const currentLockedSlots = currentLocks.lockedSlots;
+
+      // Extract existing nested rows by slot key
+      const existingReadings = Array.isArray(existingData.readings)
+        ? existingData.readings
+        : Array.isArray(existingData.shifts)
+          ? existingData.shifts
+          : Array.isArray(existingData.rows)
+            ? existingData.rows
+            : [];
+
+      const existingSlots = {};
+      const existingFlatSlots = {};
+      SLOT_KEYS.forEach((sk) => {
+        existingSlots[sk] = cleanRow({});
+        existingFlatSlots[sk] = flattenRow(existingSlots[sk]);
+      });
+      existingReadings.forEach((r) => {
+        const sk = getSlotKey(r);
+        if (sk) {
+          existingSlots[sk] = cleanRow(r);
+          existingFlatSlots[sk] = flattenRow(existingSlots[sk]);
+        }
+      });
+
+      // Extract incoming nested rows only for slots present in payload.readings
+      const incomingSlots = {};
+      const incomingFlatSlots = {};
+      readings.forEach((r) => {
+        const sk = getSlotKey(r);
+        if (sk) {
+          incomingSlots[sk] = cleanRow(r);
+          incomingFlatSlots[sk] = flattenRow(incomingSlots[sk]);
+        }
+      });
+
+      // Detect changed slots among provided rows
+      const changedSlots = [];
+      SLOT_KEYS.forEach((sk) => {
+        if (incomingFlatSlots[sk] !== undefined) {
+          const exFlat = existingFlatSlots[sk] || {};
+          const incFlat = incomingFlatSlots[sk];
+          if (SEWER_PARAMS.some(([sec, key]) => isValueDifferent(exFlat[`${sec}_${key}`], incFlat[`${sec}_${key}`]))) {
+            changedSlots.push(sk);
           }
         }
-      };
-
-      checkVal('sec200', 'fnh3');
-      checkVal('sec200', 'cnh3');
-      checkVal('sec400', 'fnh3');
-      checkVal('sec400', 'cnh3');
-      checkVal('sec400', 'hco3');
-      checkVal('finalOutlet', 'fnh3');
-      checkVal('finalOutlet', 'cnh3');
-      checkVal('finalOutlet', 'hco3');
-      checkVal('finalOutlet', 'pcl');
-    });
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed. Enter numeric values only.',
-        errors,
       });
-    }
 
-    // Prevent duplicate sampling time slots
-    const timeSlots = readings.map((r) => String(r.time || '').trim()).filter(Boolean);
-    const uniqueSlots = new Set(timeSlots);
-    if (timeSlots.length !== uniqueSlots.size) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate sampling time slots detected. Each observation must have a unique time slot.',
-      });
-    }
-
-    // Fetch existing record in MongoDB
-    const query = {
-      date: payload.date,
-      analysisType: 'Sewer Water Analysis',
-      plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-    };
-    if (req.user && req.user.company) {
-      query.$or = [{ company: req.user.company._id || req.user.company }, { company: null }];
-    }
-
-    let existingDoc = await PlantAnalysisRecord.findOne(query);
-
-    let editedFields = existingDoc?.data?.editedFields || {};
-    let editAuditHistory = Array.isArray(existingDoc?.data?.editAuditHistory) ? existingDoc.data.editAuditHistory : [];
-    let lockedSlots = existingDoc?.data?.lockedSlots || {};
-    let oldReadings = existingDoc?.data?.readings || [];
-
-    // Check Slot-Level Lock Violations (Each slot allows exactly 1 edit after initial save)
-    const SEWER_KEYS = [
-      ['sec200', 'fnh3'], ['sec200', 'cnh3'],
-      ['sec400', 'fnh3'], ['sec400', 'cnh3'], ['sec400', 'hco3'],
-      ['finalOutlet', 'fnh3'], ['finalOutlet', 'cnh3'], ['finalOutlet', 'hco3'], ['finalOutlet', 'pcl']
-    ];
-
-    for (const newRow of readings) {
-      const slotKey = newRow.id || newRow.time;
-      const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
-      if (oldRow) {
-        const slotHasDiff = SEWER_KEYS.some(([sec, k]) => isValDiff(oldRow[sec]?.[k], newRow[sec]?.[k]));
-        if (slotHasDiff && lockedSlots[slotKey]?.isLocked) {
-          return res.status(400).json({
-            success: false,
-            message: `Sampling slot ${newRow.time} has exhausted its permitted edit and is permanently locked.`,
-          });
-        }
-      }
-    }
-
-    const isEdit = Boolean(existingDoc);
-    const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
-    const editorId = req.user?._id;
-    const nowIso = new Date().toISOString();
-
-    // Field-level edit detection
-    if (isEdit && existingDoc?.data?.readings) {
-      const prevReadings = existingDoc.data.readings;
-      const compareField = (rowId, time, section, key, oldVal, newVal) => {
-        if (isValDiff(oldVal, newVal)) {
-          const fieldKey = `${rowId || time}_${section}_${key}`;
-          editedFields[fieldKey] = true;
-          editAuditHistory.push({
-            field: `${section}.${key}`,
-            rowId: rowId || time,
-            time,
-            previousValue: oldVal ?? '',
-            newValue: newVal ?? '',
-            editedBy: editorName,
-            editedById: editorId,
-            timestamp: nowIso,
-          });
-        }
-      };
-
-      readings.forEach((newR) => {
-        const oldR = prevReadings.find((r) => (r.id && r.id === newR.id) || r.time === newR.time);
-        if (oldR) {
-          compareField(newR.id, newR.time, 'sec200', 'fnh3', oldR.sec200?.fnh3, newR.sec200?.fnh3);
-          compareField(newR.id, newR.time, 'sec200', 'cnh3', oldR.sec200?.cnh3, newR.sec200?.cnh3);
-          compareField(newR.id, newR.time, 'sec400', 'fnh3', oldR.sec400?.fnh3, newR.sec400?.fnh3);
-          compareField(newR.id, newR.time, 'sec400', 'cnh3', oldR.sec400?.cnh3, newR.sec400?.cnh3);
-          compareField(newR.id, newR.time, 'sec400', 'hco3', oldR.sec400?.hco3, newR.sec400?.hco3);
-          compareField(newR.id, newR.time, 'finalOutlet', 'fnh3', oldR.finalOutlet?.fnh3, newR.finalOutlet?.fnh3);
-          compareField(newR.id, newR.time, 'finalOutlet', 'cnh3', oldR.finalOutlet?.cnh3, newR.finalOutlet?.cnh3);
-          compareField(newR.id, newR.time, 'finalOutlet', 'hco3', oldR.finalOutlet?.hco3, newR.finalOutlet?.hco3);
-          compareField(newR.id, newR.time, 'finalOutlet', 'pcl', oldR.finalOutlet?.pcl, newR.finalOutlet?.pcl);
-        }
-      });
-    }
-
-    // Update lockedSlots state machine
-    readings.forEach((newRow) => {
-      const slotKey = newRow.id || newRow.time;
-      const hasDataInSlot = SEWER_KEYS.some(([sec, k]) => {
-        const v = newRow[sec]?.[k];
-        return v !== '' && v !== null && v !== undefined;
-      });
-      if (hasDataInSlot) {
-        const oldRow = oldReadings.find((r) => (r.id && r.id === newRow.id) || r.time === newRow.time);
-        const slotDiff = oldRow && SEWER_KEYS.some(([sec, k]) => isValDiff(oldRow[sec]?.[k], newRow[sec]?.[k]));
-        const prevSlot = lockedSlots[slotKey] || { initialSaved: false, editCount: 0, isLocked: false };
-
-        if (prevSlot.initialSaved && slotDiff) {
-          const nextEdits = (prevSlot.editCount || 0) + 1;
-          lockedSlots[slotKey] = {
-            initialSaved: true,
-            editCount: nextEdits,
-            isLocked: nextEdits >= 1,
-          };
-        } else if (!prevSlot.initialSaved) {
-          lockedSlots[slotKey] = {
-            initialSaved: true,
-            editCount: 0,
-            isLocked: false,
-          };
-        }
-      }
-    });
-
-    const saveCount = (existingDoc?.data?.saveCount || 0) + 1;
-
-    const recordData = {
-      id: existingDoc?.data?.id || `sewer_${Date.now()}`,
-      date: payload.date,
-      plant: 'OFFSET',
-      plantCode: 'OFFSITE',
-      unit: 'Sewer Water',
-      analysisType: 'Sewer Water Analysis',
-      readings,
-      lockedSlots,
-      editedFields,
-      editAuditHistory,
-      saveCount,
-      submittedBy: editorName,
-      submittedById: editorId,
-      submittedAt: nowIso,
-      company: req.user?.company?._id || req.user?.company || 'TFL',
-    };
-
-    // Update in-memory fallback
-    const memIdx = sewerWaterRecords.findIndex((r) => r.date === payload.date);
-    if (memIdx >= 0) {
-      sewerWaterRecords[memIdx] = recordData;
-    } else {
-      sewerWaterRecords.unshift(recordData);
-    }
-
-    // Persist to MongoDB PlantAnalysisRecord
-    const savedDoc = await PlantAnalysisRecord.findOneAndUpdate(
-      {
-        plantCode: { $in: ['OFFSITE', 'OFFSET', 'OFFSITE Plant', 'OFFSET Plant'] },
-        analysisType: 'Sewer Water Analysis',
-        date: payload.date,
-        ...(req.user && req.user.company ? { company: req.user.company } : {}),
-      },
-      {
-        plantName: 'OFFSET Plant',
-        plantCode: 'OFFSITE',
-        analysisType: 'Sewer Water Analysis',
-        unit: 'Sewer Water',
-        date: payload.date,
-        data: recordData,
-        submittedBy: editorName,
-        submittedById: editorId,
-        company: req.user?.company?._id || req.user?.company,
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-
-    // Optional user activity log
-    try {
-      if (ActivityLog && req.user?._id) {
-        await ActivityLog.create({
-          user: req.user._id,
-          action: isEdit ? 'UPDATE' : 'CREATE',
-          entity: 'ANALYSIS',
-          details: {
-            message: `${isEdit ? 'Updated' : 'Recorded'} Sewer Water Analysis for date ${payload.date}`,
-            plant: 'OFFSET',
-            unit: 'Sewer Water',
-          },
+      let targetSlot = payload.targetSlot ? String(payload.targetSlot).trim().toLowerCase() : null;
+      if (targetSlot && !SLOT_KEYS.includes(targetSlot)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid targetSlot '${targetSlot}'. Valid slots are: ${SLOT_KEYS.join(', ')}`,
         });
       }
-    } catch (logErr) {
-      console.warn('[SewerWater ActivityLog] note:', logErr.message);
-    }
 
-    // Decoupled Email Notification Dispatch to OFFSITE Plant Operator
-    const saveEventId = `save_sewerwater_${Date.now()}`;
-    let emailResult = { success: false, emailStatus: 'pending' };
-    try {
-      emailResult = await executeSaveAndEmailWorkflow({
-        plantIdentifier: 'OFFSITE',
-        analysisType: 'Sewer Water Analysis',
-        unit: 'Sewer Water',
-        shift: 'Day',
+      if (changedSlots.length > 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only one slot can be saved per submission.',
+        });
+      }
+
+      if (!targetSlot) {
+        if (changedSlots.length === 1) {
+          targetSlot = changedSlots[0];
+        } else {
+          // If no changes, find the first unsaved slot, or first slot
+          targetSlot = SLOT_KEYS.find((sk) => !currentLockedSlots[sk]?.isSaved) || SLOT_KEYS[0];
+        }
+      }
+
+      // Check empty slot on first save
+      const targetIncomingRow = incomingSlots[targetSlot] || cleanRow({});
+      if (!currentLockedSlots[targetSlot]?.isSaved && isUnitEmpty(targetIncomingRow)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot save empty slot ${targetSlot}. At least one non-empty value is required.`,
+        });
+      }
+
+      // Prepare incomingShiftRows for computeSlotTransition:
+      // only targetSlot gets incoming flat data; other slots retain existing flat data
+      const incomingShiftRows = {};
+      for (const u of SLOT_KEYS) {
+        if (u === targetSlot) {
+          incomingShiftRows[u] = incomingFlatSlots[u] || {};
+        } else if (existingFlatSlots[u] !== undefined) {
+          incomingShiftRows[u] = existingFlatSlots[u];
+        }
+      }
+
+      // Compute sequential transition via Universal Lock Engine
+      const transition = computeSlotTransition({
+        unitsOrder: SLOT_KEYS,
+        lockedSlots: currentLockedSlots,
+        storedRows: existingFlatSlots,
+        incomingRows: incomingShiftRows,
+        now,
+      });
+
+      const canonicalReadingsTemplate = SLOT_KEYS.map((sk) => {
+        const ex = existingSlots[sk] || cleanRow({});
+        return {
+          id: SLOT_META[sk].id,
+          time: SLOT_META[sk].time,
+          sec200: ex.sec200,
+          sec400: ex.sec400,
+          finalOutlet: ex.finalOutlet,
+        };
+      });
+
+      if (transition.noChange) {
+        return res.status(200).json({
+          success: true,
+          noChange: true,
+          message: 'No changes',
+          data: existingData,
+          record: existingData,
+          recordId: existingDoc?._id,
+          readings: canonicalReadingsTemplate,
+          lockedSlots: currentLockedSlots,
+          editedFields: existingData.editedFields || {},
+          editAuditHistory: existingData.editAuditHistory || [],
+          emailStatus: 'disabled',
+          emailSent: false,
+        });
+      }
+
+      if (!transition.ok) {
+        return res.status(transition.status || 400).json({
+          success: false,
+          message: transition.message,
+        });
+      }
+
+      const isCorrection = transition.isCorrection;
+      const targetIdx = SLOT_KEYS.indexOf(targetSlot);
+      const editorName = req.user?.name || payload.submittedBy || 'Plant Operator';
+      const editorId = req.user?._id || null;
+      const nowIso = now.toISOString();
+
+      const updatedLockedSlots = JSON.parse(JSON.stringify(currentLockedSlots));
+      if (!isCorrection) {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: false,
+          correctionUsed: false,
+        };
+        for (let p = 0; p < targetIdx; p++) {
+          updatedLockedSlots[SLOT_KEYS[p]].isLocked = true;
+        }
+      } else {
+        updatedLockedSlots[targetSlot] = {
+          isSaved: true,
+          isLocked: true,
+          correctionUsed: true,
+        };
+      }
+
+      // Field-level flat edit audit on corrections
+      const updatedEditedFields = { ...(existingData.editedFields || {}) };
+      const updatedAuditHistory = [...(existingData.editAuditHistory || [])];
+
+      if (isCorrection) {
+        const rowId = SLOT_META[targetSlot].id;
+        const timeVal = SLOT_META[targetSlot].time;
+        const shiftLabel = 'Day';
+        const targetExistingFlat = existingFlatSlots[targetSlot] || {};
+        const targetIncomingFlat = incomingFlatSlots[targetSlot] || {};
+
+        SEWER_PARAMS.forEach(([sec, key]) => {
+          const fieldKey = `${sec}_${key}`;
+          const ov = targetExistingFlat[fieldKey];
+          const nv = targetIncomingFlat[fieldKey];
+          if (isValueDifferent(ov, nv)) {
+            updatedEditedFields[`${rowId}_${fieldKey}`] = true;
+            updatedEditedFields[`${timeVal}_${fieldKey}`] = true;
+            updatedAuditHistory.push({
+              date: payload.date,
+              rowId,
+              shift: shiftLabel,
+              time: timeVal,
+              field: fieldKey,
+              oldValue: ov !== undefined && ov !== null ? String(ov) : '',
+              newValue: nv !== undefined && nv !== null ? String(nv) : '',
+              editedBy: editorName,
+              editedById: editorId,
+              timestamp: nowIso,
+            });
+          }
+        });
+      }
+
+      // Build updated readings in visual order preserving nested shape
+      const updatedReadings = SLOT_KEYS.map((sk) => {
+        const row = sk === targetSlot ? incomingSlots[sk] : existingSlots[sk];
+        return {
+          id: SLOT_META[sk].id,
+          time: SLOT_META[sk].time,
+          sec200: row.sec200,
+          sec400: row.sec400,
+          finalOutlet: row.finalOutlet,
+        };
+      });
+
+      const recordData = {
+        id: existingDoc ? String(existingDoc._id) : `sewer_${Date.now()}`,
         date: payload.date,
+        plant: 'OFFSET',
+        plantCode: CANONICAL_PLANT_CODE,
+        plantName: CANONICAL_PLANT_NAME,
+        unit: CANONICAL_UNIT,
+        analysisType: CANONICAL_ANALYSIS_TYPE,
+        readings: updatedReadings,
+        lockedSlots: updatedLockedSlots,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        submittedBy: editorName,
+        submittedById: editorId,
+        submittedAt: nowIso,
+        company: companyVal,
+      };
+
+      const docUpdatePayload = {
+        plantName: CANONICAL_PLANT_NAME,
+        plantCode: CANONICAL_PLANT_CODE,
+        analysisType: CANONICAL_ANALYSIS_TYPE,
+        unit: CANONICAL_UNIT,
+        date: payload.date,
+        shift: 'Day',
         data: recordData,
         submittedBy: editorName,
         submittedById: editorId,
-        company: req.user?.company?._id || req.user?.company || null,
-        explicitRecord: savedDoc,
-        rawBody: { ...payload, ...recordData },
-        saveEventId,
-        isTestMode,
-      });
-    } catch (mailErr) {
-      console.warn('[SewerWater Email] Dispatch note:', mailErr.message);
-      emailResult = {
-        success: false,
-        emailStatus: 'failed',
-        error: mailErr.message,
+        company: companyVal,
+        savedAt: now,
+        emailStatus: 'disabled',
+        emailRecipient: null,
       };
+
+      let savedDoc = null;
+      if (existingDoc?._id) {
+        const updateFilter = {
+          _id: existingDoc._id,
+          ...(isCorrection
+            ? {
+              $or: [
+                {
+                  [`data.lockedSlots.${targetSlot}.isSaved`]: true,
+                  [`data.lockedSlots.${targetSlot}.correctionUsed`]: false,
+                  [`data.lockedSlots.${targetSlot}.isLocked`]: false,
+                },
+                {
+                  [`data.lockedSlots.${targetSlot}`]: { $exists: false },
+                  'data.isLocked': { $ne: true },
+                  'data.editCount': { $not: { $gte: 1 } },
+                },
+                {
+                  [`data.lockedSlots`]: { $exists: false },
+                  'data.isLocked': { $ne: true },
+                  'data.editCount': { $not: { $gte: 1 } },
+                },
+              ],
+            }
+            : {
+              $or: [
+                { [`data.lockedSlots.${targetSlot}.isSaved`]: { $ne: true } },
+                { [`data.lockedSlots.${targetSlot}`]: { $exists: false } },
+                { [`data.lockedSlots`]: { $exists: false } },
+              ],
+            }),
+        };
+
+        const updateRes = await PlantAnalysisRecord.updateOne(updateFilter, {
+          $set: docUpdatePayload,
+        });
+
+        if (updateRes.matchedCount === 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Conflict: This shift was locked or updated concurrently by another user.',
+          });
+        }
+        savedDoc = await PlantAnalysisRecord.findById(existingDoc._id).lean();
+      } else {
+        try {
+          const insertDoc = {
+            plantName: CANONICAL_PLANT_NAME,
+            plantCode: CANONICAL_PLANT_CODE,
+            analysisType: CANONICAL_ANALYSIS_TYPE,
+            unit: CANONICAL_UNIT,
+            date: payload.date,
+            shift: 'Day',
+            data: recordData,
+            submittedBy: editorName,
+            submittedById: editorId,
+            company: companyVal,
+            savedAt: now,
+            emailStatus: 'disabled',
+            emailRecipient: null,
+          };
+          savedDoc = await PlantAnalysisRecord.create(insertDoc);
+        } catch (insertErr) {
+          if (insertErr.code === 11000) {
+            return res.status(409).json({
+              success: false,
+              message: 'Conflict: Document for this date was created concurrently.',
+            });
+          }
+          throw insertErr;
+        }
+      }
+
+      recordData.id = String(savedDoc._id);
+      recordData._id = savedDoc._id;
+
+      return res.status(200).json({
+        success: true,
+        message: 'Sewer Water Analysis saved successfully in MongoDB ✓',
+        recordId: savedDoc._id,
+        emailStatus: 'disabled',
+        emailRecipient: null,
+        emailSent: false,
+        emailPending: false,
+        editedFields: updatedEditedFields,
+        editAuditHistory: updatedAuditHistory,
+        readings: updatedReadings,
+        lockedSlots: updatedLockedSlots,
+        data: recordData,
+      });
+    } catch (error) {
+      console.error('[SewerWater POST] Uncaught error saving data:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while processing Sewer Water analysis: ' + error.message,
+      });
     }
+  });
 
-    const isEmailDelivered = emailResult.emailSent === true || (emailResult.success === true && emailResult.emailStatus === 'sent');
-    const emailStatus = emailResult.emailStatus || (isEmailDelivered ? 'sent' : 'failed');
-    const emailRecipient = emailResult.recipient || savedDoc.emailRecipient || null;
-
+  /**
+   * @desc    Retry email notification for Sewer Water Analysis
+   * @route   POST /api/sewer-water-analysis/:id/retry-email
+   * @access  Private (Admin only)
+   */
+  router.post('/:id/retry-email', async (req, res) => {
     return res.status(200).json({
       success: true,
-      message: 'Sewer Water Analysis saved successfully in MongoDB ✓',
-      recordId: savedDoc._id,
-      emailStatus: 'disabled',
-      emailRecipient: null,
       emailSent: false,
-      emailPending: false,
-      lockedSlots,
-      editedFields,
-      editAuditHistory,
-      data: recordData,
+      emailStatus: 'disabled',
+      message: 'Email notification functionality has been removed.',
     });
-  } catch (error) {
-    console.error('Error in POST /api/sewer-water-analysis:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to save Sewer Water Analysis record: ' + error.message,
-      error: error.message,
-    });
-  }
-});
-
-/**
- * @desc    Retry email notification for a previously saved Sewer Water record
- * @route   POST /api/sewer-water-analysis/:id/retry-email
- * @access  Private
- */
-router.post('/:id/retry-email', async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    emailSent: false,
-    emailStatus: 'disabled',
-    message: 'Email notification functionality has been removed.',
   });
-});
 
-module.exports = router;
+  return router;
+}
+
+const defaultRouter = createSewerWaterRouter();
+defaultRouter.createRouter = createSewerWaterRouter;
+module.exports = defaultRouter;
