@@ -20,6 +20,7 @@ const ReportsPage = () => {
   // ── Section 1: Single Plant Management Report State ──
   const [plantId, setPlantId] = useState('');
   const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [downloadingGeneric, setDownloadingGeneric] = useState(false);
   const [singlePlantError, setSinglePlantError] = useState('');
 
@@ -90,30 +91,78 @@ const ReportsPage = () => {
       return;
     }
 
-    const targetDate = String(startDate).trim();
+    const fromDateStr = String(startDate).trim();
+    const toDateStr = endDate ? String(endDate).trim() : '';
+    const isRange = Boolean(toDateStr && toDateStr !== fromDateStr);
+
+    if (isRange) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(toDateStr)) {
+        const msg = 'Valid End Date (YYYY-MM-DD) is required';
+        setSinglePlantError(msg);
+        showToast(msg, 'error');
+        return;
+      }
+      if (fromDateStr > toDateStr) {
+        const msg = '"End Date" must be greater than or equal to "Start Date"';
+        setSinglePlantError(msg);
+        showToast(msg, 'error');
+        return;
+      }
+      const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays > 31) {
+        const msg = 'Date range cannot exceed 31 days';
+        setSinglePlantError(msg);
+        showToast(msg, 'error');
+        return;
+      }
+    }
 
     try {
       setDownloadingGeneric(true);
-      showToast(`Generating ${plantCode} Management Report for ${targetDate}...`, 'info');
 
-      const response = await api.get('/reports/generic', {
-        params: { plant: plantCode, date: targetDate },
-        responseType: 'blob',
-      });
+      if (isRange) {
+        showToast(`Generating ${plantCode} Reports from ${fromDateStr} to ${toDateStr}...`, 'info');
 
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${plantCode}_Report_${targetDate}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+        const response = await api.get('/reports/generic-range', {
+          params: { plant: plantCode, from: fromDateStr, to: toDateStr },
+          responseType: 'blob',
+        });
 
-      showToast(`${plantCode} Report downloaded successfully!`, 'success');
+        const blob = new Blob([response.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `${plantCode}_Report_${fromDateStr}_to_${toDateStr}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+        showToast(`${plantCode} Reports downloaded successfully!`, 'success');
+      } else {
+        showToast(`Generating ${plantCode} Management Report for ${fromDateStr}...`, 'info');
+
+        const response = await api.get('/reports/generic', {
+          params: { plant: plantCode, date: fromDateStr },
+          responseType: 'blob',
+        });
+
+        const blob = new Blob([response.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `${plantCode}_Report_${fromDateStr}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+        showToast(`${plantCode} Report downloaded successfully!`, 'success');
+      }
     } catch (err) {
       let errorMessage = 'Failed to download report.';
       if (err.response?.data instanceof Blob) {
@@ -300,17 +349,27 @@ const ReportsPage = () => {
             </div>
           </div>
 
-          {/* End Date (Auto-synced and disabled, Option 1A) */}
+          {/* End Date */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">End Date</label>
             <input
               type="date"
-              value={startDate}
-              disabled
-              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-100 text-slate-500 font-medium cursor-not-allowed"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                if (singlePlantError) setSinglePlantError('');
+              }}
+              min={startDate || undefined}
+              max={(() => {
+                if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return undefined;
+                const d = new Date(`${startDate}T00:00:00Z`);
+                d.setUTCDate(d.getUTCDate() + 30);
+                return d.toISOString().slice(0, 10);
+              })()}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              Single plant report is generated for one date (Start Date)
+              Leave empty or same as Start Date for a single day. Max 31 days (one workbook, separate sheets per date).
             </p>
           </div>
         </div>
