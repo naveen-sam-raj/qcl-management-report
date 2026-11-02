@@ -266,7 +266,7 @@ const CustomDonutTooltip = ({ active, payload, plantName }) => {
 };
 
 /**
- * Small percentage labels on large slices of the inner ring (>= 8% share)
+ * Small percentage labels on large slices of the inner ring (>= 4% share)
  */
 const renderInnerSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
   if (percent < 0.04) return null;
@@ -303,14 +303,6 @@ const TFLAdminDashboard = () => {
 
   // Dashboard API response data
   const [dashboardData, setDashboardData] = useState(null);
-
-  // Per-plant sorting mode: { [plantCode]: 'count' | 'outPercent' }
-  const [sortModes, setSortModes] = useState({
-    ACL: 'count',
-    SA: 'count',
-    OFFSITE: 'count',
-    CO2: 'count',
-  });
 
   const timerRef = useRef(null);
 
@@ -410,23 +402,23 @@ const TFLAdminDashboard = () => {
   };
 
   return (
-    <div className="space-y-4 animate-fadeIn pb-8">
+    <div className="space-y-2.5 animate-fadeIn pb-4 lg:pb-0">
       {/* Heading Block */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-1.5">
-          <Factory className="w-3.5 h-3.5 text-blue-600" />
+      <div className="bg-white px-4 py-3 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-1">
+          <Factory className="w-3 h-3 text-blue-600" />
           <span>TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED</span>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+        <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
           Plant Dashboard
         </h1>
-        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+        <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
           Live operational parameter status and analytics across all 4 plant units
         </p>
       </div>
 
       {/* ── 1. Top Controls Bar: Date Filter + Live Status + Refresh ── */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         {/* Date Filter Controls */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs">
@@ -527,7 +519,7 @@ const TFLAdminDashboard = () => {
       )}
 
       {/* ── 2. Grid of 4 Plant Donut Chart Panels ── */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
         {PLANT_ORDER.map((plantCode) => {
           const cfg = PLANT_CONFIG[plantCode];
           const Icon = cfg.icon;
@@ -536,46 +528,54 @@ const TFLAdminDashboard = () => {
 
           const computed = computePlantDonutData(pData, "count");
           const activeAnalyses = computed.analysesList.filter((a) => a.totalEntered > 0);
+          const hasOthers = activeAnalyses.length > 6;
+          const displayAnalyses = hasOthers ? activeAnalyses.slice(0, 6) : activeAnalyses;
+          const othersList = hasOthers ? activeAnalyses.slice(6) : [];
+          const othersCountAnalysis = othersList.length;
+          const othersCount = othersList.reduce((sum, item) => sum + item.totalEntered, 0);
+          const othersPct = computed.totalEntered > 0
+            ? parseFloat(((othersCount / computed.totalEntered) * 100).toFixed(1))
+            : 0;
 
           return (
             <div
               key={plantCode}
-              className="bg-white rounded-xl border border-slate-200/90 shadow-xs flex flex-col justify-between overflow-hidden"
+              className="bg-white rounded-xl border border-slate-200/90 shadow-xs flex flex-col justify-between overflow-hidden lg:h-[calc((100vh-220px)/2)] lg:min-h-[250px]"
             >
               {/* Card Header: Plant info + Subtitle + Date range */}
-              <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-8 h-8 rounded-lg ${cfg.bg} ${cfg.border} border flex items-center justify-center ${cfg.color} shrink-0`}>
-                    <Icon className="w-4 h-4" />
+              <div className="px-3.5 py-2 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className={`w-7 h-7 rounded-lg ${cfg.bg} ${cfg.border} border flex items-center justify-center ${cfg.color} shrink-0`}>
+                    <Icon className="w-3.5 h-3.5" />
                   </div>
-                  <div>
-                    <h2 className="font-extrabold text-sm sm:text-base text-slate-900 tracking-tight">
+                  <div className="min-w-0">
+                    <h2 className="font-extrabold text-xs sm:text-sm text-slate-900 tracking-tight truncate">
                       {cfg.name}
                     </h2>
-                    <p className="text-[11px] text-slate-500">Analysis-wise Data Entered</p>
+                    <p className="text-[10px] text-slate-500 leading-tight">Analysis-wise Data Entered</p>
                   </div>
                 </div>
 
-                <div className="text-[11px] font-medium text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200/80 shrink-0 self-start sm:self-center font-mono">
+                <div className="text-[10px] font-medium text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200/80 shrink-0 font-mono">
                   {formatDateRange(fromDate, toDate)}
                 </div>
               </div>
 
               {/* Card Content Body */}
-              <div className="p-4 flex-1 flex flex-col justify-center min-h-[340px]">
+              <div className="p-3 flex-1 flex flex-col justify-center min-h-0 overflow-hidden">
                 {loading ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-2">
-                    <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex flex-col items-center justify-center h-full min-h-[170px] text-slate-400 gap-2">
+                    <div className="w-7 h-7 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
                     <span className="text-xs font-semibold">Loading live operational data...</span>
                   </div>
                 ) : !isAccessible ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                  <div className="flex flex-col items-center justify-center h-full min-h-[170px] text-slate-400">
                     <p className="text-xs font-bold">Access Restricted</p>
                     <p className="text-[11px]">You are not authorized to view {cfg.name} analytics.</p>
                   </div>
                 ) : !pData?.hasData || computed.totalEntered === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-1.5">
-                    <Info className="w-8 h-8 text-slate-300 stroke-1" />
+                  <div className="flex flex-col items-center justify-center h-full min-h-[170px] text-slate-400 gap-1.5">
+                    <Info className="w-7 h-7 text-slate-300 stroke-1" />
                     <p className="text-xs font-bold text-slate-600">
                       No data for {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
                     </p>
@@ -584,11 +584,11 @@ const TFLAdminDashboard = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 w-full">
+                  <div className="flex flex-row items-center gap-3 sm:gap-4 w-full h-full min-h-0">
                     {/* ── Left: Single-Ring Donut Chart + Center Summary ── */}
-                    <div className="shrink-0 flex flex-col items-center justify-center self-center lg:self-start pt-2">
-                      <div className="relative flex items-center justify-center" style={{ width: 300, height: 300 }}>
-                        <ResponsiveContainer width={300} height={300}>
+                    <div className="shrink-0 flex items-center justify-center">
+                      <div className="relative flex items-center justify-center" style={{ width: 170, height: 170 }}>
+                        <ResponsiveContainer width={170} height={170}>
                           <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                             <Pie
                               data={computed.innerRingData}
@@ -596,8 +596,8 @@ const TFLAdminDashboard = () => {
                               nameKey="name"
                               cx="50%"
                               cy="50%"
-                              innerRadius={75}
-                              outerRadius={125}
+                              innerRadius={42}
+                              outerRadius={70}
                               paddingAngle={1}
                               stroke="#ffffff"
                               strokeWidth={1.5}
@@ -615,11 +615,11 @@ const TFLAdminDashboard = () => {
                         </ResponsiveContainer>
 
                         {/* Center Ring Summary */}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
-                          <span className="text-3xl font-black text-slate-900 tracking-tight leading-none">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-1">
+                          <span className="text-lg sm:text-xl font-black text-slate-900 tracking-tight leading-none">
                             {computed.totalEntered.toLocaleString()}
                           </span>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mt-0.5 leading-tight">
                             values entered
                           </span>
                         </div>
@@ -627,40 +627,49 @@ const TFLAdminDashboard = () => {
                     </div>
 
                     {/* ── Right: Legend ── */}
-                    <div className="w-full flex-1 min-w-0">
-                      <div className="pb-2 mb-2 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <div className="w-full flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="pb-1 mb-1.5 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                         <span>{activeAnalyses.length} {activeAnalyses.length === 1 ? "analysis" : "analyses"}</span>
                       </div>
-                      <div className="space-y-2">
-                        {activeAnalyses.map((a) => (
+                      <div className="space-y-1">
+                        {displayAnalyses.map((a) => (
                           <div
                             key={a.analysisType}
-                            className="flex items-center gap-2 text-xs min-w-0 py-0.5"
+                            className="flex items-center gap-1.5 text-[11px] min-w-0"
                           >
                             <span
-                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              className="w-2 h-2 rounded-full shrink-0"
                               style={{ backgroundColor: a.color }}
                             />
-                            <div className="flex items-baseline gap-1.5 min-w-0 flex-wrap">
-                              <span className="font-semibold text-slate-800 text-[12px] truncate">
+                            <div className="flex items-baseline gap-1 min-w-0 truncate">
+                              <span className="font-semibold text-slate-800 truncate">
                                 {a.title}
                               </span>
-                              <span className="text-slate-400 font-normal">-</span>
-                              <span className="text-[11px] text-slate-600 font-mono">
+                              <span className="text-slate-400 font-normal shrink-0">-</span>
+                              <span className="text-[10px] text-slate-600 font-mono shrink-0">
                                 {a.totalEntered} ({a.percentageOfPlant}%)
                               </span>
                             </div>
                           </div>
                         ))}
+                        {hasOthers && (
+                          <div className="flex items-center gap-1.5 text-[11px] min-w-0 text-slate-600">
+                            <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
+                            <div className="flex items-baseline gap-1 min-w-0 truncate">
+                              <span className="font-semibold text-slate-700 truncate">
+                                Others ({othersCountAnalysis} {othersCountAnalysis === 1 ? "analysis" : "analyses"})
+                              </span>
+                              <span className="text-slate-400 font-normal shrink-0">-</span>
+                              <span className="text-[10px] text-slate-600 font-mono shrink-0">
+                                {othersCount} ({othersPct}%)
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Card Footer */}
-              <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50 text-[10px] text-slate-400">
-                Source: Dashboard live values
               </div>
             </div>
           );
