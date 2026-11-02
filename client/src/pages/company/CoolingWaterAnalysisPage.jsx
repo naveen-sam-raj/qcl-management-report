@@ -5,47 +5,46 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
-  getTodayAsiaKolkata,
-  formatDateDisplay,
-  SaveStatusBanner,
-  SaveConfirmationModal,
-  EditedBadge,
-  retryAnalysisEmail,
   LockedDateDisplay,
   StatusSaveButton,
   RecordStatusBadge,
+  EditedBadge,
 } from '../../utils/offsetAnalysisHelper';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import {
   ArrowLeft,
-  Calendar,
-  Save,
   RotateCcw,
-  CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   ThermometerSnowflake,
   AlertCircle,
-  Lock,
 } from 'lucide-react';
 
-const emptyRow = { time: '07:00', ph: '', frc: '', cl: '', opo4: '', turbidity: '', tds: '', fe: '', sio2: '', alk: '', so4: '', th: '', cah: '', mgh: '', ammn: '' };
-const emptyRow200 = { time: '07:00', ph: '', frc: '', opo4: '', cl: '' };
+const emptyRowCW = { ph: '', frc: '', cl: '', opo4: '', turbidity: '', tds: '', fe: '', sio2: '', alk: '', so4: '', th: '', cah: '', mgh: '', ammn: '' };
+const emptyRow200 = { ph: '', frc: '', opo4: '', cl: '' };
 
 const DEFAULT_READINGS_DAY = [
-  { id: 't07', ...emptyRow, time: '07:00' },
-  { id: 't09', ...emptyRow, time: '09:00' },
-  { id: 't11', ...emptyRow, time: '11:00' },
-  { id: 't13', ...emptyRow, time: '13:00' },
-  { id: 't15', ...emptyRow, time: '15:00' },
-  { id: 't17', ...emptyRow, time: '17:00' },
+  { id: 't07', time: '07:00', ...emptyRowCW },
+  { id: 't09', time: '09:00', ...emptyRowCW },
+  { id: 't11', time: '11:00', ...emptyRowCW },
+  { id: 't13', time: '13:00', ...emptyRowCW },
+  { id: 't15', time: '15:00', ...emptyRowCW },
+  { id: 't17', time: '17:00', ...emptyRowCW },
 ];
 
 const DEFAULT_READINGS_200 = [
-  { id: 't07', ...emptyRow200, time: '07:00' },
-  { id: 't19', ...emptyRow200, time: '19:00' },
+  { id: 't07', time: '07:00', ...emptyRow200 },
+  { id: 't19', time: '19:00', ...emptyRow200 },
 ];
+
+const SLOTS_CW = ['t07', 't09', 't11', 't13', 't15', 't17'];
+const SLOTS_200 = ['t07', 't19'];
+
+const CW_NUMERIC_FIELDS = ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh'];
+const CW_ALL_FIELDS = ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh', 'ammn'];
+
+const CW200_NUMERIC_FIELDS = ['ph', 'frc', 'opo4', 'cl'];
+const CW200_ALL_FIELDS = ['ph', 'frc', 'opo4', 'cl'];
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
@@ -57,51 +56,22 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
+  const slots = is200 ? SLOTS_200 : SLOTS_CW;
+  const fields = is200 ? CW200_ALL_FIELDS : CW_ALL_FIELDS;
+  const numericFields = is200 ? CW200_NUMERIC_FIELDS : CW_NUMERIC_FIELDS;
+  const defaultReadings = is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY;
+
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
-  const [readings, setReadings] = useState(is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY);
+  const [date] = useState(() => getOperatingDateIST());
+  const [readings, setReadings] = useState(() => defaultReadings.map((r) => ({ ...r })));
+  const [originalReadings, setOriginalReadings] = useState(() => defaultReadings.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed'
   const [recordId, setRecordId] = useState(null);
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [emailStatusDetail, setEmailStatusDetail] = useState('');
-  const [initialSaved, setInitialSaved] = useState(false);
-  const [editCount, setEditCount] = useState(0);
-  const [isLocked, setIsLocked] = useState(false);
-  const [lockedShifts, setLockedShifts] = useState({
-    shift1Saved: false,
-    shift2Saved: false,
-    shift1Locked: false,
-    shift2Locked: false,
-    shift2Edits: 0,
-  });
+  const [lockedSlots, setLockedSlots] = useState({});
   const [editedFields, setEditedFields] = useState({});
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmData, setConfirmData] = useState(null);
 
-  // Sequential shift permissions for 200# / lock for Day routine
-  const isRowDisabled = useCallback((row, idx) => {
-    if (isViewOnly) return true;
-    if (!is200) return false;
-
-    const time = String(row.time || '');
-    if (idx === 0 || time === '07:00') {
-      if (lockedShifts.shift1Locked || lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1) return true;
-      return false;
-    }
-    if (idx === 1 || time === '19:00') {
-      if (!lockedShifts.shift1Saved) return true; // Waiting for Shift 1
-      if (lockedShifts.shift2Locked) return true;
-      if (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1) return true;
-      return false;
-    }
-    return false;
-  }, [isViewOnly, is200, lockedShifts]);
-
-  // Fetch existing data when date or unit changes
+  // Fetch existing data when date or is200 changes
   useEffect(() => {
     if (!date) return;
     let active = true;
@@ -112,81 +82,43 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
         const response = await api.get(`/cooling-water-analysis?date=${date}&unit=${encodeURIComponent(unitParam)}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
-
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
           }
-          if (record?.initialSaved !== undefined) {
-            setInitialSaved(Boolean(record.initialSaved));
+          if (response.data.lockedSlots || record?.lockedSlots) {
+            setLockedSlots(response.data.lockedSlots || record.lockedSlots);
+          } else {
+            setLockedSlots({});
           }
-          if (record?.editCount !== undefined) {
-            setEditCount(record.editCount);
-          }
-          if (record?.isLocked !== undefined) {
-            setIsLocked(Boolean(record.isLocked || (record.editCount >= 1)));
-          }
-          if (record?.lockedShifts) {
-            setLockedShifts(record.lockedShifts);
-          }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
+          if (response.data.editedFields || record?.editedFields) {
+            setEditedFields(response.data.editedFields || record.editedFields);
           } else {
             setEditedFields({});
           }
 
-          if (!record) {
-            setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
-          } else if (record.shifts) {
-            setReadings(record.shifts);
-          } else if (record.readings && Object.keys(record.readings).length > 0) {
-            setReadings(record.readings);
-          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            setReadings(record.data);
-          } else if (Array.isArray(record) && record.length > 0) {
-            setReadings(record);
-          } else {
-            setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
-          }
+          const fetchedReadings = response.data.readings || record?.readings || defaultReadings.map((r) => ({ ...r }));
+          setReadings(fetchedReadings);
+          setOriginalReadings(fetchedReadings);
         } else {
-          setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
-          setInitialSaved(false);
-          setEditCount(0);
-          setIsLocked(false);
-          setLockedShifts({
-            shift1Saved: false,
-            shift2Saved: false,
-            shift1Locked: false,
-            shift2Locked: false,
-            shift2Edits: 0,
-          });
+          setReadings(defaultReadings.map((r) => ({ ...r })));
+          setOriginalReadings(defaultReadings.map((r) => ({ ...r })));
+          setLockedSlots({});
           setEditedFields({});
           setRecordId(null);
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing Cooling Water data', err);
-        setReadings(is200 ? DEFAULT_READINGS_200.map((r) => ({ ...r })) : DEFAULT_READINGS_DAY.map((r) => ({ ...r })));
-        setInitialSaved(false);
-        setEditCount(0);
-        setIsLocked(false);
-        setLockedShifts({
-          shift1Saved: false,
-          shift2Saved: false,
-          shift1Locked: false,
-          shift2Locked: false,
-          shift2Edits: 0,
-        });
+        if (err.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        } else {
+          console.warn('Could not fetch existing Cooling Water data', err);
+        }
+        setReadings(defaultReadings.map((r) => ({ ...r })));
+        setOriginalReadings(defaultReadings.map((r) => ({ ...r })));
+        setLockedSlots({});
         setEditedFields({});
         setRecordId(null);
       }
@@ -212,38 +144,39 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
     });
   }, []);
 
-  const handleAddRow = () => {
-    const nextId = String(Date.now());
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        ...(is200 ? emptyRow200 : emptyRow),
-        time: is200 ? '19:00' : '19:00',
-      },
-    ]);
-  };
-
-  const handleRemoveRow = (id) => {
-    if (readings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
-    }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-  };
-
   const handleReset = () => {
-    setReadings(is200 ? DEFAULT_READINGS_200 : DEFAULT_READINGS_DAY);
+    setReadings(originalReadings.map((r) => ({ ...r })));
     setErrors({});
-    showToast?.('Values reset to defaults.', 'info');
+    showToast?.('Values reset to saved state.', 'info');
   };
 
-  // ── Save flow with confirmation modal ──
-  const initiateSave = () => {
+  const isSlotDisabled = useCallback((slotId, idx) => {
+    if (isViewOnly) return true;
+    if (lockedSlots[slotId]?.isLocked) return true;
+    if (idx > 0 && !lockedSlots[slots[idx - 1]]?.isSaved) return true;
+    return false;
+  }, [isViewOnly, lockedSlots, slots]);
+
+  const getSlotStatus = useCallback((slotId, idx) => {
+    if (lockedSlots[slotId]?.isLocked) return 'LOCKED';
+    if (idx > 0 && !lockedSlots[slots[idx - 1]]?.isSaved) return 'WAITING';
+    if (lockedSlots[slotId]?.isSaved) return 'EDITABLE';
+    return 'NEW';
+  }, [lockedSlots, slots]);
+
+  const isAllLocked = useMemo(() => {
+    return slots.length > 0 && slots.every((sk) => lockedSlots[sk]?.isLocked);
+  }, [slots, lockedSlots]);
+
+  const overallStatus = useMemo(() => {
+    if (isAllLocked) return 'locked';
+    if (slots.some((sk) => lockedSlots[sk]?.isSaved)) return 'editable';
+    return 'new';
+  }, [isAllLocked, slots, lockedSlots]);
+
+  // ── Save flow: single targetSlot submission ──
+  const handleSave = async () => {
     const newErrors = {};
-    const numericFields = is200
-      ? ['ph', 'frc', 'opo4', 'cl']
-      : ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh'];
 
     readings.forEach((r) => {
       numericFields.forEach((f) => {
@@ -265,119 +198,77 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
       return;
     }
 
-    const payload = {
-      date,
-      plant: 'OFFSET',
-      unit: is200 ? 'cooling water 200#' : 'cooling water',
-      readings,
-      submittedBy: user?.name || 'Shift Chemist',
-    };
+    // Detect which slot was entered or changed relative to originalReadings
+    const modifiedSlots = slots.filter((sk) => {
+      const current = readings.find((r) => r.id === sk) || {};
+      const orig = originalReadings.find((r) => r.id === sk) || {};
+      return fields.some((f) => {
+        const cv = current[f] !== undefined && current[f] !== null ? String(current[f]).trim() : '';
+        const ov = orig[f] !== undefined && orig[f] !== null ? String(orig[f]).trim() : '';
+        return cv !== ov;
+      });
+    });
 
-    setConfirmData(payload);
-    setShowConfirmModal(true);
-  };
+    if (modifiedSlots.length === 0) {
+      showToast?.('No changes', 'info');
+      return;
+    }
 
-  const handleConfirmSave = async () => {
-    if (!confirmData) return;
+    if (modifiedSlots.length > 1) {
+      showToast?.('Only one slot can be saved per submission.', 'warning');
+      return;
+    }
+
+    const targetSlot = modifiedSlots[0];
     setSaving(true);
-    setSavePhase('saving');
 
     try {
-      const res = await api.post('/cooling-water-analysis', confirmData);
+      const payload = {
+        date,
+        plant: 'OFFSET',
+        unit: is200 ? 'cooling water 200#' : 'cooling water',
+        targetSlot,
+        readings,
+        submittedBy: user?.name || 'Authorized Admin',
+      };
+
+      const res = await api.post('/cooling-water-analysis', payload);
 
       if (res.data?.success) {
-        setSaveSuccess(true);
-        const record = res.data.data;
-        if (record?._id || record?.id) {
-          setRecordId(record._id || record.id);
+        if (res.data.recordId) {
+          setRecordId(res.data.recordId);
         }
-        if (record?.initialSaved !== undefined) {
-          setInitialSaved(Boolean(record.initialSaved));
+        if (res.data.lockedSlots) {
+          setLockedSlots(res.data.lockedSlots);
         }
-        if (record?.editCount !== undefined) {
-          setEditCount(record.editCount);
+        if (res.data.editedFields) {
+          setEditedFields(res.data.editedFields);
         }
-        if (record?.isLocked !== undefined) {
-          setIsLocked(Boolean(record.isLocked || (record.editCount >= 1)));
-        }
-        if (record?.lockedShifts) {
-          setLockedShifts(record.lockedShifts);
-        }
-        if (record?.editedFields) {
-          setEditedFields(record.editedFields);
+        if (res.data.data?.readings) {
+          setReadings(res.data.data.readings);
+          setOriginalReadings(res.data.data.readings);
         }
 
-        const emailSuccess = res.data.emailSent || res.data.emailStatus === 'sent';
-        const operatorEmail = res.data.emailRecipient || res.data.assignedOperatorEmail || recipientEmail;
-        if (operatorEmail) setRecipientEmail(operatorEmail);
-
-        const analysisLabel = is200 ? 'Cooling Water 200#' : 'Cooling Water';
-        if (emailSuccess) {
-          setSavePhase('completed');
-          showToast?.(`${analysisLabel} Analysis saved & notification sent to ${operatorEmail || 'operator'}!`, 'success');
-        } else if (res.data.emailStatus === 'failed') {
-          setSavePhase('email_failed');
-          setEmailStatusDetail(res.data.emailError || 'SMTP Delivery Failed');
-          showToast?.(`${analysisLabel} Analysis saved to MongoDB. Email dispatch failed.`, 'warning');
+        if (res.data.noChange) {
+          showToast?.('No changes', 'info');
         } else {
-          setSavePhase('idle');
-          showToast?.(`${analysisLabel} Analysis saved to MongoDB. Email dispatch pending.`, 'info');
+          showToast?.('Saved ✓', 'success');
         }
       } else {
         showToast?.(res.data?.message || 'Error saving Cooling Water data.', 'error');
-        setSavePhase('idle');
       }
     } catch (err) {
       console.error('API save error:', err);
       const errMsg = err.response?.data?.message || 'Failed to save Cooling Water Analysis to database.';
       showToast?.(errMsg, 'error');
-      setSavePhase('idle');
     } finally {
       setSaving(false);
-      setShowConfirmModal(false);
     }
   };
 
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/cooling-water-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
-  };
-
-  const summaryItems = useMemo(() => {
-    return [
-      { label: 'Time Slots Recorded', value: readings.length },
-      { label: 'Unit', value: is200 ? 'Cooling Water 200#' : 'Cooling Water' },
-      { label: 'Latest Slot Time', value: readings[readings.length - 1]?.time || '—' },
-      { label: 'Latest pH', value: readings[readings.length - 1]?.ph || '—' },
-      { label: 'Latest FRC', value: readings[readings.length - 1]?.frc ? `${readings[readings.length - 1].frc} ppm` : '—' },
-    ];
-  }, [readings, is200]);
-
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── SAVE STATUS BANNER ── */}
-      <SaveStatusBanner
-        saveSuccess={saveSuccess}
-        savePhase={savePhase}
-        date={date}
-        analysisName={is200 ? 'Cooling Water 200# Analysis' : 'Cooling Water Analysis'}
-        recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => {
-          setSaveSuccess(false);
-          setSavePhase('idle');
-        }}
-        saving={saving}
-      />
-
-      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
+      {/* ── TOP HEADER BAR ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <button
@@ -411,20 +302,20 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
 
         {/* Action Buttons: Reset & Save */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
-          {!is200 && (
-            <div className="mr-2">
-              <RecordStatusBadge
-                status={isLocked ? 'locked' : initialSaved ? 'editable' : 'new'}
-                subLabel={isLocked ? 'Max 1 edit saved' : initialSaved ? '1 edit remaining' : 'Ready for initial entry'}
-              />
-            </div>
-          )}
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="cw-locked-date" />
+
+          <div className="mr-2">
+            <RecordStatusBadge
+              status={overallStatus}
+              subLabel={isAllLocked ? 'all slots locked' : lockedSlots[slots[0]]?.isSaved ? 'in progress' : 'first slot ready'}
+            />
+          </div>
 
           {!isViewOnly && (
             <button
               onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs"
+              disabled={saving || isAllLocked}
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-40 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Reset
@@ -434,9 +325,10 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           {!isViewOnly && (
             <StatusSaveButton
               saving={saving}
-              isLocked={is200 ? Boolean(lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) : false}
-              savePhase={savePhase}
-              onClick={initiateSave}
+              isLocked={isAllLocked}
+              savePhase="idle"
+              onClick={handleSave}
+              alwaysShowSaveText={true}
               className="px-4 py-2 text-xs"
             />
           )}
@@ -453,20 +345,8 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                 {is200 ? 'Cooling Water / 200# Shift Readings (07:00, 19:00)' : 'Cooling Water (C.W Water) Laboratory Readings'}
               </h2>
             </div>
-
-            {/* Read-Only Date Badge */}
             <LockedDateDisplay date={date} id="cw-date-display" />
           </div>
-
-          {!isViewOnly && (
-            <button
-              onClick={handleAddRow}
-              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Time Slot
-            </button>
-          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -487,16 +367,27 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                   <div>FRC</div>
                   <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
                 </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>O-PO₄</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
-                  <div>Cl</div>
-                  <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
-                </th>
-                {!is200 && (
+                {is200 ? (
                   <>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>O-PO₄</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>Cl</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                  </>
+                ) : (
+                  <>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>Cl</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
+                    <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
+                      <div>O-PO₄</div>
+                      <div className="text-[10px] font-normal text-slate-300 normal-case">ppm</div>
+                    </th>
                     <th className="py-3 px-3 min-w-[80px] text-center border-r border-slate-700">
                       <div>Turbidity</div>
                       <div className="text-[10px] font-normal text-slate-300 normal-case">NTU</div>
@@ -539,12 +430,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                     </th>
                   </>
                 )}
-                {is200 && (
-                  <th className="py-3 px-4 text-center border-r border-slate-700">STATUS</th>
-                )}
-                {!isViewOnly && (
-                  <th className="py-3 px-2 w-14 text-center">ACTION</th>
-                )}
+                <th className="py-3 px-4 text-center border-r border-slate-700">STATUS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -569,41 +455,17 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                 };
 
                 const isValid = (val, limit) => limit && val !== '' ? validateCellValue(val, limit) : { isOutOfLimit: false };
-                
+
                 const validations = {};
-                Object.keys(limits).forEach(key => {
+                Object.keys(limits).forEach((key) => {
                   validations[key] = isValid(row[key], limits[key]);
                 });
 
                 const isAmmnNil = row.ammn !== undefined && ['nil', 'n', 'ni', 'none', '-'].includes(String(row.ammn).toLowerCase().trim());
                 validations.ammn = limits.ammn && row.ammn !== '' ? (isAmmnNil ? { isOutOfLimit: false } : { isOutOfLimit: true }) : { isOutOfLimit: false };
 
-                const disabled = isRowDisabled(row, idx);
-
-                // Shift Status Badge for 200#
-                let shiftBadge = null;
-                if (is200) {
-                  const time = String(row.time || '');
-                  if (idx === 0 || time === '07:00') {
-                    if (lockedShifts.shift1Locked || lockedShifts.shift2Saved || (lockedShifts.shift1Saved && (lockedShifts.shift1Edits || 0) >= 1)) {
-                      shiftBadge = <RecordStatusBadge status="locked" />;
-                    } else if (lockedShifts.shift1Saved) {
-                      shiftBadge = <RecordStatusBadge status="editable" subLabel="1 edit left" />;
-                    } else {
-                      shiftBadge = <RecordStatusBadge status="new" />;
-                    }
-                  } else if (idx === 1 || time === '19:00') {
-                    if (!lockedShifts.shift1Saved) {
-                      shiftBadge = <RecordStatusBadge status="waiting" />;
-                    } else if (lockedShifts.shift2Locked || (lockedShifts.shift2Saved && (lockedShifts.shift2Edits || 0) >= 1)) {
-                      shiftBadge = <RecordStatusBadge status="locked" />;
-                    } else if (lockedShifts.shift2Saved) {
-                      shiftBadge = <RecordStatusBadge status="editable" subLabel="1 edit left" />;
-                    } else {
-                      shiftBadge = <RecordStatusBadge status="new" />;
-                    }
-                  }
-                }
+                const disabled = isSlotDisabled(row.id, idx);
+                const status = getSlotStatus(row.id, idx);
 
                 const renderInput = (field) => {
                   const errorMsg = errors[`${row.id}_${field}`];
@@ -615,9 +477,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                   const rowKey = row.id || row.time;
                   const isEdited = Boolean(
                     editedFields[`${rowKey}_${field}`] ||
-                    editedFields[`${row.time}_${field}`] ||
-                    (idx === 0 && editedFields[`07:00_${field}`]) ||
-                    (idx === 1 && editedFields[`19:00_${field}`])
+                    editedFields[`${row.time}_${field}`]
                   );
 
                   return (
@@ -630,15 +490,14 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                           disabled={disabled}
                           onChange={(e) => handleCellChange(row.id, field, e.target.value)}
                           placeholder={isNilLimit ? 'NIL' : '0'}
-                          className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${
-                            disabled
+                          className={`w-full text-center font-mono text-xs py-1 px-1 rounded border transition ${disabled
                               ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
-                              : (errorMsg || isOutOfLimit)
-                              ? 'border-red-500 bg-red-50'
-                              : row[field] !== '' && row[field] !== '0'
-                              ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
-                              : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
-                          }`}
+                              : errorMsg || isOutOfLimit
+                                ? 'border-red-500 bg-red-50'
+                                : row[field] !== '' && row[field] !== '0'
+                                  ? 'border-sky-300 bg-sky-50/30 font-bold text-sky-950 focus:border-blue-600'
+                                  : 'border-slate-200 bg-white text-slate-800 focus:border-blue-600'
+                            }`}
                         />
                       </div>
                       <EditedBadge isEdited={isEdited} />
@@ -656,6 +515,10 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                   );
                 };
 
+                const displayFields = is200
+                  ? ['ph', 'frc', 'opo4', 'cl']
+                  : ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh', 'ammn'];
+
                 return (
                   <tr
                     key={row.id}
@@ -665,41 +528,18 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
                       {idx + 1}
                     </td>
 
-                    <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/30">
-                      <input
-                        type="text"
-                        value={row.time}
-                        disabled={disabled}
-                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                        placeholder="HH:mm"
-                        className={`w-full text-center font-mono font-bold text-xs rounded-md py-1 px-1 transition shadow-2xs ${
-                          disabled
-                            ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'
-                            : 'bg-white border border-slate-200 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100'
-                        }`}
-                      />
+                    <td className="py-2.5 px-2 text-center border-r border-slate-100 bg-slate-50/30 font-mono font-bold text-slate-800">
+                      {row.time}
                     </td>
 
-                    {(is200 ? ['ph', 'frc', 'opo4', 'cl'] : ['ph', 'frc', 'cl', 'opo4', 'turbidity', 'tds', 'fe', 'sio2', 'alk', 'so4', 'th', 'cah', 'mgh', 'ammn']).map(renderInput)}
+                    {displayFields.map(renderInput)}
 
-                    {is200 && (
-                      <td className="py-2.5 px-4 text-center border-r border-slate-100">
-                        {shiftBadge || <span className="text-xs text-slate-400">—</span>}
-                      </td>
-                    )}
-
-                    {!isViewOnly && (
-                      <td className="py-2.5 px-2 text-center">
-                        <button
-                          onClick={() => handleRemoveRow(row.id)}
-                          disabled={readings.length <= 1 || disabled}
-                          className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-                          title="Remove row"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    )}
+                    <td className="py-2.5 px-4 text-center border-r border-slate-100">
+                      <RecordStatusBadge
+                        status={status.toLowerCase()}
+                        subLabel={status === 'EDITABLE' ? '1 edit left' : undefined}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -708,38 +548,16 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
         </div>
 
         <div className="px-5 py-3 border-t border-slate-200/80 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 font-medium">
-          <div className="flex items-center gap-3">
-            {!isViewOnly && (
-              <button
-                onClick={handleAddRow}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:text-blue-600 text-slate-600 font-semibold transition shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add Another Time Slot
-              </button>
-            )}
-            <span>{readings.length} slots recorded</span>
+          <div className="flex items-center gap-2 text-slate-400">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>One correction allowed after first save; saving the next slot/shift locks the previous one.</span>
           </div>
 
-          <div className="flex items-center gap-1.5 text-slate-400">
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>Fill limits properly</span>
+          <div className="text-slate-400">
+            <span>{readings.length} slots recorded</span>
           </div>
         </div>
       </div>
-
-      {/* ── SAVE CONFIRMATION MODAL ── */}
-      <SaveConfirmationModal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        onConfirm={handleConfirmSave}
-        saving={saving}
-        analysisName={is200 ? 'Cooling Water / 200# Analysis' : 'Cooling Water Analysis (C.W Water)'}
-        date={date}
-        shiftOrTime={readings.length ? `${readings.length} Slots` : 'Daily'}
-        summaryItems={summaryItems}
-        recipientEmail={recipientEmail}
-      />
     </div>
   );
 };
