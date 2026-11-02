@@ -6,55 +6,49 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  Calendar,
-  Save,
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   Layers,
   Droplets,
-  HelpCircle,
 } from 'lucide-react';
 import {
   getCellLimit,
   validateCellValue,
   OFFSET_DM_WATER_LIMITS,
 } from '../../services/analysisValidation';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import {
-  getTodayAsiaKolkata,
   formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
   StatusSaveButton,
-  SaveStatusBanner,
-  SaveConfirmationModal,
   EditedBadge,
-  retryAnalysisEmail,
 } from '../../utils/offsetAnalysisHelper';
 
-// ─── Centralized Limit Configs for Offset Plant → DM Water (Frequency: Day) ───
+// Centralized Limit Configs for Offset Plant -> DM Water (Frequency: Day)
 const PH_LIMIT = OFFSET_DM_WATER_LIMITS.ph;
 const COND_LIMIT = OFFSET_DM_WATER_LIMITS.cond;
 const TH_LIMIT = OFFSET_DM_WATER_LIMITS.th;
 const ALK_LIMIT = OFFSET_DM_WATER_LIMITS.alk;
 const SIO2_LIMIT = OFFSET_DM_WATER_LIMITS.sio2;
 
-// Initial empty rows for DM Water and Anion Unit (first-time opening displays '–')
+const SLOT_KEYS = ['dm_water', 'a_unit'];
+const USER_FIELDS = ['ph', 'cond', 'th', 'alk', 'sio2'];
+
 const createInitialRows = () => [
   {
     id: 'r_dm_water',
     unit: 'DM WATER',
     time: '',
-    ph: '–',
-    cond: '–',
-    th: '–',
-    alk: '–',
-    sio2: '–',
-    p: '–',
-    m: '–',
+    ph: '',
+    cond: '',
+    th: '',
+    alk: '',
+    sio2: '',
+    p: '0',
+    m: '0',
     isDefault: true,
     accent: 'blue',
   },
@@ -62,21 +56,19 @@ const createInitialRows = () => [
     id: 'r_anion_unit',
     unit: 'A.UNIT',
     time: '',
-    ph: '–',
-    cond: '–',
-    th: '–',
-    alk: '–',
-    sio2: '–',
-    p: '–',
-    m: '–',
+    ph: '',
+    cond: '',
+    th: '',
+    alk: '',
+    sio2: '',
+    p: '0',
+    m: '0',
     isDefault: true,
     accent: 'indigo',
   },
 ];
 
 const DEFAULT_ROWS = createInitialRows();
-
-const NUMERIC_FIELDS = ['ph', 'cond', 'th', 'alk', 'sio2'];
 
 const isValidInput = (val, field) => {
   if (val === '' || val === null || val === undefined || val === '–' || val === '-') return true;
@@ -87,6 +79,19 @@ const isValidInput = (val, field) => {
   return /^-?\d*\.?\d*$/.test(val);
 };
 
+function getSlotKey(row) {
+  if (!row || typeof row !== 'object') return null;
+  const idStr = String(row.id || '').trim().toLowerCase();
+  const unitStr = String(row.unit || '').trim().toLowerCase();
+  if (idStr === 'r_dm_water' || unitStr === 'dm water' || unitStr.includes('dm water')) {
+    return 'dm_water';
+  }
+  if (idStr === 'r_anion_unit' || unitStr === 'a.unit' || unitStr === 'a_unit' || unitStr.includes('anion')) {
+    return 'a_unit';
+  }
+  return null;
+}
+
 const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -95,166 +100,123 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States ──
-  // Date initialized to today in Asia/Kolkata
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  // Enforce today's operating date (06:00-06:00 IST), read-only without setter
+  const [date] = useState(() => getOperatingDateIST());
   const [readings, setReadings] = useState(() => createInitialRows());
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed' | 'save_failed'
-  const [recordId, setRecordId] = useState(null);
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [emailStatusDetail, setEmailStatusDetail] = useState('');
-  const [editedFields, setEditedFields] = useState({});
+  const [originalReadings, setOriginalReadings] = useState(() => createInitialRows());
+  const [lockedSlots, setLockedSlots] = useState({});
   const [initialSaved, setInitialSaved] = useState(false);
   const [editCount, setEditCount] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmData, setConfirmData] = useState(null);
+  const [editedFields, setEditedFields] = useState({});
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
 
-  // Fetch existing data when date changes
+  // Fetch existing data on mount
   useEffect(() => {
-    if (!date) return;
     let active = true;
-
-    // Immediately reset to initial rows on date change so stale values from another date never appear
-    setReadings(createInitialRows());
-    setEditedFields({});
-    setRecordId(null);
-    setInitialSaved(false);
-    setEditCount(0);
-    setIsLocked(false);
-    setSaveSuccess(false);
-    setSavePhase('idle');
 
     const fetchExistingData = async () => {
       try {
         const response = await api.get(`/dm-water-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
-
         if (response.data && response.data.success && response.data.data) {
-          const payloadData = response.data.data;
-          const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
-          if (record && (record._id || record.id)) {
-            setRecordId(record._id || record.id);
-          }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
-          } else {
-            setEditedFields({});
-          }
+          const rec = response.data.data;
+          const sLocked = response.data.lockedSlots || rec.lockedSlots || {};
+          setLockedSlots(sLocked);
+          setInitialSaved(Boolean(response.data.initialSaved || rec.initialSaved));
+          setEditCount(response.data.editCount ?? rec.editCount ?? 0);
+          setIsLocked(Boolean(response.data.isLocked || rec.isLocked));
+          setEditedFields(response.data.editedFields || rec.editedFields || {});
 
-          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
-          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
-
-          setInitialSaved(hasSaved);
-          setEditCount(currentEdits);
-          setIsLocked(false);
-          
-          let loadedReadings = null;
-          if (record.shifts && Array.isArray(record.shifts) && record.shifts.length > 0) {
-            loadedReadings = record.shifts;
-          } else if (record.readings && Array.isArray(record.readings) && record.readings.length > 0) {
-            loadedReadings = record.readings;
-          } else if (record.data && Array.isArray(record.data) && record.data.length > 0) {
-            loadedReadings = record.data;
-          } else if (Array.isArray(record) && record.length > 0) {
-            loadedReadings = record;
-          } else if (record.data && Array.isArray(record.data.readings) && record.data.readings.length > 0) {
-            loadedReadings = record.data.readings;
-          }
-
-          if (loadedReadings && loadedReadings.length > 0) {
-            const normalized = loadedReadings.map((r, idx) => ({
+          const loaded = rec.readings || rec.shifts || rec.rows || [];
+          if (Array.isArray(loaded) && loaded.length > 0) {
+            const normalized = loaded.map((r, idx) => ({
               ...r,
               id: r.id || (idx === 0 ? 'r_dm_water' : idx === 1 ? 'r_anion_unit' : `r_custom_${idx}`),
               unit: r.unit || (idx === 0 ? 'DM WATER' : idx === 1 ? 'A.UNIT' : `Stream ${idx + 1}`),
               time: r.time !== undefined && r.time !== null ? String(r.time) : '',
-              ph: r.ph !== undefined && r.ph !== null && r.ph !== '' && r.ph !== '–' && r.ph !== '-' ? String(r.ph) : '–',
-              cond: r.cond !== undefined && r.cond !== null && r.cond !== '' && r.cond !== '–' && r.cond !== '-' ? String(r.cond) : '–',
-              th: r.th !== undefined && r.th !== null && r.th !== '' && r.th !== '–' && r.th !== '-' ? String(r.th) : '–',
-              alk: r.alk !== undefined && r.alk !== null && r.alk !== '' && r.alk !== '–' && r.alk !== '-' ? String(r.alk) : '–',
-              sio2: r.sio2 !== undefined && r.sio2 !== null && r.sio2 !== '' && r.sio2 !== '–' && r.sio2 !== '-' ? String(r.sio2) : '–',
+              ph: r.ph === '–' || r.ph === '-' ? '' : (r.ph || ''),
+              cond: r.cond === '–' || r.cond === '-' ? '' : (r.cond || ''),
+              th: r.th === '–' || r.th === '-' ? '' : (r.th || ''),
+              alk: r.alk === '–' || r.alk === '-' ? '' : (r.alk || ''),
+              sio2: r.sio2 === '–' || r.sio2 === '-' ? '' : (r.sio2 || ''),
+              p: r.p || '0',
+              m: r.m || r.alk || '0',
               isDefault: idx < 2,
               accent: idx % 2 === 0 ? 'blue' : 'indigo',
             }));
 
-            // Keep both standard rows (DM WATER and A.UNIT) visible even if loaded data had only 1 row
             if (normalized.length === 1) {
               const firstIsDM = String(normalized[0].unit).toUpperCase().includes('DM');
               normalized.push({
                 id: firstIsDM ? 'r_anion_unit' : 'r_dm_water',
                 unit: firstIsDM ? 'A.UNIT' : 'DM WATER',
                 time: '',
-                ph: '–',
-                cond: '–',
-                th: '–',
-                alk: '–',
-                sio2: '–',
-                p: '–',
-                m: '–',
+                ph: '',
+                cond: '',
+                th: '',
+                alk: '',
+                sio2: '',
+                p: '0',
+                m: '0',
                 isDefault: true,
                 accent: firstIsDM ? 'indigo' : 'blue',
               });
             }
 
             setReadings(normalized);
+            setOriginalReadings(normalized);
           } else {
             setReadings(createInitialRows());
+            setOriginalReadings(createInitialRows());
           }
         } else {
           setReadings(createInitialRows());
-          setEditedFields({});
-          setRecordId(null);
+          setOriginalReadings(createInitialRows());
+          setLockedSlots({});
           setInitialSaved(false);
           setEditCount(0);
           setIsLocked(false);
+          setEditedFields({});
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing data', err);
+        if (err.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        } else {
+          console.warn('[DMWater GET] Fetch error note:', err.message);
+        }
         setReadings(createInitialRows());
-        setEditedFields({});
-        setRecordId(null);
+        setOriginalReadings(createInitialRows());
+        setLockedSlots({});
         setInitialSaved(false);
         setEditCount(0);
         setIsLocked(false);
+        setEditedFields({});
       }
     };
+
     fetchExistingData();
 
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, showToast]);
 
-
-  // ── Handle cell change ──
+  // Handle cell change
   const handleCellChange = useCallback((id, field, value) => {
     let cleanVal = value;
     if (typeof cleanVal === 'string' && cleanVal.includes('–')) {
-      const withoutDash = cleanVal.replace(/–/g, '');
-      if (withoutDash !== '') {
-        cleanVal = withoutDash;
-      }
+      cleanVal = cleanVal.replace(/–/g, '');
     }
-    if (NUMERIC_FIELDS.includes(field) && !isValidInput(cleanVal, field)) return;
+    if (USER_FIELDS.includes(field) && !isValidInput(cleanVal, field)) return;
 
     setReadings((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: cleanVal } : row))
     );
 
-    // Clear validation error if any
     setErrors((prev) => {
       const copy = { ...prev };
       delete copy[`${id}_${field}`];
@@ -262,58 +224,22 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     });
   }, []);
 
-  // ── Add new custom sampling row ──
-  const handleAddRow = () => {
-    const nextId = `r_custom_${Date.now()}`;
-    const nextIndex = readings.length + 1;
-    const defaultUnitName = nextIndex % 2 === 1 ? `DM WATER (${nextIndex})` : `A.UNIT (${nextIndex})`;
-
-    setReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        unit: defaultUnitName,
-        time: '',
-        ph: '–',
-        cond: '–',
-        th: '–',
-        alk: '–',
-        sio2: '–',
-        p: '–',
-        m: '–',
-        isDefault: false,
-        accent: nextIndex % 2 === 1 ? 'blue' : 'indigo',
-      },
-    ]);
-    showToast?.('Added new sampling stream row.', 'info');
-  };
-
-  // ── Remove custom row ──
-  const handleRemoveRow = (id) => {
-    if (readings.length <= 1) {
-      showToast?.('At least one analysis row is required.', 'warning');
-      return;
-    }
-    setReadings((prev) => prev.filter((r) => r.id !== id));
-    showToast?.('Row removed.', 'info');
-  };
-
-  // ── Reset ──
+  // Reset restores initial/original state for current operating date
   const handleReset = () => {
-    setReadings(createInitialRows());
-    setDate(getTodayAsiaKolkata());
+    setReadings(originalReadings.map((r) => ({ ...r })));
     setErrors({});
-    setSaveSuccess(false);
     showToast?.('Values reset to initial unentered state.', 'info');
   };
 
-  // ── Validate ──
+  // Validate numeric fields before save
   const validate = () => {
     const newErrors = {};
     let hasError = false;
 
     readings.forEach((row) => {
-      NUMERIC_FIELDS.forEach((field) => {
+      const sk = getSlotKey(row);
+      if (!sk) return;
+      USER_FIELDS.forEach((field) => {
         const val = row[field];
         if (val !== '' && val !== null && val !== undefined && val !== '–' && val !== '-') {
           if (field === 'th') {
@@ -334,53 +260,63 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     return !hasError;
   };
 
-  // ── Save Click (Opens Confirmation Modal) ──
-  const handleSaveClick = () => {
-    if (isViewOnly) return;
+  // Direct save handler
+  const handleSave = async () => {
+    if (isViewOnly || saving) return;
+
     if (!validate()) {
       showToast?.('Please correct invalid numeric entries.', 'error');
       return;
     }
 
-    const hasAnyValue = readings.some((row) =>
-      NUMERIC_FIELDS.some((field) => {
-        const v = row[field];
-        return v !== '' && v !== null && v !== undefined && v !== '–' && v !== '-';
-      })
-    );
+    // Identify changed slot
+    const diffSlots = [];
+    SLOT_KEYS.forEach((sk) => {
+      const origRow = originalReadings.find((r) => getSlotKey(r) === sk) || {};
+      const currRow = readings.find((r) => getSlotKey(r) === sk) || {};
+      let changed = false;
+      USER_FIELDS.forEach((f) => {
+        const oVal = origRow[f] === undefined || origRow[f] === null || origRow[f] === '–' || origRow[f] === '-' ? '' : String(origRow[f]).trim();
+        const cVal = currRow[f] === undefined || currRow[f] === null || currRow[f] === '–' || currRow[f] === '-' ? '' : String(currRow[f]).trim();
+        if (oVal !== cVal) {
+          changed = true;
+        }
+      });
+      if (changed) {
+        diffSlots.push(sk);
+      }
+    });
 
-    if (!hasAnyValue) {
+    if (diffSlots.length > 1) {
+      showToast?.('Only one slot can be saved per submission.', 'warning');
+      return;
+    }
+
+    let targetSlot = null;
+    if (diffSlots.length === 1) {
+      targetSlot = diffSlots[0];
+    } else {
+      const firstUnsaved = SLOT_KEYS.find((sk) => !lockedSlots[sk]?.isSaved);
+      targetSlot = firstUnsaved || SLOT_KEYS[0];
+    }
+
+    // Check target slot emptiness on user fields
+    const targetCurrRow = readings.find((r) => getSlotKey(r) === targetSlot) || {};
+    const hasAnyTargetValue = USER_FIELDS.some((f) => {
+      const v = targetCurrRow[f];
+      return v !== '' && v !== null && v !== undefined && v !== '–' && v !== '-';
+    });
+
+    const isTargetSaved = Boolean(lockedSlots[targetSlot]?.isSaved);
+    if (!hasAnyTargetValue && !isTargetSaved) {
       showToast?.('Please enter at least one analytical reading value.', 'warning');
       return;
     }
 
-    // Build summary items
-    const summaryItems = [];
-    readings.forEach((r) => {
-      if (r.ph && r.ph !== '–' && r.ph !== '-') summaryItems.push({ label: `${r.unit} pH`, value: r.ph });
-      if (r.cond && r.cond !== '–' && r.cond !== '-') summaryItems.push({ label: `${r.unit} Cond`, value: r.cond });
-      if (r.th && r.th !== '–' && r.th !== '-') summaryItems.push({ label: `${r.unit} TH`, value: r.th });
-      if (r.alk && r.alk !== '–' && r.alk !== '-') summaryItems.push({ label: `${r.unit} Alk`, value: r.alk });
-      if (r.sio2 && r.sio2 !== '–' && r.sio2 !== '-') summaryItems.push({ label: `${r.unit} SiO₂`, value: r.sio2 });
-    });
-
-    setConfirmData({
-      summaryItems,
-    });
-    setShowConfirmModal(true);
-  };
-
-  // ── Confirm Save (Submits to Backend) ──
-  const handleConfirmSave = async () => {
-    if (saving) return;
     setSaving(true);
-    setSavePhase('saving');
-    setShowConfirmModal(false);
-
     const payload = {
       date,
-      plant: 'OFFSET',
-      unit: 'DM Water',
+      targetSlot,
       readings: readings.map((r) => ({
         ...r,
         ph: r.ph === '–' || r.ph === '-' ? '' : r.ph,
@@ -389,7 +325,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         alk: r.alk === '–' || r.alk === '-' ? '' : r.alk,
         sio2: r.sio2 === '–' || r.sio2 === '-' ? '' : r.sio2,
         p: r.p !== undefined && r.p !== '' && r.p !== '–' && r.p !== '-' ? r.p : '0',
-        m: r.alk !== undefined && r.alk !== '' && r.alk !== '–' && r.alk !== '-'
+        m: (r.alk !== undefined && r.alk !== '' && r.alk !== '–' && r.alk !== '-')
           ? r.alk
           : (r.m && r.m !== '–' && r.m !== '-' ? r.m : '0'),
       })),
@@ -398,38 +334,32 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
     try {
       const response = await api.post('/dm-water-analysis', payload);
+      if (response.data?.noChange) {
+        showToast?.('No changes', 'info');
+        return;
+      }
+
       if (!response.data?.success) {
         throw new Error(response.data?.message || 'Database save not confirmed');
       }
-      setSaveSuccess(true);
+
       const savedDoc = response.data?.data;
-      if (savedDoc && (savedDoc._id || savedDoc.id)) {
-        setRecordId(savedDoc._id || savedDoc.id);
-      }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
-      }
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
+      const sLocked = response.data?.lockedSlots || savedDoc?.lockedSlots || {};
+      setLockedSlots(sLocked);
+      setInitialSaved(Boolean(response.data?.initialSaved || savedDoc?.initialSaved));
+      setEditCount(response.data?.editCount ?? savedDoc?.editCount ?? 0);
+      setIsLocked(Boolean(response.data?.isLocked || savedDoc?.isLocked));
+
+      if (response.data?.editedFields || savedDoc?.editedFields) {
+        setEditedFields(response.data.editedFields || savedDoc.editedFields);
       }
 
-      setInitialSaved(true);
-      setEditCount((prev) => prev + 1);
-      setIsLocked(false);
+      const updatedReadings = readings.map((r) => ({ ...r }));
+      setReadings(updatedReadings);
+      setOriginalReadings(updatedReadings);
 
-      const emailStatus = response.data?.emailStatus;
-      if (emailStatus === 'sent' || response.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail('Delivered to SMTP server ✓');
-        showToast?.('Saved & Emailed Successfully ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(response.data?.emailError || 'Email delivery failed');
-        showToast?.('Data saved to database. Email delivery failed: ' + (response.data?.emailError || 'Server error'), 'warning');
-      }
+      showToast?.('Saved ✓', 'success');
     } catch (err) {
-      setSavePhase('save_failed');
-      setSaveSuccess(false);
       console.error('[DMWaterAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
@@ -438,20 +368,31 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     }
   };
 
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/api/dm-water-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
+  const getSlotStatusInfo = (sk) => {
+    const s = lockedSlots[sk];
+    if (s?.isLocked) {
+      return { status: 'LOCKED', label: 'LOCKED' };
+    }
+    if (s?.isSaved && !s?.correctionUsed) {
+      return { status: 'EDITABLE', label: 'EDITABLE' };
+    }
+    if (sk === 'a_unit' && !lockedSlots.dm_water?.isSaved) {
+      return { status: 'WAITING', label: 'WAITING' };
+    }
+    return { status: 'NEW', label: 'OPEN' };
+  };
+
+  const isSlotEditable = (sk) => {
+    if (isViewOnly) return false;
+    const s = lockedSlots[sk];
+    if (s?.isLocked) return false;
+    if (sk === 'a_unit' && !lockedSlots.dm_water?.isSaved) return false;
+    return true;
   };
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
+      {/* Breadcrumb & Top Navigation */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Left: Plant Navigation + Title */}
@@ -466,7 +407,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
             </button>
 
             <div className="min-w-0">
-              {/* Breadcrumb */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
                 <Layers className="w-3.5 h-3.5 text-emerald-500" />
                 <span>OFFSET Plant</span>
@@ -482,34 +422,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-            {/* Interactive Date Picker for Date Isolation & Safe Navigation */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
-              <label
-                htmlFor="dmwater-date-picker"
-                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
-              >
-                <span>Date:</span>
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="dmwater-date-picker"
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-7 pr-2 py-1 text-xs font-semibold border rounded-md border-slate-300 bg-white text-slate-700 hover:border-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  title="Select date to view or enter DM Water analysis"
-                />
-              </div>
-              <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
-                {formatDateDisplay(date)}
-              </span>
-            </div>
+            <LockedDateDisplay date={date} badgeText="Operating Day" id="dm-locked-date" />
 
             <RecordStatusBadge
-              status={initialSaved ? 'SAVED' : 'NEW'}
-              subLabel={initialSaved ? 'saved record' : 'unsaved'}
+              status={isLocked ? 'LOCKED' : initialSaved ? 'SAVED' : 'NEW'}
+              subLabel={isLocked ? 'permanently locked' : initialSaved ? 'saved record' : 'unsaved'}
             />
 
             <button
@@ -517,7 +434,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               onClick={handleReset}
               disabled={saving}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-              title="Reset to default unentered values"
+              title="Reset to initial unentered values"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
@@ -527,9 +444,9 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               <StatusSaveButton
                 id="btn-dm-save"
                 saving={saving}
-                isLocked={false}
-                savePhase={savePhase}
-                onClick={handleSaveClick}
+                isLocked={isLocked}
+                alwaysShowSaveText={true}
+                onClick={handleSave}
                 title="Save DM Water analysis"
               />
             ) : (
@@ -541,20 +458,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
       </div>
 
-      {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
-      <SaveStatusBanner
-        saveSuccess={saveSuccess}
-        savePhase={savePhase}
-        date={date}
-        analysisName="DM Water Analysis"
-        recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => setSaveSuccess(false)}
-        saving={saving}
-      />
-
-      {/* ── Table Container ── */}
+      {/* Table Container */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {/* Table Meta Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 bg-slate-50/50">
@@ -571,18 +475,11 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition border border-blue-200 cursor-pointer shadow-2xs"
-              title="Add another sampling stream"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Stream Row</span>
-            </button>
+            <LockedDateDisplay date={date} id="dm-date-display" />
           </div>
         </div>
 
-        {/* The Table - Fully responsive: expands close to available width on desktop/large displays, horizontally scrollable on mobile/tablet */}
+        {/* The Table */}
         <div className="overflow-x-auto w-full table-responsive-container">
           <table className="w-full text-center border-collapse min-w-[900px] xl:min-w-full">
             <thead>
@@ -618,27 +515,29 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                   <div className="font-extrabold text-indigo-300">SiO₂</div>
                   <div className="text-[10px] text-slate-300 font-normal normal-case">(ppm)</div>
                 </th>
-                <th className="py-2.5 px-2 w-14 min-w-[56px] text-center">
-                  Action
+                <th className="py-2.5 px-2 w-28 min-w-[100px] text-center">
+                  Status
                 </th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-100 text-xs">
               {readings.map((row, idx) => {
-                const isDM = row.unit?.toUpperCase().includes('DM WATER');
-                const isAnion = row.unit?.toUpperCase().includes('A.UNIT');
+                const sk = getSlotKey(row);
+                const isDM = sk === 'dm_water';
+                const isAnion = sk === 'a_unit';
+                const editable = sk ? isSlotEditable(sk) : false;
+                const slotInfo = sk ? getSlotStatusInfo(sk) : { status: 'CUSTOM', label: 'LEGACY' };
 
                 return (
                   <tr
                     key={row.id}
-                    className={`transition-colors ${
-                      isDM
+                    className={`transition-colors ${isDM
                         ? 'bg-blue-50/20 hover:bg-blue-50/40'
                         : isAnion
-                        ? 'bg-indigo-50/20 hover:bg-indigo-50/40'
-                        : 'hover:bg-slate-50'
-                    }`}
+                          ? 'bg-indigo-50/20 hover:bg-indigo-50/40'
+                          : 'hover:bg-slate-50'
+                      }`}
                   >
                     {/* Index */}
                     <td className="py-2.5 px-2 text-center text-slate-400 font-semibold border-r border-slate-100 text-[11px]">
@@ -649,46 +548,25 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                     <td className="py-2.5 px-3 border-r border-slate-100 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <div
-                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                            isDM
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${isDM
                               ? 'bg-blue-600'
                               : isAnion
-                              ? 'bg-indigo-600'
-                              : 'bg-emerald-500'
-                          }`}
+                                ? 'bg-indigo-600'
+                                : 'bg-emerald-500'
+                            }`}
                         />
-                        {row.isDefault ? (
-                          <div className="font-extrabold text-slate-900 tracking-wide text-xs text-center">
-                            {row.unit}
-                            <div className="text-[10px] text-slate-400 font-medium">
-                              {isDM ? 'Demineralized Water' : 'Anion Exchange Unit'}
-                            </div>
+                        <div className="font-extrabold text-slate-900 tracking-wide text-xs text-center">
+                          {row.unit}
+                          <div className="text-[10px] text-slate-400 font-medium">
+                            {isDM ? 'Demineralized Water' : isAnion ? 'Anion Exchange Unit' : 'Legacy Stream'}
                           </div>
-                        ) : (
-                          <input
-                            type="text"
-                            value={row.unit}
-                            onChange={(e) => handleCellChange(row.id, 'unit', e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 font-bold text-slate-800 text-xs text-center focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            placeholder="Unit Name"
-                          />
-                        )}
+                        </div>
                       </div>
                     </td>
 
-                    {/* Time Input */}
-                    <td className="py-2.5 px-2 border-r border-slate-100 text-center">
-                      <input
-                        type="time"
-                        value={row.time}
-                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                        placeholder="HH:mm"
-                        className={`w-full text-center font-bold text-xs py-1 px-1.5 rounded-md border transition ${
-                          row.time && isDM
-                            ? 'bg-amber-50 border-amber-300 text-amber-950 font-black'
-                            : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400'
-                        } focus:outline-none focus:ring-1 focus:ring-blue-500`}
-                      />
+                    {/* Time (Read-only) */}
+                    <td className="py-2.5 px-2 border-r border-slate-100 text-center font-mono font-bold text-slate-700 bg-slate-50/40">
+                      {row.time || '–'}
                     </td>
 
                     {/* 1. pH: Direct Valid Range 7.0 – 9.5 */}
@@ -707,25 +585,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.ph}
+                                disabled={!editable}
                                 onChange={(e) => handleCellChange(row.id, 'ph', e.target.value)}
-                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="7.0 – 9.5"
-                                title={
-                                  hasVal
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${row.ph} (Direct Valid Range: 7.0 – 9.5)`
-                                      : `NORMAL: ${row.ph} (Direct Valid Range: 7.0 – 9.5)`
-                                    : 'Direct Valid Range: 7.0 – 9.5'
-                                }
-                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_ph`]
-                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                    : hasVal && isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
-                                    : hasVal && isNormal
-                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
-                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
-                                }`}
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${!editable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_ph`]
+                                      ? 'border-red-400 bg-red-50 text-red-700'
+                                      : hasVal && isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                        : hasVal && isNormal
+                                          ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                          : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+                                  }`}
                               />
                               {hasVal && isOutOfLimit && (
                                 <span
@@ -736,8 +608,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 </span>
                               )}
                             </div>
-
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">7.0 – 9.5</span>
                               {hasVal && (
@@ -752,6 +622,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 ) : null
                               )}
                             </div>
+                            <EditedBadge isEdited={editedFields[`${row.id}_ph`] || editedFields[`${row.unit}_ph`] || editedFields[`${sk}_ph`]} />
                             {errors[`${row.id}_ph`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_ph`]}
@@ -778,25 +649,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.cond}
+                                disabled={!editable}
                                 onChange={(e) => handleCellChange(row.id, 'cond', e.target.value)}
-                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="5 – 15"
-                                title={
-                                  hasVal
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${row.cond} umho/cm (Valid: 5 – 15 umho/cm)`
-                                      : `NORMAL: ${row.cond} umho/cm (Valid: 5 – 15 umho/cm)`
-                                    : 'Valid Range: 5 – 15 umho/cm'
-                                }
-                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_cond`]
-                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                    : hasVal && isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
-                                    : hasVal && isNormal
-                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
-                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100'
-                                }`}
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${!editable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_cond`]
+                                      ? 'border-red-400 bg-red-50 text-red-700'
+                                      : hasVal && isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                        : hasVal && isNormal
+                                          ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                          : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100'
+                                  }`}
                               />
                               {hasVal && isOutOfLimit && (
                                 <span
@@ -807,8 +672,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 </span>
                               )}
                             </div>
-
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">5 – 15 umho/cm</span>
                               {hasVal && (
@@ -823,6 +686,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 ) : null
                               )}
                             </div>
+                            <EditedBadge isEdited={editedFields[`${row.id}_cond`] || editedFields[`${row.unit}_cond`] || editedFields[`${sk}_cond`]} />
                             {errors[`${row.id}_cond`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_cond`]}
@@ -833,7 +697,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 3. TH: Limit Nil (Keep input field available, treat Nil exactly as provided) */}
+                    {/* 3. TH: Limit Nil */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
                         const hasVal = row.th !== '' && row.th !== null && row.th !== undefined && row.th !== '–' && row.th !== '-';
@@ -844,22 +708,22 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                               id={`dm-water-input-${row.id}-th`}
                               type="text"
                               value={row.th}
+                              disabled={!editable}
                               onChange={(e) => handleCellChange(row.id, 'th', e.target.value)}
-                              onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                               placeholder="Nil"
-                              title="Limit: Nil"
-                              className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                errors[`${row.id}_th`]
-                                  ? 'border-red-400 bg-red-50 text-red-700'
-                                  : hasVal
-                                  ? 'border-slate-300 bg-white text-slate-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
-                                  : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
-                              }`}
+                              className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${!editable
+                                  ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                  : errors[`${row.id}_th`]
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : hasVal
+                                      ? 'border-slate-300 bg-white text-slate-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
+                                      : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-100'
+                                }`}
                             />
-                            {/* Display Limit: Nil near input */}
                             <div className="flex items-center justify-center gap-1 w-full text-[10px] leading-tight">
                               <span className="text-slate-400 font-medium">Limit: Nil</span>
                             </div>
+                            <EditedBadge isEdited={editedFields[`${row.id}_th`] || editedFields[`${row.unit}_th`] || editedFields[`${sk}_th`]} />
                             {errors[`${row.id}_th`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_th`]}
@@ -886,25 +750,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.alk}
+                                disabled={!editable}
                                 onChange={(e) => handleCellChange(row.id, 'alk', e.target.value)}
-                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="1 – 9"
-                                title={
-                                  hasVal
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${row.alk} ppm (Valid: 1 – 9 ppm)`
-                                      : `NORMAL: ${row.alk} ppm (Valid: 1 – 9 ppm)`
-                                    : 'Valid Range: 1 – 9 ppm'
-                                }
-                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_alk`]
-                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                    : hasVal && isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
-                                    : hasVal && isNormal
-                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
-                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
-                                }`}
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${!editable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_alk`]
+                                      ? 'border-red-400 bg-red-50 text-red-700'
+                                      : hasVal && isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                        : hasVal && isNormal
+                                          ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                          : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
+                                  }`}
                               />
                               {hasVal && isOutOfLimit && (
                                 <span
@@ -915,8 +773,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 </span>
                               )}
                             </div>
-
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">1 – 9 ppm</span>
                               {hasVal && (
@@ -931,6 +787,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 ) : null
                               )}
                             </div>
+                            <EditedBadge isEdited={editedFields[`${row.id}_alk`] || editedFields[`${row.unit}_alk`] || editedFields[`${sk}_alk`]} />
                             {errors[`${row.id}_alk`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_alk`]}
@@ -941,7 +798,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 5. SiO2: Reference 0.20 ppm, Tolerance ±5 (Preserved exactly as given) */}
+                    {/* 5. SiO2: Reference 0.20 ppm, Tolerance ±5 */}
                     <td className="py-2 px-2.5 border-r border-slate-100 align-top text-center">
                       {(() => {
                         const valRes = validateCellValue(row.sio2 === '–' ? '' : row.sio2, SIO2_LIMIT);
@@ -957,25 +814,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.sio2}
+                                disabled={!editable}
                                 onChange={(e) => handleCellChange(row.id, 'sio2', e.target.value)}
-                                onFocus={(e) => { if (e.target.value === '–') e.target.select(); }}
                                 placeholder="0.20 ± 5"
-                                title={
-                                  hasVal
-                                    ? isOutOfLimit
-                                      ? `OUT OF LIMIT: ${row.sio2} ppm (Valid: 0.20 ± 5 ppm)`
-                                      : `NORMAL: ${row.sio2} ppm (Valid: 0.20 ± 5 ppm)`
-                                    : 'Valid Reference: 0.20 ppm ±5'
-                                }
-                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_sio2`]
-                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                    : hasVal && isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
-                                    : hasVal && isNormal
-                                    ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
-                                    : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'
-                                }`}
+                                className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${!editable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_sio2`]
+                                      ? 'border-red-400 bg-red-50 text-red-700'
+                                      : hasVal && isOutOfLimit
+                                        ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
+                                        : hasVal && isNormal
+                                          ? 'border-emerald-400 bg-emerald-50/50 text-emerald-950 font-bold focus:ring-2 focus:ring-emerald-200'
+                                          : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'
+                                  }`}
                               />
                               {hasVal && isOutOfLimit && (
                                 <span
@@ -986,8 +837,6 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 </span>
                               )}
                             </div>
-
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">0.20 ± 5 ppm</span>
                               {hasVal && (
@@ -1002,7 +851,7 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                                 ) : null
                               )}
                             </div>
-                            <EditedBadge isEdited={editedFields[`${row.id}_sio2`] || editedFields[`${row.unit}_sio2`]} />
+                            <EditedBadge isEdited={editedFields[`${row.id}_sio2`] || editedFields[`${row.unit}_sio2`] || editedFields[`${sk}_sio2`]} />
                             {errors[`${row.id}_sio2`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
                                 {errors[`${row.id}_sio2`]}
@@ -1013,20 +862,12 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* Action */}
+                    {/* Status */}
                     <td className="py-2.5 px-2 text-center align-top">
-                      {!row.isDefault ? (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRow(row.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
-                          title="Delete stream row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      ) : (
-                        <span className="text-[10px] text-slate-300 font-bold block pt-1">Standard</span>
-                      )}
+                      <RecordStatusBadge
+                        status={slotInfo.status}
+                        subLabel={slotInfo.label}
+                      />
                     </td>
                   </tr>
                 );
@@ -1036,29 +877,19 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
 
         {/* Footer Summary */}
-        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-700">Total Stream Rows: {readings.length}</span>
             <span>•</span>
             <span className="text-slate-500">Frequency: <strong className="text-slate-700">Day</strong></span>
             <span>•</span>
             <span>Click any cell to edit numeric values</span>
           </div>
+          <div className="text-[11px] text-slate-500 font-medium italic">
+            One correction allowed after first save; saving the next slot/shift locks the previous one.
+          </div>
         </div>
       </div>
-
-      {/* ── Save Confirmation Modal ── */}
-      <SaveConfirmationModal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        onConfirm={handleConfirmSave}
-        saving={saving}
-        analysisName="DM Water Analysis"
-        date={date}
-        shiftOrTime="Daily Frequency"
-        summaryItems={confirmData?.summaryItems || []}
-        recipientEmail={recipientEmail}
-      />
     </div>
   );
 };
