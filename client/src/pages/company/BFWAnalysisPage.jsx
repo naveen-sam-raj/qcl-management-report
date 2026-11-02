@@ -6,13 +6,9 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  Calendar,
-  Save,
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Trash2,
   Clock,
   Droplets,
   Flame,
@@ -23,21 +19,16 @@ import {
   OFFSET_SHS_LIMITS,
 } from '../../services/analysisValidation';
 import {
-  getTodayAsiaKolkata,
-  formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
   StatusSaveButton,
-  SaveStatusBanner,
-  SaveConfirmationModal,
   EditedBadge,
-  retryAnalysisEmail,
 } from '../../utils/offsetAnalysisHelper';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
-// Default initial readings with empty measurement fields
 const DEFAULT_BFW_READINGS = [
   {
-    id: 'bfw_1',
+    id: 'r1',
     stream: 'Boiler Feed Water (BFW)',
     frequency: 'Day',
     time: '15:00',
@@ -53,7 +44,7 @@ const DEFAULT_BFW_READINGS = [
 
 const DEFAULT_SHS_READINGS = [
   {
-    id: 'shs_1',
+    id: 'r2',
     stream: 'Super Heated Steam (SHS)',
     frequency: 'Day',
     time: '15:00',
@@ -73,7 +64,7 @@ const isValidInput = (val, field) => {
   if (val === '' || val === null || val === undefined) return true;
   if (field === 'th') {
     const s = String(val).toLowerCase();
-    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-') return true;
+    if (s === 'nil' || s === 'n' || s === 'ni' || s === 'none' || s === '-' || s === '–') return true;
   }
   return /^-?\d*\.?\d*$/.test(val);
 };
@@ -86,26 +77,21 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── Active Selected Option (BFW or SHS - Separate Selectable Options) ──
-  const [selectedOption, setSelectedOption] = useState('bfw'); // 'bfw' | 'shs'
+  // Active Selected Option ('bfw' | 'shs')
+  const [selectedOption, setSelectedOption] = useState('bfw');
 
-  // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  // States
+  const [date] = useState(() => getOperatingDateIST());
   const [bfwReadings, setBfwReadings] = useState(() => DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
   const [shsReadings, setShsReadings] = useState(() => DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savePhase, setSavePhase] = useState('idle'); // 'idle' | 'saving' | 'completed'  | 'email_failed' | 'save_failed'
   const [recordId, setRecordId] = useState(null);
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [emailStatusDetail, setEmailStatusDetail] = useState('');
   const [editedFields, setEditedFields] = useState({});
-  const [initialSaved, setInitialSaved] = useState(false);
-  const [editCount, setEditCount] = useState(0);
-  const [isLocked, setIsLocked] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmData, setConfirmData] = useState(null);
+  const [lockedSlots, setLockedSlots] = useState({
+    bfw: { isSaved: false, isLocked: false, correctionUsed: false },
+    shs: { isSaved: false, isLocked: false, correctionUsed: false },
+  });
 
   // Active configuration based on selected option
   const isBfwSelected = selectedOption === 'bfw';
@@ -113,6 +99,44 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const activeOptionLabel = isBfwSelected ? 'Boiler Feed Water (BFW)' : 'Super Heated Steam (SHS)';
   const activeReadings = isBfwSelected ? bfwReadings : shsReadings;
   const setActiveReadings = isBfwSelected ? setBfwReadings : setShsReadings;
+
+  const activeSlotLock = lockedSlots[selectedOption] || {};
+  const isSlotLocked = Boolean(activeSlotLock.isLocked);
+
+  let badgeStatus = 'WAITING';
+  if (selectedOption === 'bfw') {
+    if (!activeSlotLock.isSaved) badgeStatus = 'NEW';
+    else if (activeSlotLock.isLocked) badgeStatus = 'LOCKED';
+    else badgeStatus = 'EDITABLE';
+  } else {
+    const bfwLock = lockedSlots.bfw || {};
+    if (!activeSlotLock.isSaved) {
+      badgeStatus = bfwLock.isSaved ? 'NEW' : 'WAITING';
+    } else if (activeSlotLock.isLocked) {
+      badgeStatus = 'LOCKED';
+    } else {
+      badgeStatus = 'EDITABLE';
+    }
+  }
+
+  const isEditable = !isViewOnly && badgeStatus !== 'LOCKED' && badgeStatus !== 'WAITING';
+
+  const hydrateReadings = (rawReadings) => {
+    if (!Array.isArray(rawReadings) || rawReadings.length === 0) return;
+    const bfw = rawReadings.find((r) => {
+      const idStr = String(r?.id || '').toLowerCase();
+      const sStr = String(r?.stream || '').toLowerCase();
+      return idStr === 'r1' || idStr === 'bfw_1' || sStr.includes('boiler') || sStr.includes('bfw');
+    });
+    const shs = rawReadings.find((r) => {
+      const idStr = String(r?.id || '').toLowerCase();
+      const sStr = String(r?.stream || '').toLowerCase();
+      return idStr === 'r2' || idStr === 'shs_1' || sStr.includes('super') || sStr.includes('shs');
+    });
+
+    if (bfw) setBfwReadings([{ ...bfw }]);
+    if (shs) setShsReadings([{ ...shs }]);
+  };
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -124,46 +148,25 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         const response = await api.get(`/bfw-analysis?date=${date}`);
         if (!active) return;
 
-        if (response.data?.assignedOperatorEmail || response.data?.emailRecipient) {
-          setRecipientEmail(response.data.emailRecipient || response.data.assignedOperatorEmail);
-        }
-        if (response.data?.emailStatus) {
-          if (response.data.emailStatus === 'sent') setSavePhase('completed');
-          else if (response.data.emailStatus === 'failed') setSavePhase('email_failed');
-          else setSavePhase('idle');
-        }
-
         if (response.data && response.data.success && response.data.data) {
           const payloadData = response.data.data;
           const record = Array.isArray(payloadData) ? payloadData[0] : payloadData;
           if (record && (record._id || record.id)) {
             setRecordId(record._id || record.id);
           }
-          if (record?.editedFields) {
-            setEditedFields(record.editedFields);
+          if (response.data?.editedFields || record?.editedFields) {
+            setEditedFields(response.data.editedFields || record.editedFields);
           } else {
             setEditedFields({});
           }
 
-          const hasSaved = Boolean(record?.initialSaved || record?.data?.initialSaved || record?._id || record?.id);
-          const currentEdits = record?.editCount ?? record?.data?.editCount ?? 0;
-          const lockStatus = Boolean(record?.isLocked || record?.data?.isLocked || currentEdits >= 1);
-
-          setInitialSaved(hasSaved);
-          setEditCount(currentEdits);
-          setIsLocked(lockStatus);
+          if (response.data?.lockedSlots || record?.lockedSlots) {
+            setLockedSlots(response.data.lockedSlots || record.lockedSlots);
+          }
 
           const rawReadings = record?.readings || record?.data?.readings || record?.shifts || [];
           if (Array.isArray(rawReadings) && rawReadings.length > 0) {
-            const bfw = rawReadings.filter((r) =>
-              String(r.stream || '').toLowerCase().includes('boiler') || String(r.stream || '').toLowerCase().includes('bfw')
-            );
-            const shs = rawReadings.filter((r) =>
-              String(r.stream || '').toLowerCase().includes('super') || String(r.stream || '').toLowerCase().includes('shs')
-            );
-
-            setBfwReadings(bfw.length > 0 ? bfw : DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
-            setShsReadings(shs.length > 0 ? shs : DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
+            hydrateReadings(rawReadings);
           } else {
             setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
             setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
@@ -171,20 +174,21 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         } else {
           setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
           setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
-          setInitialSaved(false);
-          setEditCount(0);
-          setIsLocked(false);
           setEditedFields({});
           setRecordId(null);
+          if (response.data?.lockedSlots) {
+            setLockedSlots(response.data.lockedSlots);
+          }
         }
       } catch (err) {
         if (!active) return;
-        console.warn('Could not fetch existing BFW data', err);
+        if (err.response?.status === 403) {
+          showToast?.('Access restricted to admins.', 'error');
+        } else {
+          console.warn('Could not fetch existing BFW data', err);
+        }
         setBfwReadings(DEFAULT_BFW_READINGS.map((r) => ({ ...r })));
         setShsReadings(DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
-        setInitialSaved(false);
-        setEditCount(0);
-        setIsLocked(false);
         setEditedFields({});
         setRecordId(null);
       }
@@ -194,198 +198,148 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, showToast]);
 
-  // ── Handle cell change ──
-  const handleCellChange = useCallback((id, field, value) => {
-    if ((NUMERIC_FIELDS.includes(field) || field === 'th') && !isValidInput(value, field)) return;
+  // Handle cell change
+  const handleCellChange = useCallback(
+    (id, field, value) => {
+      if ((NUMERIC_FIELDS.includes(field) || field === 'th') && !isValidInput(value, field)) return;
 
-    setActiveReadings((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        const updated = { ...r, [field]: value };
-        if (field === 'alk') {
-          updated.tAlk = value;
-        } else if (field === 'tAlk') {
-          updated.alk = value;
-        }
-        return updated;
-      })
-    );
+      setActiveReadings((prev) =>
+        prev.map((r) => {
+          if (r.id !== id) return r;
+          const updated = { ...r, [field]: value };
+          if (field === 'alk') {
+            updated.tAlk = value;
+          } else if (field === 'tAlk') {
+            updated.alk = value;
+          }
+          return updated;
+        })
+      );
 
-    // Clear error for this field
-    setErrors((prev) => {
-      const copy = { ...prev };
-      delete copy[`${id}_${field}`];
-      return copy;
-    });
-  }, [setActiveReadings]);
+      setErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[`${id}_${field}`];
+        return copy;
+      });
+    },
+    [setActiveReadings]
+  );
 
-  // ── Add new reading row ──
-  const handleAddRow = () => {
-    const nextId = `${selectedOption}_${Date.now()}`;
-    const defaultStream = isBfwSelected
-      ? `Boiler Feed Water (BFW) - #${activeReadings.length + 1}`
-      : `Super Heated Steam (SHS) - #${activeReadings.length + 1}`;
-
-    setActiveReadings((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        stream: defaultStream,
-        frequency: 'Day',
-        time: '15:00',
-        ph: '',
-        cond: '',
-        th: '',
-        alk: '',
-        tAlk: '',
-        sio2: '',
-        fe2o3: '',
-      },
-    ]);
-    showToast?.(`Added new sampling row for ${activeOptionLabel}.`, 'info');
-  };
-
-  // ── Remove reading row ──
-  const handleRemoveRow = (id) => {
-    if (activeReadings.length <= 1) {
-      showToast?.('At least one reading row is required.', 'warning');
-      return;
-    }
-    setActiveReadings((prev) => prev.filter((r) => r.id !== id));
-    showToast?.('Row removed.', 'info');
-  };
-
-  // ── Reset ──
+  // Reset active option fields
   const handleReset = () => {
+    if (isSlotLocked) return;
     if (isBfwSelected) {
-      setBfwReadings(DEFAULT_BFW_READINGS);
+      setBfwReadings((prev) => [
+        {
+          id: prev[0]?.id || 'r1',
+          stream: 'Boiler Feed Water (BFW)',
+          frequency: 'Day',
+          time: '15:00',
+          ph: '',
+          cond: '',
+          th: '',
+          alk: '',
+          tAlk: '',
+          sio2: '',
+          fe2o3: '',
+        },
+      ]);
       showToast?.('BFW values reset to defaults.', 'info');
     } else {
-      setShsReadings(DEFAULT_SHS_READINGS);
+      setShsReadings((prev) => [
+        {
+          id: prev[0]?.id || 'r2',
+          stream: 'Super Heated Steam (SHS)',
+          frequency: 'Day',
+          time: '15:00',
+          ph: '',
+          cond: '',
+          th: '',
+          alk: '',
+          tAlk: '',
+          sio2: '',
+          fe2o3: '',
+        },
+      ]);
       showToast?.('SHS values reset to defaults.', 'info');
     }
-    setDate(getTodayAsiaKolkata());
     setErrors({});
-    setSaveSuccess(false);
   };
 
-  // ── Save Click (Opens Confirmation Modal) ──
-  const handleSaveClick = () => {
-    if (isViewOnly) return;
-    const newErrors = {};
-    const allReadings = [...bfwReadings, ...shsReadings];
+  // Save active slot
+  const handleSave = async () => {
+    if (isViewOnly || saving || !isEditable) return;
 
-    allReadings.forEach((r) => {
-      if (r.th !== '' && r.th !== null && r.th !== undefined) {
-        const s = String(r.th).trim().toLowerCase();
-        if (s !== 'nil' && s !== 'n' && s !== 'none' && s !== '-' && isNaN(Number(r.th))) {
-          newErrors[`${r.id}_th`] = 'Invalid';
+    const currentErrors = {};
+    const targetRow = isBfwSelected ? bfwReadings[0] : shsReadings[0];
+    if (!targetRow) return;
+
+    if (targetRow.th !== '' && targetRow.th !== null && targetRow.th !== undefined) {
+      const s = String(targetRow.th).trim().toLowerCase();
+      if (s !== 'nil' && s !== 'n' && s !== 'none' && s !== '-' && s !== '–' && isNaN(Number(targetRow.th))) {
+        currentErrors[`${targetRow.id}_th`] = 'Invalid';
+      }
+    }
+
+    NUMERIC_FIELDS.forEach((f) => {
+      const val = targetRow[f];
+      if (val !== '' && val !== null && val !== undefined) {
+        const norm = String(val).trim();
+        if (norm !== '' && norm !== '-' && norm !== '–' && isNaN(Number(norm))) {
+          currentErrors[`${targetRow.id}_${f}`] = 'Invalid';
         }
       }
-
-      ['ph', 'cond', 'alk', 'sio2'].forEach((f) => {
-        const val = r[f];
-        if (val !== '' && val !== null && val !== undefined && isNaN(Number(val))) {
-          newErrors[`${r.id}_${f}`] = 'Invalid';
-        }
-      });
     });
 
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (Object.keys(currentErrors).length > 0) {
+      setErrors(currentErrors);
       showToast?.('Please check and fix highlighted cell errors.', 'error');
       return;
     }
 
-    const summaryItems = [];
-    allReadings.forEach((r) => {
-      if (r.ph) summaryItems.push({ label: `${r.stream} pH`, value: r.ph });
-      if (r.cond) summaryItems.push({ label: `${r.stream} Cond`, value: r.cond });
-      if (r.th) summaryItems.push({ label: `${r.stream} TH`, value: r.th });
-      if (r.alk) summaryItems.push({ label: `${r.stream} Alk`, value: r.alk });
-      if (r.sio2) summaryItems.push({ label: `${r.stream} SiO₂`, value: r.sio2 });
-    });
-
-    setConfirmData({
-      summaryItems,
-    });
-    setShowConfirmModal(true);
-  };
-
-  // ── Confirm Save (Submits to Backend) ──
-  const handleConfirmSave = async () => {
-    if (saving) return;
     setSaving(true);
-    setSavePhase('saving');
-    setShowConfirmModal(false);
-
-    const allReadings = [...bfwReadings, ...shsReadings];
     try {
       const payload = {
         date,
-        plant: 'OFFSET',
-        unit: 'BFW',
-        analysisType: 'Boiler Feed Water / Super Heated Steam Analysis',
-        readings: allReadings.map((r) => ({
-          ...r,
-          alk: r.alk || r.tAlk || '',
-          tAlk: r.tAlk || r.alk || '',
-        })),
+        targetSlot: selectedOption,
+        readings: [
+          {
+            ...targetRow,
+            alk: targetRow.alk || targetRow.tAlk || '',
+            tAlk: targetRow.alk || targetRow.tAlk || '',
+          },
+        ],
         submittedBy: user?.name || 'Shift Chemist',
       };
 
       const res = await api.post('/bfw-analysis', payload);
-      setSaveSuccess(true);
-      const savedDoc = res.data?.data;
-      if (savedDoc && (savedDoc._id || savedDoc.id)) {
-        setRecordId(savedDoc._id || savedDoc.id);
-      }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
-      }
-      if (res.data?.emailRecipient) {
-        setRecipientEmail(res.data.emailRecipient);
-      }
-
-      // Update one-time edit state
-      const nextEdits = initialSaved ? editCount + 1 : 0;
-      setInitialSaved(true);
-      setEditCount(nextEdits);
-      if (initialSaved || nextEdits >= 1) {
-        setIsLocked(true);
-      }
-
-      const emailStatus = res.data?.emailStatus;
-      if (emailStatus === 'sent' || res.data?.emailSent) {
-        setSavePhase('completed');
-        setEmailStatusDetail('Delivered to SMTP server ✓');
-        showToast?.('Saved & Emailed Successfully ✓', 'success');
+      if (res.data?.noChange) {
+        showToast?.('No changes', 'info');
       } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(res.data?.emailError || 'Email delivery failed');
-        showToast?.('Data saved to database. Email delivery failed: ' + (res.data?.emailError || 'Server error'), 'warning');
+        showToast?.('Saved ✓', 'success');
+      }
+
+      if (res.data?.lockedSlots) {
+        setLockedSlots(res.data.lockedSlots);
+      }
+      if (res.data?.editedFields) {
+        setEditedFields(res.data.editedFields);
+      }
+      if (res.data?.recordId) {
+        setRecordId(res.data.recordId);
+      }
+      if (res.data?.data?.readings) {
+        hydrateReadings(res.data.data.readings);
       }
     } catch (err) {
-      setSavePhase('save_failed');
       console.error('[BFWAnalysis] Save error:', err);
       const serverMessage = err.response?.data?.message || err.message;
       showToast?.('Save Error: ' + serverMessage, 'error');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleRetryEmail = () => {
-    retryAnalysisEmail({
-      endpoint: '/api/bfw-analysis',
-      recordId,
-      setSavePhase,
-      setEmailStatusDetail,
-      showToast,
-      setSaving,
-    });
   };
 
   return (
@@ -426,19 +380,19 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
 
-        {/* Action Buttons: Reset & Save */}
+        {/* Action Buttons: StatusBadge, Reset & StatusSaveButton */}
         <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          <LockedDateDisplay date={date} id="bfw-locked-date" />
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="bfw-locked-date" />
 
           <RecordStatusBadge
-            status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
-            subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+            status={badgeStatus}
+            subLabel={isSlotLocked ? 'permanently locked' : activeSlotLock.isSaved ? '1 correction available' : 'initial entry'}
           />
 
           <button
             onClick={handleReset}
-            disabled={saving || isLocked}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+            disabled={saving || !isEditable}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
             Reset
@@ -448,10 +402,10 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
             <StatusSaveButton
               id="btn-bfw-save"
               saving={saving}
-              isLocked={isLocked}
-              savePhase={savePhase}
-              onClick={handleSaveClick}
-              title="Save Boiler Feed Water / Super Heated Steam analysis"
+              isLocked={!isEditable}
+              onClick={handleSave}
+              alwaysShowSaveText={true}
+              title={`Save ${activeOptionLabel} analysis`}
             />
           ) : (
             <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
@@ -461,21 +415,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
         </div>
       </div>
 
-      {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
-      <SaveStatusBanner
-        saveSuccess={saveSuccess}
-        savePhase={savePhase}
-        date={date}
-        analysisName="Boiler Feed Water / Super Heated Steam Analysis"
-        recipientEmail={recipientEmail}
-        emailStatusDetail={emailStatusDetail}
-        onRetryEmail={handleRetryEmail}
-        onDismiss={() => setSaveSuccess(false)}
-        saving={saving}
-      />
-
       {/* ── SEPARATE SELECTABLE OPTIONS SWITCHER ── */}
-      {/* Kept under the SAME option/selection area as TWO distinct selectable options */}
       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1 shrink-0">
@@ -499,7 +439,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                 isBfwSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-200 text-slate-600'
               }`}
             >
-              Frequency: Day
+              Slot 1
             </span>
           </button>
 
@@ -520,7 +460,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                 !isBfwSelected ? 'bg-amber-700 text-amber-100' : 'bg-slate-200 text-slate-600'
               }`}
             >
-              Frequency: Day
+              Slot 2
             </span>
           </button>
         </div>
@@ -540,14 +480,6 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
               Frequency: Day
             </span>
           </div>
-
-          <button
-            onClick={handleAddRow}
-            className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 text-xs font-bold transition flex items-center gap-1"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Row
-          </button>
         </div>
 
         <div>
@@ -555,9 +487,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
             <thead>
               <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider font-extrabold select-none">
                 <th className="py-3 px-2 w-10 text-center border-r border-slate-700">#</th>
-                <th className="py-3 px-3 w-44 border-r border-slate-700">STREAM / SAMPLE</th>
+                <th className="py-3 px-3 w-48 border-r border-slate-700">STREAM / SAMPLE</th>
                 <th className="py-3 px-2 w-20 text-center border-r border-slate-700">TIME</th>
-                
+
                 {/* 1. pH */}
                 <th className="py-3 px-2.5 w-28 text-center border-r border-slate-700">
                   <div className="text-white font-bold">pH</div>
@@ -583,12 +515,10 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                 </th>
 
                 {/* 5. SiO2 */}
-                <th className="py-3 px-2.5 w-32 text-center border-r border-slate-700">
+                <th className="py-3 px-2.5 w-32 text-center">
                   <div className="text-white font-bold">SiO₂</div>
                   <div className="text-[10px] font-normal text-amber-300 normal-case">ppm</div>
                 </th>
-
-                <th className="py-3 px-2 w-12 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -613,27 +543,20 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                             isBfwSelected ? 'bg-blue-600' : 'bg-amber-500'
                           }`}
                         />
-                        <input
-                          type="text"
-                          value={row.stream}
-                          onChange={(e) => handleCellChange(row.id, 'stream', e.target.value)}
-                          className="w-full font-bold text-slate-800 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none px-1 py-0.5 rounded transition text-xs"
-                        />
+                        <span className="font-bold text-slate-800 text-xs px-1 py-0.5">
+                          {row.stream}
+                        </span>
                       </div>
                     </td>
 
-                    {/* Time */}
+                    {/* Time (Read-only) */}
                     <td className="py-2.5 px-2 text-center border-r border-slate-100">
-                      <input
-                        type="text"
-                        value={row.time}
-                        onChange={(e) => handleCellChange(row.id, 'time', e.target.value)}
-                        placeholder="HH:mm"
-                        className="w-full text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded-lg py-1 px-1 text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-100 transition shadow-2xs"
-                      />
+                      <span className="font-mono font-bold text-xs text-slate-700">
+                        {row.time || '15:00'}
+                      </span>
                     </td>
 
-                    {/* 1. pH: Direct Valid Range 7.0 – 9.5 */}
+                    {/* 1. pH */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
                         const valRes = validateCellValue(row.ph, activeLimits.ph);
@@ -649,6 +572,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.ph}
+                                disabled={!isEditable}
                                 onChange={(e) => handleCellChange(row.id, 'ph', e.target.value)}
                                 placeholder="7.0 – 9.5"
                                 title={
@@ -659,7 +583,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                     : 'Direct Valid Range: 7.0 – 9.5'
                                 }
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_ph`]
+                                  !isEditable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_ph`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
                                     : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
@@ -678,9 +604,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                               )}
                             </div>
 
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">7.0 – 9.5</span>
+                              <EditedBadge isEdited={Boolean(editedFields[`${row.id}_ph`])} />
                               {hasVal && (
                                 isOutOfLimit ? (
                                   <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
@@ -703,7 +629,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 2. Cond: Target 10 umho/cm, Tolerance ±5 -> Valid Range 5 – 15 umho/cm */}
+                    {/* 2. Cond */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
                         const valRes = validateCellValue(row.cond, activeLimits.cond);
@@ -719,6 +645,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.cond}
+                                disabled={!isEditable}
                                 onChange={(e) => handleCellChange(row.id, 'cond', e.target.value)}
                                 placeholder="5 – 15"
                                 title={
@@ -729,7 +656,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                     : 'Valid Range: 5 – 15 umho/cm'
                                 }
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_cond`]
+                                  !isEditable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_cond`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
                                     : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
@@ -748,9 +677,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                               )}
                             </div>
 
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">5 – 15 umho/cm</span>
+                              <EditedBadge isEdited={Boolean(editedFields[`${row.id}_cond`])} />
                               {hasVal && (
                                 isOutOfLimit ? (
                                   <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
@@ -773,31 +702,30 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 3. TH: Limit Nil (Keep input field available, treat Nil exactly as provided) */}
+                    {/* 3. TH */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
-                        const hasVal = row.th !== '' && row.th !== null && row.th !== undefined;
-
                         return (
                           <div className="flex flex-col items-center gap-1 w-full">
                             <input
                               id={`${selectedOption}-input-${row.id}-th`}
                               type="text"
                               value={row.th}
+                              disabled={!isEditable}
                               onChange={(e) => handleCellChange(row.id, 'th', e.target.value)}
                               placeholder="Nil"
                               title="Limit: Nil"
                               className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                errors[`${row.id}_th`]
+                                !isEditable
+                                  ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                  : errors[`${row.id}_th`]
                                   ? 'border-red-400 bg-red-50 text-red-700'
-                                  : hasVal
-                                  ? 'border-slate-300 bg-white text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-100'
                                   : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400 focus:border-amber-500 focus:ring-1 focus:ring-amber-100'
                               }`}
                             />
-                            {/* Display Limit: Nil near input */}
-                            <div className="flex items-center justify-center gap-1 w-full text-[10px] leading-tight">
+                            <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight">
                               <span className="text-slate-400 font-medium">Limit: Nil</span>
+                              <EditedBadge isEdited={Boolean(editedFields[`${row.id}_th`])} />
                             </div>
                             {errors[`${row.id}_th`] && (
                               <div className="text-[10px] text-red-500 font-bold text-center mt-0.5">
@@ -809,7 +737,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 4. Alk: Target 5 ppm, Tolerance ±4 -> Valid Range 1 – 9 ppm */}
+                    {/* 4. Alk */}
                     <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
                       {(() => {
                         const valRes = validateCellValue(row.alk, activeLimits.alk);
@@ -825,6 +753,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.alk}
+                                disabled={!isEditable}
                                 onChange={(e) => handleCellChange(row.id, 'alk', e.target.value)}
                                 placeholder="1 – 9"
                                 title={
@@ -835,7 +764,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                     : 'Valid Range: 1 – 9 ppm'
                                 }
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_alk`]
+                                  !isEditable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_alk`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
                                     : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
@@ -854,9 +785,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                               )}
                             </div>
 
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">1 – 9 ppm</span>
+                              <EditedBadge isEdited={Boolean(editedFields[`${row.id}_alk`])} />
                               {hasVal && (
                                 isOutOfLimit ? (
                                   <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
@@ -879,8 +810,8 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                       })()}
                     </td>
 
-                    {/* 5. SiO2: Target 0.20 ppm, Tolerance ±5 -> Source notation preserved */}
-                    <td className="py-2 px-2 border-r border-slate-100 align-top text-center">
+                    {/* 5. SiO2 */}
+                    <td className="py-2 px-2 align-top text-center">
                       {(() => {
                         const valRes = validateCellValue(row.sio2, activeLimits.sio2);
                         const hasVal = row.sio2 !== '' && row.sio2 !== null && row.sio2 !== undefined;
@@ -895,6 +826,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                 type="text"
                                 inputMode="decimal"
                                 value={row.sio2}
+                                disabled={!isEditable}
                                 onChange={(e) => handleCellChange(row.id, 'sio2', e.target.value)}
                                 placeholder="0.20 ± 5"
                                 title={
@@ -905,7 +837,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                                     : 'Reference: 0.20 ± 5 ppm'
                                 }
                                 className={`w-full px-2 py-1 text-xs font-bold text-center rounded border transition focus:outline-none ${
-                                  errors[`${row.id}_sio2`]
+                                  !isEditable
+                                    ? 'bg-slate-100/70 border-slate-200 text-slate-500 cursor-not-allowed'
+                                    : errors[`${row.id}_sio2`]
                                     ? 'border-red-400 bg-red-50 text-red-700'
                                     : isOutOfLimit
                                     ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:ring-2 focus:ring-rose-200'
@@ -924,9 +858,9 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                               )}
                             </div>
 
-                            {/* Range display near input & dynamic status centered */}
                             <div className="flex items-center justify-center gap-1.5 w-full text-[10px] leading-tight flex-wrap">
                               <span className="text-slate-400 font-medium">0.20 ± 5 ppm</span>
+                              <EditedBadge isEdited={Boolean(editedFields[`${row.id}_sio2`])} />
                               {hasVal && (
                                 isOutOfLimit ? (
                                   <span className="font-black text-rose-700 bg-rose-100 px-1 py-0.2 rounded border border-rose-300 text-[9px] whitespace-nowrap">
@@ -948,58 +882,18 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
                         );
                       })()}
                     </td>
-
-                    {/* ACTION */}
-                    <td className="py-2.5 px-2 text-center align-top">
-                      <button
-                        onClick={() => handleRemoveRow(row.id)}
-                        disabled={activeReadings.length <= 1}
-                        className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-30 disabled:hover:bg-transparent"
-                        title="Delete row"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-
-        {/* Table Footer */}
-        <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddRow}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-semibold transition flex items-center gap-1.5 shadow-2xs"
-            >
-              <Plus className="w-3.5 h-3.5 text-blue-600" />
-              Add Another Sampling Row
-            </button>
-            <span className="text-slate-500 font-medium">
-              {activeReadings.length} {activeReadings.length === 1 ? 'row' : 'rows'} recorded for {activeOptionLabel}
-            </span>
-          </div>
-
-          <div className="text-slate-500 text-xs">
-            Units: <span className="font-semibold text-slate-700">Cond in umho/cm | Alk, SiO₂ in ppm | TH: Nil</span>
-          </div>
-        </div>
       </div>
 
-      {/* ── Save Confirmation Modal ── */}
-      <SaveConfirmationModal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        onConfirm={handleConfirmSave}
-        saving={saving}
-        analysisName="Boiler Feed Water / Super Heated Steam Analysis"
-        date={date}
-        shiftOrTime={`${activeOptionLabel} (Daily Frequency)`}
-        summaryItems={confirmData?.summaryItems || []}
-        recipientEmail={recipientEmail}
-      />
+      {/* ── Footer ── */}
+      <div className="text-center text-xs text-slate-500 font-medium py-3">
+        One correction allowed after first save; saving the next slot/shift locks the previous one.
+      </div>
     </div>
   );
 };
