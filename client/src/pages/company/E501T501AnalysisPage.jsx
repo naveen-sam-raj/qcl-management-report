@@ -11,7 +11,6 @@ import {
   RotateCcw,
   CheckCircle2,
   ChevronRight,
-  Plus,
   Trash2,
   Clock,
   Layers,
@@ -583,16 +582,6 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
                 T 501
               </button>
             </div>
-
-            {!isViewOnly && (
-              <button
-                onClick={handleAddRow}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 px-3 py-1.5 rounded-lg transition shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add Shift Row
-              </button>
-            )}
           </div>
         </div>
 
