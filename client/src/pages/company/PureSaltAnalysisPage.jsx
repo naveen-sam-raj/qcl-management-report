@@ -181,11 +181,22 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
   // Helper to determine the active editable shift based on lock state
   const resolveActiveShift = useCallback((lShifts = {}) => {
-    const areAllShiftsLocked = Boolean(lShifts.shift3Saved && (lShifts.shift3Edits || 0) >= 1);
-    if (areAllShiftsLocked) return null;
-    if (!lShifts.shift1Saved || !lShifts.shift1) return 'shift1';
-    if (!lShifts.shift2Saved || !lShifts.shift2) return 'shift2';
-    if (!lShifts.shift3Saved || (lShifts.shift3Edits || 0) === 0) return 'shift3';
+    // If Shift 1 is not saved yet, Shift 1 is the active shift
+    if (!lShifts.shift1Saved && !lShifts.shift1 && !lShifts.shift1Locked) {
+      return 'shift1';
+    }
+    // Once Shift 1 is saved, Shift 2 becomes active if not saved yet and not locked
+    if (!lShifts.shift2Saved && !lShifts.shift2 && !lShifts.shift2Locked) {
+      return 'shift2';
+    }
+    // Once Shift 2 is saved, Shift 3 becomes active if not saved yet and not locked
+    if (!lShifts.shift3Saved && !lShifts.shift3 && !lShifts.shift3Locked) {
+      return 'shift3';
+    }
+    // If Shift 3 was saved, allow 1 correction on Shift 3 if not yet used
+    if (lShifts.shift3Saved && (lShifts.shift3Edits || 0) === 0 && !lShifts.shift3 && !lShifts.shift3Locked) {
+      return 'shift3';
+    }
     return null;
   }, []);
 
@@ -200,13 +211,13 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         return 'NEW';
       }
       if (key === 'shift1') {
-        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved) return 'LOCKED';
+        if (lockedShifts.shift1 || lockedShifts.shift1Locked || lockedShifts.shift2Saved || (lockedShifts.shift1Edits || 0) >= 1) return 'LOCKED';
         if (lockedShifts.shift1Saved) return 'EDITABLE';
         return 'OPEN';
       }
       if (key === 'shift2') {
         if (!lockedShifts.shift1Saved) return 'WAITING';
-        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved) return 'LOCKED';
+        if (lockedShifts.shift2 || lockedShifts.shift2Locked || lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1) return 'LOCKED';
         if (lockedShifts.shift2Saved) return 'EDITABLE';
         return 'OPEN';
       }
@@ -301,9 +312,10 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   // ── Real-time input change (Accepts exact values without limits/tolerances) ──
   const handleChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
-    if (lockedShifts[rowKey]) return; // Prevent edit if locked
-    if (rowKey === 'shift2' && !lockedShifts.shift1Saved) return; // Enforce sequence
-    if (rowKey === 'shift3' && !lockedShifts.shift2Saved) return; // Enforce sequence
+    if (lockedShifts[rowKey] || lockedShifts[`${rowKey}Locked`]) return; // Prevent edit if locked
+    if (rowKey === 'shift1' && (lockedShifts.shift2Saved || (lockedShifts.shift1Edits || 0) >= 1)) return;
+    if (rowKey === 'shift2' && (!lockedShifts.shift1Saved || lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1)) return;
+    if (rowKey === 'shift3' && (!lockedShifts.shift2Saved || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))) return;
 
     // Shift-Wise Locking: shifts can only be edited when actively selected
     if (['shift1', 'shift2', 'shift3'].includes(rowKey) && activeEditingShift !== rowKey) {
@@ -440,15 +452,23 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     for (const key of targetRows) {
       const isShift = ['shift1', 'shift2', 'shift3'].includes(key);
       const hasData = data[key] && Object.values(data[key]).some(val => val !== null && val !== '');
-      const canEdit = !lockedShifts[key] &&
-        !(key === 'shift2' && !lockedShifts.shift1Saved) &&
-        !(key === 'shift3' && !lockedShifts.shift2Saved) &&
-        (!isShift || activeEditingShift === key);
+      const isShiftLocked = isShift && (
+        lockedShifts[key] ||
+        lockedShifts[`${key}Locked`] ||
+        (key === 'shift1' && (lockedShifts.shift2Saved || (lockedShifts.shift1Edits || 0) >= 1)) ||
+        (key === 'shift2' && (!lockedShifts.shift1Saved || lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1)) ||
+        (key === 'shift3' && (!lockedShifts.shift2Saved || ((lockedShifts.shift3Edits || 0) >= 1 && lockedShifts.shift3Saved)))
+      );
+      const canEdit = !lockedShifts[key] && !isShiftLocked && (!isShift || activeEditingShift === key);
       if (hasData && canEdit) {
         const diff = isDiff(originalData ? originalData[key] : null, data[key]);
         if (diff) {
           toSave.push({ key, name: shiftDisplayNames[key], values: data[key] });
-          if (key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
+          if (
+            (key === 'shift1' && lockedShifts.shift1Saved) ||
+            (key === 'shift2' && lockedShifts.shift2Saved) ||
+            (key === 'shift3' && lockedShifts.shift3Saved)
+          ) {
             isFinalEdit = true;
           }
         }
@@ -527,16 +547,15 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       const excelInfo = response.data.excel;
       setLastSavedRecord(savedRecord);
       setLastExcelData(excelInfo);
-      if (savedRecord?.lockedShifts) {
-        setLockedShifts(savedRecord.lockedShifts);
-      }
+      const locks = response?.data?.lockedShifts || savedRecord?.lockedShifts || {};
+      setLockedShifts(locks);
       if (savedRecord?.editedFields) {
         setEditedFields(savedRecord.editedFields);
       }
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
       }
-      setActiveEditingShift(resolveActiveShift(savedRecord?.lockedShifts || {}));
+      setActiveEditingShift(resolveActiveShift(locks));
       setShowConfirmModal(false);
 
       // Check email status from server
@@ -699,7 +718,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
               {/* I SHIFT Button */}
               {(() => {
-                const isLocked = Boolean(lockedShifts.shift1);
+                const isLocked = Boolean(
+                  lockedShifts.shift1 ||
+                  lockedShifts.shift1Locked ||
+                  lockedShifts.shift2Saved ||
+                  (lockedShifts.shift1Edits || 0) >= 1
+                );
                 const isEligible = !isLocked;
                 const isActive = activeEditingShift === 'shift1';
                 return (
@@ -726,7 +750,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
               {/* II SHIFT Button */}
               {(() => {
-                const isLocked = Boolean(lockedShifts.shift2);
+                const isLocked = Boolean(
+                  lockedShifts.shift2 ||
+                  lockedShifts.shift2Locked ||
+                  lockedShifts.shift3Saved ||
+                  (lockedShifts.shift2Edits || 0) >= 1
+                );
                 const isWaiting = !lockedShifts.shift1Saved;
                 const isEligible = !isLocked && !isWaiting;
                 const isActive = activeEditingShift === 'shift2';
@@ -763,9 +792,9 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
               {/* III SHIFT Button */}
               {(() => {
-                const isLocked = Boolean(lockedShifts.shift3);
-                const isWaiting = !lockedShifts.shift2Saved;
                 const isFinalUsed = Boolean(lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
+                const isLocked = Boolean(lockedShifts.shift3 || lockedShifts.shift3Locked || isFinalUsed);
+                const isWaiting = !lockedShifts.shift2Saved;
                 const isEligible = !isLocked && !isWaiting && !isFinalUsed;
                 const isActive = activeEditingShift === 'shift3';
                 return (
@@ -849,47 +878,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                           )}
                           <RecordStatusBadge status={getRowStatus(row.key)} />
                         </div>
-
-                        {/* Shift Edit Selector Action Button */}
-                        {!isViewOnly && ['shift1', 'shift2', 'shift3'].includes(row.key) && (() => {
-                          const isLocked = Boolean(lockedShifts[row.key]);
-                          const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
-                          const isFinalUsed = Boolean(row.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
-                          const canEdit = !isLocked && !isWaiting && !isFinalUsed;
-                          const isActive = activeEditingShift === row.key;
-
-                          if (isActive) {
-                            return (
-                              <button
-                                type="button"
-                                id={`btn-psa-active-${row.key}`}
-                                onClick={() => setActiveEditingShift(null)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-600 hover:bg-blue-700 text-white shadow-2xs cursor-pointer transition shrink-0"
-                                title="Click to stop editing this shift (set to read-only)"
-                              >
-                                <Pencil className="w-2.5 h-2.5" />
-                                <span>Editing</span>
-                              </button>
-                            );
-                          }
-
-                          if (canEdit) {
-                            return (
-                              <button
-                                type="button"
-                                id={`btn-psa-select-${row.key}`}
-                                onClick={() => setActiveEditingShift(row.key)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 hover:border-blue-500 shadow-2xs cursor-pointer transition shrink-0"
-                                title={`Click to edit ${row.label}`}
-                              >
-                                <Pencil className="w-2.5 h-2.5" />
-                                <span>{lockedShifts[`${row.key}Saved`] ? 'Edit' : 'Enter'}</span>
-                              </button>
-                            );
-                          }
-
-                          return null;
-                        })()}
                       </div>
                     </td>
 
@@ -909,13 +897,19 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                                 const isShift = ['shift1', 'shift2', 'shift3'].includes(row.key);
                                 let isDisabled;
                                 if (isShift) {
-                                  const isLocked = Boolean(lockedShifts[row.key]);
+                                  const isLocked = Boolean(
+                                    lockedShifts[row.key] ||
+                                    lockedShifts[`${row.key}Locked`] ||
+                                    (row.key === 'shift1' && (lockedShifts.shift2Saved || (lockedShifts.shift1Edits || 0) >= 1)) ||
+                                    (row.key === 'shift2' && (lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1)) ||
+                                    (row.key === 'shift3' && (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
+                                  );
                                   const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
                                   const isShiftActive = activeEditingShift === row.key;
                                   isDisabled = isViewOnly || isLocked || isWaiting || !isShiftActive;
                                 } else {
                                   // RAW SALT and COMPOSITION retain their independent rules
-                                  const isLocked = Boolean(lockedShifts[row.key]);
+                                  const isLocked = Boolean(lockedShifts[row.key] || lockedShifts[`${row.key}Locked`]);
                                   isDisabled = isViewOnly || isLocked;
                                 }
                                 return (
