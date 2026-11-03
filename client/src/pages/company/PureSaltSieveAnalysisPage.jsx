@@ -52,6 +52,19 @@ const buildEmptyData = () =>
     ROWS.map((r) => [r.key, Object.fromEntries(PARAMETERS.map((p) => [p.key, '']))])
   );
 
+const normalizeSieveData = (incomingRows) => {
+  const empty = buildEmptyData();
+  if (!incomingRows || typeof incomingRows !== 'object') return empty;
+  const merged = {};
+  ROWS.forEach((r) => {
+    merged[r.key] = {
+      ...empty[r.key],
+      ...(incomingRows[r.key] || {}),
+    };
+  });
+  return merged;
+};
+
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
 
 const formatDateDisplay = (isoDate) => {
@@ -228,13 +241,15 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           }
 
           if (record && record.rows) {
-            setData(record.rows);
-            setOriginalData(JSON.parse(JSON.stringify(record.rows)));
+            const normalized = normalizeSieveData(record.rows);
+            setData(normalized);
+            setOriginalData(JSON.parse(JSON.stringify(normalized)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
           } else if (record && record.data && record.data.rows) {
-            setData(record.data.rows);
-            setOriginalData(JSON.parse(JSON.stringify(record.data.rows)));
+            const normalized = normalizeSieveData(record.data.rows);
+            setData(normalized);
+            setOriginalData(JSON.parse(JSON.stringify(normalized)));
             setLockedShifts(record.lockedShifts || record.data.lockedShifts || {});
             setEditedFields(record.editedFields || record.data.editedFields || {});
           } else {
@@ -272,7 +287,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
 
     setData((prev) => ({
       ...prev,
-      [rowKey]: { ...prev[rowKey], [paramKey]: value },
+      [rowKey]: { ...((prev && prev[rowKey]) || {}), [paramKey]: value },
     }));
 
     // Clear cell error if any
@@ -311,7 +326,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     let hasError = false;
     ROWS.forEach((r) => {
       PARAMETERS.forEach((p) => {
-        const val = data[r.key][p.key];
+        const val = data?.[r.key]?.[p.key] ?? '';
         if (val !== '' && val !== null && isNaN(Number(val))) {
           newErrors[`${r.key}_${p.key}`] = 'Enter numbers only';
           hasError = true;
@@ -347,13 +362,14 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
     let toSave = [];
     let isFinalEdit = false;
     for (const key of targetRows) {
-      const hasData = data[key] && Object.values(data[key]).some((val) => val !== null && val !== '');
+      const rowData = data?.[key] || {};
+      const hasData = Object.values(rowData).some((val) => val !== null && val !== '');
       const canEdit = !isShiftDisabled(key);
 
       if (hasData && canEdit) {
-        const diff = isDiff(originalData ? originalData[key] : null, data[key]);
+        const diff = isDiff(originalData ? originalData[key] : null, rowData);
         if (diff) {
-          toSave.push({ key, name: shiftDisplayNames[key], values: data[key] });
+          toSave.push({ key, name: shiftDisplayNames[key], values: rowData });
           if (key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
             isFinalEdit = true;
           }
@@ -403,8 +419,8 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
           r.key,
           Object.fromEntries(
             PARAMETERS.map((p) => {
-              const val = data[r.key][p.key];
-              return [p.key, val !== '' && val !== null ? parseFloat(val) : null];
+              const val = data?.[r.key]?.[p.key];
+              return [p.key, val !== '' && val !== null && val !== undefined ? parseFloat(val) : null];
             })
           ),
         ])
@@ -437,7 +453,9 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
         setEditedFields(savedRecord.editedFields);
       }
       if (savedRecord?.rows) {
-        setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
+        const normalized = normalizeSieveData(savedRecord.rows);
+        setData(normalized);
+        setOriginalData(JSON.parse(JSON.stringify(normalized)));
       }
 
       // Check email status from server
@@ -652,7 +670,7 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
 
                     {/* Parameter input cells */}
                     {PARAMETERS.map((param) => {
-                      const cellVal = data[row.key][param.key];
+                      const cellVal = data?.[row.key]?.[param.key] ?? '';
                       const limit = getCellLimit(plantId, 'pure-salt-sieve', row.key, param.key);
                       const validation = validateCellValue(cellVal, limit);
                       const isOutOfLimit = validation.isOutOfLimit;
