@@ -11,9 +11,22 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+const pad2 = (n) => String(n).padStart(2, '0');
+const toLocalYMD = (date) => {
+  const d = date instanceof Date ? date : new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+const addDaysLocal = (ymd, n) => {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return '';
+  const [y, m, d] = ymd.split('-').map(Number);
+  const target = new Date(y, m - 1, d + n);
+  return toLocalYMD(target);
+};
+
 const ReportsPage = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const todayStr = toLocalYMD(new Date());
 
   const [plants, setPlants] = useState([]);
 
@@ -94,6 +107,13 @@ const ReportsPage = () => {
     const fromDateStr = String(startDate).trim();
     const toDateStr = endDate ? String(endDate).trim() : '';
     const isRange = Boolean(toDateStr && toDateStr !== fromDateStr);
+
+    if (fromDateStr > todayStr || (toDateStr && toDateStr > todayStr)) {
+      const msg = 'Future dates are not allowed';
+      setSinglePlantError(msg);
+      showToast(msg, 'error');
+      return;
+    }
 
     if (isRange) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(toDateStr)) {
@@ -341,9 +361,18 @@ const ReportsPage = () => {
                 type="date"
                 value={startDate}
                 onChange={(e) => {
-                  setStartDate(e.target.value);
+                  const val = e.target.value;
+                  if (val && val > todayStr) {
+                    showToast('Future dates are not allowed', 'error');
+                    return;
+                  }
+                  setStartDate(val);
+                  if (endDate && val && endDate < val) {
+                    setEndDate('');
+                  }
                   if (singlePlantError) setSinglePlantError('');
                 }}
+                max={todayStr}
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
               />
             </div>
@@ -356,15 +385,19 @@ const ReportsPage = () => {
               type="date"
               value={endDate}
               onChange={(e) => {
-                setEndDate(e.target.value);
+                const val = e.target.value;
+                if (val && val > todayStr) {
+                  showToast('Future dates are not allowed', 'error');
+                  return;
+                }
+                setEndDate(val);
                 if (singlePlantError) setSinglePlantError('');
               }}
               min={startDate || undefined}
               max={(() => {
-                if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return undefined;
-                const d = new Date(`${startDate}T00:00:00Z`);
-                d.setUTCDate(d.getUTCDate() + 30);
-                return d.toISOString().slice(0, 10);
+                if (!startDate) return todayStr;
+                const maxRange = addDaysLocal(startDate, 30);
+                return maxRange && maxRange < todayStr ? maxRange : todayStr;
               })()}
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
             />
