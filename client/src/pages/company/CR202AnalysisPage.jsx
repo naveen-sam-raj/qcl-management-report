@@ -595,7 +595,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
     });
     setSaveSuccess(false);
     setSavePhase('idle');
-  }, [isShiftDisabled]);
+  }, [isSlotDisabled]);
 
   const handleFnh3CellChange = useCallback((paramKey, value) => {
     if (!isValidDecimal(value)) return;
