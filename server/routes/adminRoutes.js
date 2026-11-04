@@ -20,6 +20,9 @@ router.post('/company-admins', createCompanyAdmin);
 router.get('/company-admins', getCompanyAdmins);
 router.put('/company-admins/:id', updateCompanyAdmin);
 router.post('/company-admins/:id/reset-password', resetCompanyAdminPassword);
+router.put('/company-admins/:id/reset-password', resetCompanyAdminPassword);
+router.post('/admins/:id/reset-password', resetCompanyAdminPassword);
+router.put('/admins/:id/reset-password', resetCompanyAdminPassword);
 router.delete('/company-admins/:id', deleteCompanyAdmin);
 router.get('/overview-stats', getSuperAdminStats);
 

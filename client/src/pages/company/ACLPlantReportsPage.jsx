@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import { resolvePlantCode } from '../../utils/plantCodeHelper';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import {
   ArrowLeft,
   Calendar,
@@ -227,8 +228,8 @@ const ACLPlantReportsPage = ({ plantId = 'acl' }) => {
 
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
-  // Default dates: past 7 days to today
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Default dates: past 7 days to operating date
+  const todayStr = getOperatingDateIST();
   const defaultFromStr = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   // ── Form State ──

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import api from '../../services/api';
 import OverallExcelReportModal from '../../components/common/OverallExcelReportModal';
 import {
@@ -107,7 +108,7 @@ const TFLOverallGraphPage = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
 
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const getTodayStr = () => getOperatingDateIST();
   const getNDaysAgoStr = (n) => {
     const d = new Date();
     d.setDate(d.getDate() - n);

@@ -11,7 +11,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -24,6 +23,8 @@ import {
   Send,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 // ─── CR 203 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
 // Frequency: ONCE IN A SHIFT
@@ -116,6 +117,8 @@ const TIME_SLOTS = [
   { key: 't03', time: '03:00', shift: 'III Shift', shiftGroup: 'shift3' },
 ];
 
+const UNITS_ORDER = ['t07', 't11', 't15', 't19', 't23', 't03'];
+
 const SHIFT_MAPPING = [
   { key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't11'] },
   { key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't19'] },
@@ -160,6 +163,19 @@ const getTodayAsiaKolkata = () => {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const isValidDecimal = (val) => val === '' || /^-?\d*\.?\d*$/.test(val);
+
+const isValueDifferent = (oldVal, newVal) => {
+  const normOld = (oldVal === '' || oldVal === null || oldVal === undefined) ? null : String(oldVal).trim();
+  const normNew = (newVal === '' || newVal === null || newVal === undefined) ? null : String(newVal).trim();
+  if (normOld === null && normNew === null) return false;
+  if (normOld === null || normNew === null) return true;
+  const numOld = Number(normOld);
+  const numNew = Number(normNew);
+  if (!Number.isNaN(numOld) && !Number.isNaN(numNew)) {
+    return numOld !== numNew;
+  }
+  return normOld !== normNew;
+};
 
 const formatDateDisplay = (isoDate) => {
   if (!isoDate) return '—';
@@ -253,7 +269,7 @@ const CR203Cell = ({
         />
 
         {/* Small EDITED badge */}
-        {isEdited && (
+        {isEdited && hasValue && (
           <span
             className="absolute -top-1.5 -left-1.5 bg-amber-500 text-white rounded px-1 text-[8px] font-black tracking-wider uppercase shadow-xs pointer-events-none"
             title="Modified after initial save"
@@ -335,8 +351,8 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
   const limitTCL  = getCellLimit(plantId, 'cr203', 'shift', 'tcl')  || CR203_LIMITS.tcl;
   const limitPCL  = getCellLimit(plantId, 'cr203', 'shift', 'pcl')  || CR203_LIMITS.pcl;
 
-  // ── State (Date strictly restricted to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── State (Date strictly restricted to Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [timeRows, setTimeRows]                     = useState(buildEmptyTimeRows());
   const [fnh3Row, setFnh3Row]                       = useState(buildEmptyFnh3Row());
   const [pclRow, setPclRow]                         = useState(buildEmptyPclRow());
@@ -350,36 +366,72 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
   const [recordId, setRecordId]                     = useState(null);
   const [recipientEmail, setRecipientEmail]         = useState('');
   const [emailStatusDetail, setEmailStatusDetail]   = useState('');
+  const [lockedSlots, setLockedSlots]               = useState({});
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
+  const [editAuditHistory, setEditAuditHistory]     = useState([]);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
   const [confirmData, setConfirmData]               = useState(null);
 
-  // Sequential Shift Workflow:
-  // - On initial load: I SHIFT is editable; II SHIFT & III SHIFT are waiting/disabled.
-  // - After I SHIFT save: I SHIFT remains editable until II SHIFT is saved; II SHIFT becomes available.
-  // - After II SHIFT save: I SHIFT is permanently locked; II SHIFT remains editable until III SHIFT is saved; III SHIFT becomes available.
-  // - After III SHIFT initial save: II SHIFT is permanently locked; exactly 1 final edit allowed for III SHIFT.
-  // - After III SHIFT final edit: all 3 shifts permanently locked for that date.
-  const isShiftDisabled = useCallback((shiftKey) => {
+  /**
+   * Slot-level lock state derivation:
+   * Returns: 'locked' | 'open' | 'waiting'
+   * - Fresh date: only t07 is 'open'; all others are 'waiting'
+   * - A slot is 'locked' if slot.isLocked/correctionUsed is true OR any successor slot isSaved
+   * - A slot is 'open' if it's not locked AND its predecessor is saved (or index === 0)
+   * - Otherwise, it is 'waiting'
+   */
+  const getSlotStatus = useCallback((slotKey) => {
+    const index = UNITS_ORDER.indexOf(slotKey);
+    if (index === -1) return 'locked';
+
+    const slot = lockedSlots[slotKey] || {};
+    if (slot.isLocked || slot.correctionUsed) {
+      return 'locked';
+    }
+
+    for (let i = index + 1; i < UNITS_ORDER.length; i++) {
+      if (lockedSlots[UNITS_ORDER[i]]?.isSaved) {
+        return 'locked';
+      }
+    }
+
+    if (index === 0) {
+      return 'open';
+    }
+
+    const prevKey = UNITS_ORDER[index - 1];
+    if (lockedSlots[prevKey]?.isSaved) {
+      return 'open';
+    }
+
+    return 'waiting';
+  }, [lockedSlots]);
+
+  const isSlotDisabled = useCallback((slotKey) => {
     if (isViewOnly) return true;
-    if (shiftKey === 'shift1') {
-      return Boolean(lockedShifts.shift1) || Boolean(lockedShifts.shift2Saved);
+    return getSlotStatus(slotKey) !== 'open';
+  }, [isViewOnly, getSlotStatus]);
+
+  const getShiftStatus = useCallback((shiftKey) => {
+    const shiftObj = SHIFT_MAPPING.find((s) => s.key === shiftKey);
+    if (!shiftObj) return { label: 'WAITING', bg: 'bg-slate-100 text-slate-500 border border-slate-200' };
+
+    const slotStatuses = shiftObj.slotKeys.map((sKey) => getSlotStatus(sKey));
+    const allLocked = slotStatuses.every((st) => st === 'locked');
+    if (allLocked) {
+      return { label: 'LOCKED', bg: 'bg-slate-200 text-slate-700' };
     }
-    if (shiftKey === 'shift2') {
-      if (!lockedShifts.shift1Saved) return true;
-      return Boolean(lockedShifts.shift2) || Boolean(lockedShifts.shift3Saved);
+
+    const anyOpen = slotStatuses.some((st) => st === 'open');
+    if (anyOpen) {
+      return { label: 'ACTIVE', bg: 'bg-emerald-100 text-emerald-800 border border-emerald-300' };
     }
-    if (shiftKey === 'shift3') {
-      if (!lockedShifts.shift2Saved) return true;
-      if (lockedShifts.shift3) return true;
-      if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) return true;
-      return false;
-    }
-    return true;
-  }, [isViewOnly, lockedShifts]);
+
+    return { label: 'WAITING', bg: 'bg-amber-100 text-amber-700 border border-amber-300' };
+  }, [getSlotStatus]);
 
   // Fetch existing data for current date
   useEffect(() => {
@@ -458,6 +510,8 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
               setOriginalPclRow(null);
             }
 
+            const resLockedSlots = response.data?.lockedSlots || record.lockedSlots || record.data?.lockedSlots || {};
+            setLockedSlots(resLockedSlots);
             setLockedShifts(record.lockedShifts || record.data?.lockedShifts || {});
             setEditedFields(record.editedFields || record.data?.editedFields || {});
           } else {
@@ -467,6 +521,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
             setOriginalTimeRows(null);
             setOriginalFnh3Row(null);
             setOriginalPclRow(null);
+            setLockedSlots({});
             setLockedShifts({});
             setEditedFields({});
           }
@@ -477,6 +532,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
           setOriginalTimeRows(null);
           setOriginalFnh3Row(null);
           setOriginalPclRow(null);
+          setLockedSlots({});
           setLockedShifts({});
           setEditedFields({});
         }
@@ -489,6 +545,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
         setOriginalTimeRows(null);
         setOriginalFnh3Row(null);
         setOriginalPclRow(null);
+        setLockedSlots({});
         setLockedShifts({});
         setEditedFields({});
       }
@@ -503,10 +560,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
   // ── Input Changes ──
   const handleTimeCellChange = useCallback((rowKey, paramKey, value) => {
     if (!isValidDecimal(value)) return;
-
-    const slotObj = TIME_SLOTS.find((s) => s.key === rowKey);
-    const shiftGroup = slotObj ? slotObj.shiftGroup : null;
-    if (shiftGroup && isShiftDisabled(shiftGroup)) return;
+    if (isSlotDisabled(rowKey)) return;
 
     setTimeRows((prev) => ({
       ...prev,
@@ -519,7 +573,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
     });
     setSaveSuccess(false);
     setSavePhase('idle');
-  }, [isShiftDisabled]);
+  }, [isSlotDisabled]);
 
   const handleFnh3CellChange = useCallback((paramKey, value) => {
     if (!isValidDecimal(value)) return;
@@ -626,33 +680,13 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
 
   // Check if a row differs from original data
   const isSlotDiff = (oldSlot, newSlot) => {
-    if (!oldSlot && newSlot) return true;
-    if (oldSlot && !newSlot) return false;
     const fields = [...STREAMS.map((s) => s.key), 'avgTcl'];
-    return fields.some((f) => {
-      let oVal = oldSlot?.[f] ?? null;
-      let nVal = newSlot?.[f] ?? null;
-      if (nVal === '') nVal = null;
-      if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-        return Number(oVal) !== Number(nVal);
-      }
-      return String(oVal) !== String(nVal);
-    });
+    return fields.some((f) => isValueDifferent(oldSlot?.[f], newSlot?.[f]));
   };
 
   const isRowDiff = (oldR, newR) => {
-    if (!oldR && newR) return true;
-    if (oldR && !newR) return false;
     const fields = [...STREAMS.map((s) => s.key), 'avgTcl'];
-    return fields.some((f) => {
-      let oVal = oldR?.[f] ?? null;
-      let nVal = newR?.[f] ?? null;
-      if (nVal === '') nVal = null;
-      if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-        return Number(oVal) !== Number(nVal);
-      }
-      return String(oVal) !== String(nVal);
-    });
+    return fields.some((f) => isValueDifferent(oldR?.[f], newR?.[f]));
   };
 
   const handleSaveClick = () => {
@@ -662,66 +696,48 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
       return;
     }
 
-    const shiftsToSave = [];
-    let isFinalEdit = false;
-
-    SHIFT_MAPPING.forEach((shift) => {
-      if (isShiftDisabled(shift.key)) return;
-
-      const hasAnyData = shift.slotKeys.some((sKey) => {
-        const row = timeRows[sKey];
-        return row && Object.values(row).some((val) => val !== null && val !== '');
-      });
-
-      const hasDiff = shift.slotKeys.some((sKey) => {
-        const oldSlot = originalTimeRows ? originalTimeRows[sKey] : null;
-        const newSlot = timeRows[sKey];
-        return isSlotDiff(oldSlot, newSlot);
-      });
-
-      if (hasAnyData && hasDiff) {
-        shiftsToSave.push({
-          key: shift.key,
-          name: shift.name,
-          slotKeys: shift.slotKeys,
-        });
-
-        if (shift.key === 'shift3' && lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
-          isFinalEdit = true;
-        }
+    const changedSlots = [];
+    UNITS_ORDER.forEach((sKey) => {
+      if (isSlotDisabled(sKey)) return;
+      const oldSlot = originalTimeRows ? originalTimeRows[sKey] : null;
+      const newSlot = timeRows[sKey];
+      if (isSlotDiff(oldSlot, newSlot)) {
+        changedSlots.push(sKey);
       }
     });
 
     const fnh3Diff = isRowDiff(originalFnh3Row, fnh3Row);
     const pclDiff = isRowDiff(originalPclRow, pclRow);
 
-    if (shiftsToSave.length === 0 && (fnh3Diff || pclDiff)) {
-      if (!isShiftDisabled('shift1')) {
-        shiftsToSave.push({ key: 'shift1', name: 'I SHIFT (06:00 – 14:00)', slotKeys: ['t07', 't11'] });
-      } else if (!isShiftDisabled('shift2')) {
-        shiftsToSave.push({ key: 'shift2', name: 'II SHIFT (14:00 – 22:00)', slotKeys: ['t15', 't19'] });
-      } else if (!isShiftDisabled('shift3')) {
-        shiftsToSave.push({ key: 'shift3', name: 'III SHIFT (22:00 – 06:00)', slotKeys: ['t23', 't03'] });
-        if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) === 0) {
-          isFinalEdit = true;
-        }
+    if (changedSlots.length === 0 && !fnh3Diff && !pclDiff) {
+      showToast('No new or modified data found to save.', 'info');
+      return;
+    }
+
+    if (changedSlots.length > 1) {
+      showToast(`Only one slot may be entered or edited per save. Detected changes in: ${changedSlots.join(', ')}`, 'warning');
+      return;
+    }
+
+    let targetSlotKey = changedSlots[0];
+    if (!targetSlotKey && (fnh3Diff || pclDiff)) {
+      targetSlotKey = UNITS_ORDER.find((k) => !isSlotDisabled(k));
+      if (!targetSlotKey) {
+        showToast('All slots for today are permanently locked. Cannot edit FNH₃ or PCl.', 'warning');
+        return;
       }
     }
 
-    if (shiftsToSave.length === 0) {
-      showToast('No new or modified shift data found to save.', 'info');
-      return;
-    }
-
-    if (shiftsToSave.length > 1) {
-      showToast('Only one shift can be saved at a time. Please save changes shift-by-shift.', 'warning');
-      return;
-    }
+    const targetSlotObj = TIME_SLOTS.find((s) => s.key === targetSlotKey);
+    const isCorrection = Boolean(lockedSlots[targetSlotKey]?.isSaved && !lockedSlots[targetSlotKey]?.isLocked);
 
     setConfirmData({
       date,
-      shift: shiftsToSave[0],
-      isFinalEdit,
+      targetSlotKey,
+      targetSlotObj,
+      isCorrection,
+      fnh3Diff,
+      pclDiff,
     });
     setShowConfirmModal(true);
   };
@@ -735,13 +751,14 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
     // Close confirmation modal immediately to prevent modal freeze
     setShowConfirmModal(false);
 
-    const shiftBeingSaved = confirmData?.shift;
+    const targetSlotObj = confirmData?.targetSlotObj;
     const payload = {
       date,
       plant: plantId ? plantId.toUpperCase() : 'ACL',
       analysisType: 'CR 203 Analysis',
       crystallizer: 'CR 203',
-      shift: shiftBeingSaved ? shiftBeingSaved.name : 'I SHIFT',
+      targetSlot: confirmData?.targetSlotKey,
+      shift: targetSlotObj?.shift || 'I Shift',
       submittedBy: user?.name || 'Plant Operator',
       submittedAt: new Date().toISOString(),
       timeRows,
@@ -752,22 +769,39 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
     try {
       const response = await api.post('/api/cr-203-analysis', payload);
 
+      if (response.data?.noChange) {
+        showToast('No changes', 'info');
+        setSavePhase('idle');
+        setSaving(false);
+        return;
+      }
+
       if (!response?.data?.success) {
         showToast(response?.data?.message || 'Unable to save CR 203 data. Please try again.', 'error');
         setSavePhase('idle');
+        setSaving(false);
         return;
       }
 
       setSaveSuccess(true);
+      setSavePhase('completed');
+      showToast(response.data?.message || `Successfully saved ${confirmData?.targetSlotKey} ✓`, 'success');
+
       const savedDoc = response.data?.data;
       if (savedDoc && (savedDoc._id || savedDoc.id)) {
         setRecordId(savedDoc._id || savedDoc.id);
       }
-      if (savedDoc?.lockedShifts) {
-        setLockedShifts(savedDoc.lockedShifts);
+      if (response.data?.lockedSlots || savedDoc?.lockedSlots) {
+        setLockedSlots(response.data?.lockedSlots || savedDoc?.lockedSlots);
       }
-      if (savedDoc?.editedFields) {
-        setEditedFields(savedDoc.editedFields);
+      if (response.data?.lockedShifts || savedDoc?.lockedShifts) {
+        setLockedShifts(response.data?.lockedShifts || savedDoc?.lockedShifts);
+      }
+      if (response.data?.editedFields || savedDoc?.editedFields) {
+        setEditedFields(response.data?.editedFields || savedDoc?.editedFields);
+      }
+      if (response.data?.editAuditHistory || savedDoc?.editAuditHistory) {
+        setEditAuditHistory(response.data?.editAuditHistory || savedDoc?.editAuditHistory);
       }
       if (savedDoc?.timeRows) {
         const populatedTRows = buildEmptyTimeRows();
@@ -780,40 +814,26 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
         setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
       }
       if (savedDoc?.fnh3Row) {
-        const popF = { ...buildEmptyFnh3Row(), ...savedDoc.fnh3Row };
+        const popF = buildEmptyFnh3Row();
+        STREAMS.forEach((s) => {
+          if (savedDoc.fnh3Row[s.key] !== undefined) popF[s.key] = String(savedDoc.fnh3Row[s.key] ?? '');
+        });
+        popF.avgTcl = savedDoc.fnh3Row.avgTcl !== null && savedDoc.fnh3Row.avgTcl !== undefined ? String(savedDoc.fnh3Row.avgTcl) : '';
         setFnh3Row(popF);
         setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
       }
       if (savedDoc?.pclRow) {
-        const popP = { ...buildEmptyPclRow(), ...savedDoc.pclRow };
+        const popP = buildEmptyPclRow();
+        STREAMS.forEach((s) => {
+          if (savedDoc.pclRow[s.key] !== undefined) popP[s.key] = String(savedDoc.pclRow[s.key] ?? '');
+        });
+        popP.avgTcl = savedDoc.pclRow.avgTcl !== null && savedDoc.pclRow.avgTcl !== undefined ? String(savedDoc.pclRow.avgTcl) : '';
         setPclRow(popP);
         setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
       }
-
-      if (response.data?.emailRecipient) {
-        setRecipientEmail(response.data.emailRecipient);
-      }
-
-      const emailRes = response.data?.emailNotification;
-      const emailSent = response.data?.emailSent;
-      const emailPending = response.data?.emailPending;
-      const statusFromApi = response.data?.emailStatus;
-
-      if (emailSent || statusFromApi === 'sent') {
-        setSavePhase('completed');
-        setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
-        showToast('Saved — Email Sent ✓', 'success');
-      } else {
-        setSavePhase('email_failed');
-        setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
-        showToast('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
-      }
     } catch (err) {
-      setSavePhase('save_failed');
-      setSaveSuccess(false);
-      console.error('[CR203Analysis] Save failed:', err);
-      const serverMessage = err.response?.data?.message || err.message;
-      showToast('Save Error: ' + serverMessage, 'error');
+      showToast(err.response?.data?.message || err.message || 'Unable to save CR 203 data.', 'error');
+      setSavePhase('idle');
     } finally {
       setSaving(false);
     }
@@ -844,55 +864,6 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
     } finally {
       setSaving(false);
     }
-  };
-
-  // Helper for Shift Status Badges
-  const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
-
-    if (lockedShifts[shiftId]) {
-      status = 'Locked';
-      bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 'shift1') {
-        if (lockedShifts.shift2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift2') {
-        if (!lockedShifts.shift1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift3') {
-        if (!lockedShifts.shift2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      }
-    }
-
-    return (
-      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-300 shadow-2xs ${bg}`}>
-        {status.toUpperCase()}
-      </span>
-    );
   };
 
   return (
@@ -961,19 +932,16 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-2">
-              {!isViewOnly && (
-                <button
-                  type="button"
-                  id="btn-cr203-reset"
-                  onClick={handleReset}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Reset form to last saved data"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Reset</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs shadow-2xs hover:border-slate-400 transition cursor-pointer disabled:opacity-50"
+                title="Reset uncommitted form changes"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                <span>Reset</span>
+              </button>
 
               {!isViewOnly && (
                 <StatusSaveButton
@@ -982,8 +950,8 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  defaultLabel="Save Shift"
-                  title="Save active shift data and notify assigned user"
+                  defaultLabel="Save Analysis"
+                  title="Save active slot data and notify assigned user"
                 />
               )}
             </div>
@@ -1015,12 +983,17 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
           <span className="font-bold text-slate-700">Shift Workflow Status:</span>
         </div>
         <div className="flex items-center gap-4 flex-wrap">
-          {SHIFT_MAPPING.map((shift) => (
-            <div key={shift.key} className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-600 text-[11px]">{shift.name.split(' ')[0]}:</span>
-              {getShiftBadge(shift.key)}
-            </div>
-          ))}
+          {SHIFT_MAPPING.map((shift) => {
+            const shiftStatus = getShiftStatus(shift.key);
+            return (
+              <div key={shift.key} className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-600 text-[11px]">{shift.name.split(' ')[0]}:</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${shiftStatus.bg}`}>
+                  {shiftStatus.label}
+                </span>
+              </div>
+            );
+          })}
         </div>
         {isViewOnly && (
           <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
@@ -1077,16 +1050,18 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
             <tbody className="divide-y divide-slate-200">
               {TIME_SLOTS.map((slot) => {
                 const styles = getRowStyles(slot.shiftGroup);
-                const shiftLocked = isShiftDisabled(slot.shiftGroup);
+                const status = getSlotStatus(slot.key);
+                const isDisabled = isSlotDisabled(slot.key);
+                const slotSaved = Boolean(lockedSlots[slot.key]?.isSaved);
 
                 return (
                   <tr
                     key={slot.key}
-                    className={`transition-colors duration-100 ${styles.row} ${shiftLocked ? 'opacity-85' : ''}`}
+                    className={`transition-colors duration-100 ${styles.row} ${isDisabled ? 'opacity-85' : ''}`}
                   >
                     {/* Time slot & shift label */}
                     <td className="px-5 py-2.5 align-top">
-                      <div className="flex flex-col gap-1 mt-1">
+                      <div className="flex flex-col gap-1.5 mt-0.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-mono font-bold text-slate-800 whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                             {slot.time}
@@ -1094,15 +1069,28 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                           <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${styles.badge}`}>
                             {slot.shift}
                           </span>
-                          {shiftLocked && (
-                            <Lock className="w-3 h-3 text-slate-400" title="Shift is locked or waiting" />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {status === 'locked' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-200 text-slate-700 inline-flex items-center gap-1 shadow-2xs">
+                              <Lock className="w-2.5 h-2.5 text-slate-500" /> LOCKED
+                            </span>
+                          )}
+                          {status === 'open' && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap shadow-2xs ${
+                              slotSaved
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            }`}>
+                              {slotSaved ? 'EDITABLE' : 'NEW'}
+                            </span>
+                          )}
+                          {status === 'waiting' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap bg-slate-100 text-slate-500 border border-slate-200 shadow-2xs">
+                              WAITING
+                            </span>
                           )}
                         </div>
-                        {['t07', 't15', 't23'].includes(slot.key) && (
-                          <div className="mt-0.5">
-                            {getShiftBadge(slot.shiftGroup)}
-                          </div>
-                        )}
                       </div>
                     </td>
 
@@ -1117,7 +1105,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                           <CR203Cell
                             id={`cr203-input-${slot.key}-${stream.key}`}
                             value={cellVal}
-                            disabled={shiftLocked}
+                            disabled={isDisabled}
                             onChange={(e) =>
                               handleTimeCellChange(slot.key, stream.key, e.target.value)
                             }
@@ -1138,7 +1126,7 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
                       <CR203Cell
                         id={`cr203-input-${slot.key}-avgtcl`}
                         value={timeRows[slot.key]?.avgTcl ?? ''}
-                        disabled={shiftLocked}
+                        disabled={isDisabled}
                         onChange={(e) =>
                           handleTimeCellChange(slot.key, 'avgTcl', e.target.value)
                         }
@@ -1269,83 +1257,69 @@ const CR203AnalysisPage = ({ plantId = 'acl' }) => {
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             <span>
-              Values for <strong>CR 203 (CNH₃ Streams A - H)</strong>, <strong>FNH₃</strong>, <strong>AVG TCl</strong> and <strong>PCl</strong>. Numeric values only.
+              Values for <strong>CR 203</strong> (CNH₃ A–H, AVG TCl, FNH₃, PCl). Frequency: <strong>ONCE IN A SHIFT</strong>. Unit: <strong>Kgm/m³</strong>.
             </span>
           </div>
           <div className="font-mono text-[11px] text-slate-400">
-            Total Slots: 6 + 1 (FNH₃) + 1 (PCl) · Frequency: ONCE IN A SHIFT · Unit: Kgm/m³
+            Total Slots: {TIME_SLOTS.length} + FNH₃ & PCl Streams
           </div>
         </div>
       </div>
 
       {/* ── Save Confirmation Modal ────────────────────────────────────────── */}
-      {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                <Send className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900">
-                  Confirm Shift Submission
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Please review the shift details before saving.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Plant / Crystallizer:</span>
-                <span className="font-bold text-slate-900">ACL Plant → CR 203</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Selected Date:</span>
-                <span className="font-bold text-slate-900">{formatDateDisplay(confirmData.date)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-semibold">Shift to Save:</span>
-                <span className="font-extrabold text-blue-600">{confirmData.shift.name}</span>
-              </div>
-              {confirmData.isFinalEdit && (
-                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px] font-bold">
-                  ⚠️ Notice: This is the final allowed edit for III SHIFT. After this save, all shifts for today will lock permanently.
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
-              >
-                Review / Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — Slot ${confirmData?.targetSlotObj?.time || confirmData?.targetSlotKey || ''} (${confirmData?.targetSlotObj?.shift || ''}) (CR 203)`}
+        subtitle={`ACL Plant for ${formatDateDisplay(confirmData?.date)}`}
+        prompt="Please review the slot details before saving."
+        isFinalEdit={confirmData?.isCorrection}
+        warningNotice={confirmData?.isCorrection ? '⚠️ Notice: This is the single permitted correction edit for this time slot. After this save, this slot will be permanently locked.' : null}
+        sections={confirmData?.targetSlotKey ? [
+          {
+            title: `Slot ${confirmData.targetSlotObj?.time || confirmData.targetSlotKey} Readings:`,
+            items: [
+              ...STREAMS.map((s) => {
+                const val = timeRows[confirmData.targetSlotKey]?.[s.key];
+                return {
+                  label: `Stream ${s.label}`,
+                  value: val === '' || val === null || val === undefined ? '—' : `${val} Kgm/m³`,
+                };
+              }),
+              {
+                label: 'AVG TCl',
+                value: (timeRows[confirmData.targetSlotKey]?.avgTcl === '' || timeRows[confirmData.targetSlotKey]?.avgTcl === null || timeRows[confirmData.targetSlotKey]?.avgTcl === undefined)
+                  ? '—'
+                  : `${timeRows[confirmData.targetSlotKey]?.avgTcl} Kgm/m³`,
+              },
+            ],
+          },
+          ...(confirmData.fnh3Diff || confirmData.pclDiff ? [
+            {
+              title: 'Global Readings (FNH₃ & PCl):',
+              items: [
+                ...(confirmData.fnh3Diff ? STREAMS.map((s) => {
+                  const val = fnh3Row[s.key];
+                  return {
+                    label: `FNH₃ (${s.label})`,
+                    value: val === '' || val === null || val === undefined ? '—' : `${val} Kgm/m³`,
+                  };
+                }) : []),
+                ...(confirmData.pclDiff ? STREAMS.map((s) => {
+                  const val = pclRow[s.key];
+                  return {
+                    label: `PCl (${s.label})`,
+                    value: val === '' || val === null || val === undefined ? '—' : `${val} Kgm/m³`,
+                  };
+                }) : []),
+              ],
+            },
+          ] : []),
+        ] : []}
+        columns={4}
+      />
 
     </div>
   );

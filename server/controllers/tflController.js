@@ -1,5 +1,6 @@
 const { PlantAnalysisRecord, PureSaltAnalysis, Plant, Company } = require('../models');
 const { ANALYSIS_LIMITS_REGISTRY } = require('../services/analysisValidation');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
 /**
  * Standardize any date string (YYYY-MM-DD, DD-MM-YYYY, ISO) to 'YYYY-MM-DD'
@@ -459,7 +460,7 @@ const getTFLOverallReportData = async (req, res) => {
     return res.status(200).json({
       success: true,
       hasData: totalRecords > 0,
-      reportDate: new Date().toISOString().split('T')[0],
+      reportDate: getOperatingDateIST(new Date()),
       totalRecords,
       summary: {
         totalPlants: selectedPlants.length,

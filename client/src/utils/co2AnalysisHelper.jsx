@@ -1,6 +1,7 @@
 import React from 'react';
 import api from '../services/api';
 import { AlertCircle, CheckCircle2, Clock, Calendar, Mail, RotateCw, Lock, Save } from 'lucide-react';
+import ConfirmSaveModal from '../components/common/ConfirmSaveModal';
 
 /**
  * Returns today's operating date in Asia/Kolkata timezone (YYYY-MM-DD)
@@ -13,6 +14,8 @@ export const getTodayAsiaKolkata = () => {
     day: '2-digit',
   }).format(new Date());
 };
+
+export const OPERATING_DAY_START_HOUR = 6;
 
 /**
  * Exact operating date in Asia/Kolkata timezone with 06:00-06:00 IST cycle (hourCycle h23)
@@ -39,7 +42,7 @@ export const getOperatingDateIST = (now = new Date()) => {
   let targetMonth = m;
   let targetDay = d;
 
-  if (hour < 6) {
+  if (hour < OPERATING_DAY_START_HOUR) {
     const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
     targetYear = prevDay.getUTCFullYear();
     targetMonth = prevDay.getUTCMonth() + 1;
@@ -175,98 +178,23 @@ export const SaveConfirmationModal = ({
   date = '',
   shiftOrTime = 'Current Shift',
   summaryItems = [],
+  summarySections = null,
   recipientEmail = '',
 }) => {
-  if (!isOpen) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-fadeIn"
-    >
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 text-slate-800 space-y-4">
-        <div className="flex items-start justify-between border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="text-base font-bold text-slate-900">
-              Confirm Submission
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Review details before persisting to MongoDB
-            </p>
-          </div>
-          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-            CO2 Plant
-          </span>
-        </div>
-
-        <div className="space-y-2 text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
-          <div className="flex justify-between py-1 border-b border-slate-200/60">
-            <span className="text-slate-500 font-semibold">Analysis Name:</span>
-            <span className="font-bold text-slate-900">{analysisName}</span>
-          </div>
-          <div className="flex justify-between py-1 border-b border-slate-200/60">
-            <span className="text-slate-500 font-semibold">Date Assigned:</span>
-            <span className="font-bold font-mono text-slate-900">{formatDateDisplay(date)}</span>
-          </div>
-          <div className="flex justify-between py-1 border-b border-slate-200/60">
-            <span className="text-slate-500 font-semibold">Shift / Frequency:</span>
-            <span className="font-bold text-slate-900">{shiftOrTime}</span>
-          </div>
-          {recipientEmail && (
-            <div className="flex justify-between py-1">
-              <span className="text-slate-500 font-semibold">Notification Recipient:</span>
-              <span className="font-bold font-mono text-blue-700">{recipientEmail}</span>
-            </div>
-          )}
-        </div>
-
-        {summaryItems && summaryItems.length > 0 && (
-          <div className="space-y-1.5 max-h-44 overflow-y-auto">
-            <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-              Measurement Summary:
-            </h4>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {summaryItems.map((item, idx) => (
-                <div key={idx} className="bg-slate-100/70 p-2 rounded-lg border border-slate-200/60">
-                  <div className="text-[10px] text-slate-500 font-medium">{item.label}</div>
-                  <div className="font-bold text-slate-900 font-mono mt-0.5">{item.value || '—'}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold text-xs transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20 cursor-pointer disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Saving to MongoDB...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Confirm & Submit</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmSaveModal
+      isOpen={isOpen}
+      onCancel={onClose}
+      onConfirm={onConfirm}
+      saving={saving}
+      title={`Confirm Save — ${shiftOrTime}`}
+      subtitle={`${analysisName} for ${formatDateDisplay(date)}`}
+      prompt={`Are you sure you want to save measurements for ${shiftOrTime}?`}
+      sectionTitle={`Values to be saved (${shiftOrTime}):`}
+      items={summarySections ? undefined : summaryItems}
+      sections={summarySections || undefined}
+      recipientEmail={recipientEmail}
+    />
   );
 };
 

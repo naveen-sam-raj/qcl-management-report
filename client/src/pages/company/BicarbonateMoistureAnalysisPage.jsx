@@ -11,7 +11,6 @@ import {
   ArrowLeft,
   AlertCircle,
   Save,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -20,6 +19,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
 export const BICARBONATE_MOISTURE_LIMITS = {
@@ -428,17 +428,6 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
           )}
 
           {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
-          )}
-
-          {!isViewOnly && (
             <StatusSaveButton
               id="btn-bicarbonate-moisture-save"
               saving={saving}
@@ -750,46 +739,24 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* Confirmation Modal */}
-      {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-scaleUp">
-            <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white">
-              <div className="flex items-center gap-2 font-bold text-sm">
-                <AlertCircle className="w-4 h-4 text-cyan-400" />
-                <span>Confirm Analysis Submission</span>
-              </div>
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-white transition"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-xs text-slate-600 leading-relaxed">
-                You are about to save data for <strong>{confirmData.reading?.shift}</strong>. Saving this slot allows exactly one correction until the subsequent slot is saved.
-              </p>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmModal(false)}
-                  className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmSave}
-                  disabled={saving}
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Confirm & Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Analysis Submission"
+        subtitle={`Soda Ash Plant for ${date}`}
+        prompt={`You are about to save data for ${confirmData?.reading?.shift || ''}. Saving this slot allows exactly one correction until the subsequent slot is saved.`}
+        items={[
+          { label: 'M 404 Option A', value: confirmData?.reading?.m404_a || '—' },
+          { label: 'M 404 Option B', value: confirmData?.reading?.m404_b || '—' },
+          { label: 'M 404 Option C', value: confirmData?.reading?.m404_c || '—' },
+          { label: 'M 405 Outlet', value: confirmData?.reading?.m405_outlet || '—' },
+          { label: 'SB Turbidity (1)', value: confirmData?.reading?.sb_turb1 || '—' },
+          { label: 'SB Turbidity (2)', value: confirmData?.reading?.sb_turb2 || '—' },
+        ]}
+        columns={3}
+      />
     </div>
   );
 };

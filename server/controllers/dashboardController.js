@@ -1,5 +1,6 @@
 const { PlantAnalysisRecord, PureSaltAnalysis } = require('../models');
 const { getAnalysisConfig } = require('../config/analysisLabels');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
 // 30-second In-Memory Cache
 const liveDashboardCache = new Map();
@@ -17,10 +18,10 @@ const PLANT_ALIASES = {
 const ALL_PLANTS = ['ACL', 'SA', 'OFFSITE', 'CO2'];
 
 /**
- * Returns today's date in IST (YYYY-MM-DD)
+ * Returns today's operating date in IST (06:00 IST cycle, YYYY-MM-DD)
  */
 function getTodayIST() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  return getOperatingDateIST(new Date());
 }
 
 /**

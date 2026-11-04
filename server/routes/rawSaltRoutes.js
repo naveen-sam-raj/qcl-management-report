@@ -2,11 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord, Plant } = require('../models');
-
-// Helper: Get today's date in Asia/Kolkata timezone (YYYY-MM-DD)
-const getTodayKolkata = () => {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-};
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
 // In-memory cache storage for Raw Salt records
 const rawSaltRecords = [];
@@ -31,12 +27,12 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // 2. Strict Current-Date Restriction (Asia/Kolkata)
-    const todayKolkata = getTodayKolkata();
-    if (payload.date !== todayKolkata) {
+    // 2. Strict Operating-Date Restriction (06:00 IST)
+    const operatingDate = getOperatingDateIST(new Date());
+    if (payload.date !== operatingDate) {
       return res.status(400).json({
         success: false,
-        message: `Date restriction enforced: Raw Salt Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+        message: `Date restriction enforced: Raw Salt Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
       });
     }
 

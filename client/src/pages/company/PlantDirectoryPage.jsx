@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Factory, Flame, Globe, Gauge, ArrowRight, BarChart3, FileSpreadsheet } from 'lucide-react';
+import { Factory, Flame, Globe, Gauge, ArrowRight } from 'lucide-react';
 import LicenseInfoCard from '../../components/common/LicenseInfoCard';
 import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
-import { generateAndDownloadTFLOverallExcel } from '../../services/tflOverallExcel';
 
 import OverallExcelReportModal from '../../components/common/OverallExcelReportModal';
 
@@ -56,40 +55,18 @@ const PlantDirectoryPage = () => {
             <span>TUTICORIN ALKALI CHEMICALS AND FERTILIZERS LIMITED</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-            TFL Admin Dashboard
+            Plant Analysis
           </h1>
           <p className="text-xs text-slate-500">
             Select a plant below to view options and operational parameters.
           </p>
         </div>
 
-        {/* Top-Right Header Actions: Badge + Overall Graph + Overall Excel Report */}
+        {/* Top-Right Header Actions: Badge */}
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
           <span className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">
             4 Plant Units
           </span>
-
-          {/* 📊 Overall Graph Button */}
-          <button
-            id="btn-tfl-overall-graph"
-            onClick={() => navigate('/admin/tfl/overall-graph')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 rounded-lg transition shadow-xs cursor-pointer"
-            title="View Consolidated 4-Plant Analytics Graph"
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
-            <span>Overall Graph</span>
-          </button>
-
-          {/* 📄 Overall Excel Report Button */}
-          <button
-            id="btn-tfl-overall-excel"
-            onClick={() => setShowExcelModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 hover:border-emerald-300 rounded-lg transition shadow-xs cursor-pointer"
-            title="Download Consolidated 5-Sheet Excel Workbook for All 4 Plants"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Overall Excel Report</span>
-          </button>
         </div>
       </div>
 

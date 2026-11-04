@@ -8,6 +8,7 @@ const {
 } = require('../controllers/reportController');
 const { protect } = require('../middleware/auth');
 const { PlantAnalysisRecord } = require('../models');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 const { authorizeRoles } = require('../middleware/rbac');
 
 router.use(protect);
@@ -654,7 +655,7 @@ router.get('/generic-range', async (req, res) => {
       });
     }
 
-    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const todayIST = getOperatingDateIST(new Date());
     if (toDateStr > todayIST || fromDateStr > todayIST) {
       return res.status(400).json({
         success: false,

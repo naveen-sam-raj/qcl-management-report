@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Plant, User, ActivityLog, PlantAnalysisRecord, Company } = require('../models');
 const { createNodemailerTransporter } = require('./emailService');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
 // Map of analysis types / keywords to plant codes for intelligent inference
 const ANALYSIS_PLANT_MAPPING = {
@@ -3965,7 +3966,7 @@ const executeSaveAndEmailWorkflow = async ({
 
   // 3. Save to MongoDB Atlas (if not already saved explicitly)
   let savedRecord = explicitRecord;
-  const targetDate = date || rawBody.date || new Date().toISOString().split('T')[0];
+  const targetDate = date || rawBody.date || getOperatingDateIST(new Date());
   const targetShift = shift || rawBody.shift || 'All Shifts';
   const targetUnit = unit || rawBody.unit || '';
   const resolvedAnalysisType = analysisType || `${plantName} Analysis`;

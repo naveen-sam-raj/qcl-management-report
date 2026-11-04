@@ -1,10 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
-import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
+import { getOperatingDateIST, SaveConfirmationModal } from '../../utils/co2AnalysisHelper';
 import {
   formatDateDisplay,
   SaveStatusBanner,
-  SaveConfirmationModal,
   EditedBadge,
   LockedDateDisplay,
   StatusSaveButton,
@@ -17,7 +16,6 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  RotateCcw,
   ChevronRight,
   Clock,
   Waves,
@@ -391,17 +389,6 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
             status={overallBadgeStatus}
             subLabel={isAllLocked ? 'all slots locked' : lockedSlots['t11']?.isSaved ? 'in progress' : 'first slot ready'}
           />
-
-          {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving || isAllLocked}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
-          )}
 
           {!isViewOnly ? (
             <StatusSaveButton
@@ -850,10 +837,61 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
         onConfirm={handleConfirmSave}
-        loading={saving}
-        summaryItems={summaryItems}
+        saving={saving}
         analysisName="Sewer Water Analysis"
         date={date}
+        shiftOrTime="Bi-hourly (11:00 - 21:00)"
+        summarySections={(() => {
+          const targetReadings = confirmData?.readings || readings;
+          const targetSlotKey = confirmData?.targetSlot;
+          const slotsToDisplay = targetSlotKey
+            ? targetReadings.filter((r) => r.id === targetSlotKey)
+            : targetReadings.filter((r) => !lockedSlots[r.id]?.isLocked);
+
+          return slotsToDisplay
+            .filter((r) => SEWER_PARAMS.some(([sec, param]) => r[sec]?.[param] !== '' && r[sec]?.[param] !== null && r[sec]?.[param] !== undefined))
+            .map((r) => ({
+              title: `Slot ${r.time}:`,
+              items: [
+                {
+                  label: '200# Sec FNH₃',
+                  value: r.sec200?.fnh3 !== '' && r.sec200?.fnh3 !== null && r.sec200?.fnh3 !== undefined ? `${r.sec200.fnh3} ppm` : '—',
+                },
+                {
+                  label: '200# Sec CNH₃',
+                  value: r.sec200?.cnh3 !== '' && r.sec200?.cnh3 !== null && r.sec200?.cnh3 !== undefined ? `${r.sec200.cnh3} ppm` : '—',
+                },
+                {
+                  label: '400# Sec FNH₃',
+                  value: r.sec400?.fnh3 !== '' && r.sec400?.fnh3 !== null && r.sec400?.fnh3 !== undefined ? `${r.sec400.fnh3} ppm` : '—',
+                },
+                {
+                  label: '400# Sec CNH₃',
+                  value: r.sec400?.cnh3 !== '' && r.sec400?.cnh3 !== null && r.sec400?.cnh3 !== undefined ? `${r.sec400.cnh3} ppm` : '—',
+                },
+                {
+                  label: '400# Sec HCO₃',
+                  value: r.sec400?.hco3 !== '' && r.sec400?.hco3 !== null && r.sec400?.hco3 !== undefined ? r.sec400.hco3 : '—',
+                },
+                {
+                  label: 'Final Outlet FNH₃',
+                  value: r.finalOutlet?.fnh3 !== '' && r.finalOutlet?.fnh3 !== null && r.finalOutlet?.fnh3 !== undefined ? `${r.finalOutlet.fnh3} ppm` : '—',
+                },
+                {
+                  label: 'Final Outlet CNH₃',
+                  value: r.finalOutlet?.cnh3 !== '' && r.finalOutlet?.cnh3 !== null && r.finalOutlet?.cnh3 !== undefined ? `${r.finalOutlet.cnh3} ppm` : '—',
+                },
+                {
+                  label: 'Final Outlet HCO₃',
+                  value: r.finalOutlet?.hco3 !== '' && r.finalOutlet?.hco3 !== null && r.finalOutlet?.hco3 !== undefined ? r.finalOutlet.hco3 : '—',
+                },
+                {
+                  label: 'Final Outlet PCl',
+                  value: r.finalOutlet?.pcl !== '' && r.finalOutlet?.pcl !== null && r.finalOutlet?.pcl !== undefined ? r.finalOutlet.pcl : '—',
+                },
+              ],
+            }));
+        })()}
       />
     </div>
   );

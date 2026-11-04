@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import api from '../../services/api';
 import {
   ResponsiveContainer,
@@ -137,7 +138,7 @@ const PlantAnalyticsGraphPage = ({ plantId, plantTitle }) => {
   const currentPlantTitle = plantTitle || meta.title;
   const IconComponent = meta.icon;
 
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const getTodayStr = () => getOperatingDateIST();
   const getNDaysAgoStr = (n) => {
     const d = new Date();
     d.setDate(d.getDate() - n);

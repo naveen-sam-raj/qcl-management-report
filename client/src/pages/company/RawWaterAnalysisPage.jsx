@@ -15,7 +15,6 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
-  RotateCcw,
   ChevronRight,
   Droplets,
   FlaskConical,
@@ -332,14 +331,6 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
           />
 
           {/* Action Buttons: Reset & Save */}
-          <button
-            onClick={handleReset}
-            disabled={saving || isLocked}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
 
           {!isViewOnly ? (
             <StatusSaveButton

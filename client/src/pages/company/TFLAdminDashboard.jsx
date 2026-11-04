@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import api from '../../services/api';
 import { useToast } from '../../components/common/Toast';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 // Plant metadata and branding
 const PLANT_CONFIG = {
@@ -76,10 +77,10 @@ function formatDateRange(from, to) {
 }
 
 /**
- * Returns today's date in IST format: YYYY-MM-DD
+ * Returns today's operating date in IST format: YYYY-MM-DD
  */
 function getTodayIST() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  return getOperatingDateIST();
 }
 
 /**

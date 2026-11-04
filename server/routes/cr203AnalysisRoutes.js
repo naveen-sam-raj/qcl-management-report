@@ -2,12 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 const { validateAnalysisPayload } = require('../services/analysisValidation');
 const {
   hydrateLockState,
   getInitialLockState,
   validateSequentialSave,
   applySequentialSaveTransition,
+  computeSlotTransition,
+  isValueDifferent,
 } = require('../services/analysisLockEngine');
 
 // In-memory fallback
@@ -15,6 +18,17 @@ const cr203Records = [];
 
 // Apply authentication middleware
 router.use(protect);
+
+const UNITS_ORDER = ['t07', 't11', 't15', 't19', 't23', 't03'];
+
+const SLOT_SHIFT_MAP = {
+  t07: 'shift1',
+  t11: 'shift1',
+  t15: 'shift2',
+  t19: 'shift2',
+  t23: 'shift3',
+  t03: 'shift3',
+};
 
 const SHIFT_TIME_SLOTS = {
   shift1: ['t07', 't11'],
@@ -30,32 +44,117 @@ const SHIFT_DISPLAY_NAMES = {
 
 const STREAMS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
-const defaultLocks = {
-  shift1: false,
-  shift1Locked: false,
-  shift2: true,
-  shift2Locked: true,
-  shift3: true,
-  shift3Locked: true,
-  shift1Saved: false,
-  shift2Saved: false,
-  shift3Saved: false,
-  shift3Edits: 0,
-};
+/**
+ * Derives lockedSlots state in memory for legacy documents that do not have data.lockedSlots.
+ */
+function deriveLegacyLockedSlots(timeRows = {}, legacyLockedShifts = {}, unitsOrder = UNITS_ORDER) {
+  const result = {};
+  const savedIndices = [];
+  unitsOrder.forEach((slotKey, idx) => {
+    const row = timeRows?.[slotKey];
+    if (row && typeof row === 'object' && Object.values(row).some((v) => v !== null && v !== '' && v !== undefined)) {
+      savedIndices.push(idx);
+    }
+  });
 
-// Asia/Kolkata date helper
-const getTodayKolkata = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
-};
+  const isLegacyShiftLocked = (shiftKey) => {
+    if (!legacyLockedShifts) return false;
+    if (legacyLockedShifts.allPermanentlyLocked) return true;
+    if (legacyLockedShifts[`${shiftKey}Locked`] === true) return true;
+    if (
+      legacyLockedShifts.slots &&
+      legacyLockedShifts.slots[shiftKey]?.isLocked === true &&
+      legacyLockedShifts.slots[shiftKey]?.isSaved === true
+    ) {
+      return true;
+    }
+    if (legacyLockedShifts[shiftKey] === true && legacyLockedShifts[`${shiftKey}Saved`] === true) {
+      return true;
+    }
+    return false;
+  };
+
+  const allLocked = Boolean(legacyLockedShifts?.allPermanentlyLocked);
+  if (savedIndices.length === 0) {
+    unitsOrder.forEach((slotKey) => {
+      result[slotKey] = {
+        isSaved: false,
+        isLocked: allLocked,
+        correctionUsed: false,
+        editsCount: 0,
+      };
+    });
+    return result;
+  }
+
+  const hIdx = Math.max(...savedIndices);
+  const hSlotKey = unitsOrder[hIdx];
+  const hShiftKey = SLOT_SHIFT_MAP[hSlotKey] || 'shift1';
+  const hShiftIsLocked = isLegacyShiftLocked(hShiftKey) || Boolean(legacyLockedShifts.allPermanentlyLocked);
+
+  unitsOrder.forEach((slotKey, idx) => {
+    if (idx < hIdx) {
+      const row = timeRows?.[slotKey];
+      const hasData = row && typeof row === 'object' && Object.values(row).some((v) => v !== null && v !== '' && v !== undefined);
+      result[slotKey] = {
+        isSaved: hasData,
+        isLocked: true,
+        correctionUsed: true,
+        editsCount: 1,
+      };
+    } else if (idx === hIdx) {
+      result[slotKey] = {
+        isSaved: true,
+        isLocked: hShiftIsLocked,
+        correctionUsed: hShiftIsLocked,
+        editsCount: hShiftIsLocked ? 1 : 0,
+      };
+    } else if (idx === hIdx + 1) {
+      result[slotKey] = {
+        isSaved: false,
+        isLocked: allLocked,
+        correctionUsed: false,
+        editsCount: 0,
+      };
+    } else {
+      result[slotKey] = {
+        isSaved: false,
+        isLocked: allLocked,
+        correctionUsed: false,
+        editsCount: 0,
+      };
+    }
+  });
+
+  return result;
+}
+
+/**
+ * Synchronizes backward-compatible lockedShifts from slot-level lockedSlots.
+ */
+function syncLockedShifts(lockedSlots = {}, unitsOrder = UNITS_ORDER) {
+  const s1Saved = Boolean(lockedSlots.t07?.isSaved || lockedSlots.t11?.isSaved);
+  const s2Saved = Boolean(lockedSlots.t15?.isSaved || lockedSlots.t19?.isSaved);
+  const s3Saved = Boolean(lockedSlots.t23?.isSaved || lockedSlots.t03?.isSaved);
+
+  const s1Locked = Boolean(lockedSlots.t07?.isLocked && lockedSlots.t11?.isLocked);
+  const s2Locked = Boolean(lockedSlots.t15?.isLocked && lockedSlots.t19?.isLocked);
+  const s3Locked = Boolean(lockedSlots.t23?.isLocked && lockedSlots.t03?.isLocked);
+
+  return {
+    type: 'shift',
+    shift1Saved: s1Saved,
+    shift2Saved: s2Saved,
+    shift3Saved: s3Saved,
+    shift1Locked: s1Locked,
+    shift2Locked: s2Locked,
+    shift3Locked: s3Locked,
+    shift1: s1Locked,
+    shift2: s2Locked,
+    shift3: s3Locked,
+    allPermanentlyLocked: s1Locked && s2Locked && s3Locked,
+  };
+}
 
 /**
  * @desc    Save CR 203 Analysis data (Shift-wise workflow, today date restriction, locking & instant email)
@@ -90,19 +189,18 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // 2. Strict Today's Date Restriction (Asia/Kolkata)
-    const todayKolkata = getTodayKolkata();
+    // 2. Strict Today's Operating Date Restriction (06:00 IST)
+    const operatingDate = getOperatingDateIST(new Date());
     const isTestMode = req.headers['x-test-mode'] === 'true' || payload.isTestMode === true;
-    if (payload.date !== todayKolkata && !isTestMode) {
+    if (payload.date !== operatingDate && !isTestMode) {
       return res.status(400).json({
         success: false,
-        message: `Date restriction enforced: CR 203 Analysis records can only be created or modified for today's date (${todayKolkata}). Historical or future modifications are not permitted.`,
+        message: `Date restriction enforced: CR 203 Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
       });
     }
 
     const plantTarget = payload.plant || 'ACL Plant';
-    const targetShifts = ['shift1', 'shift2', 'shift3'];
-    const newlySavedShifts = [];
+    const fieldsToCheck = [...STREAMS, 'avgTcl'];
 
     // Query existing record for this date
     const query = {
@@ -116,7 +214,7 @@ router.post('/', async (req, res) => {
 
     let existingDoc = await PlantAnalysisRecord.findOne(query);
     let existingData = existingDoc?.data || {};
-    let existingTimeRows = existingData.timeRows || {};
+    let existingTimeRows = existingData.timeRows || existingData.shiftRows || {};
     let existingFnh3Row = existingData.fnh3Row || {};
     let existingPclRow = existingData.pclRow || {};
 
@@ -124,267 +222,174 @@ router.post('/', async (req, res) => {
     const incomingFnh3Row = payload.fnh3Row || {};
     const incomingPclRow = payload.pclRow || {};
 
-    // Helper: check if a shift has non-empty values
-    const hasShiftData = (shiftKey, tRowsSource) => {
-      if (!tRowsSource) return false;
-      const source = tRowsSource[shiftKey] || tRowsSource;
-      const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
-      return slotKeys.some((sKey) => {
-        const slot = source[sKey] || (tRowsSource && tRowsSource[sKey]);
-        return slot && Object.values(slot).some((v) => v !== null && v !== '');
-      });
-    };
+    let existingLockedSlots = existingData.lockedSlots;
+    if (!existingLockedSlots || Object.keys(existingLockedSlots).length === 0) {
+      existingLockedSlots = deriveLegacyLockedSlots(existingTimeRows, existingData.lockedShifts, UNITS_ORDER);
+    }
 
-    // Helper: check if incoming shift data differs from existing
-    const isShiftDiff = (shiftKey, oldTRows, newTRows) => {
-      if (!oldTRows && !newTRows) return false;
-      const oldSrc = (oldTRows && oldTRows[shiftKey]) ? oldTRows[shiftKey] : oldTRows;
-      const newSrc = (newTRows && newTRows[shiftKey]) ? newTRows[shiftKey] : newTRows;
-      const slotKeys = SHIFT_TIME_SLOTS[shiftKey] || [];
-      return slotKeys.some((sKey) => {
-        const oldSlot = (oldSrc && oldSrc[sKey]) || (oldTRows && oldTRows[sKey]) || {};
-        const newSlot = (newSrc && newSrc[sKey]) || (newTRows && newTRows[sKey]) || {};
-        const fieldsToCheck = [...STREAMS, 'avgTcl'];
-        return fieldsToCheck.some((f) => {
-          let oVal = oldSlot[f] ?? null;
-          let nVal = newSlot[f] ?? null;
-          if (nVal === '') nVal = null;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            return Number(oVal) !== Number(nVal);
+    let editedFields = { ...(existingData.editedFields || {}) };
+    let editAuditHistory = [...(existingData.editAuditHistory || [])];
+
+    // Check changes for global FNH3 / PCL rows
+    const fnh3Changed = fieldsToCheck.some((f) => isValueDifferent(existingFnh3Row[f], incomingFnh3Row[f]));
+    const pclChanged = fieldsToCheck.some((f) => isValueDifferent(existingPclRow[f], incomingPclRow[f]));
+
+    // Compute slot transition using pure engine
+    const transition = computeSlotTransition({
+      unitsOrder: UNITS_ORDER,
+      lockedSlots: existingLockedSlots,
+      storedRows: existingTimeRows,
+      incomingRows: incomingTimeRows,
+      now: new Date(),
+    });
+
+    // Identical re-save: if no time slot changed and no global rows changed
+    if (transition.noChange && !fnh3Changed && !pclChanged) {
+      return res.status(200).json({
+        success: true,
+        noChange: true,
+        message: 'No changes',
+      });
+    }
+
+    // If slot changes were detected and transition was rejected
+    if (!transition.ok && (!transition.noChange || (!fnh3Changed && !pclChanged))) {
+      return res.status(transition.status || 400).json({
+        success: false,
+        message: transition.message,
+      });
+    }
+
+    // Determine targetUnit and active shift
+    let targetUnit = transition.targetUnit;
+    if (!targetUnit && (fnh3Changed || pclChanged)) {
+      const allSlotsLocked = UNITS_ORDER.every((k) => existingLockedSlots[k]?.isLocked);
+      if (allSlotsLocked) {
+        return res.status(400).json({
+          success: false,
+          message: 'All slots for today are permanently locked. Cannot edit FNH₃ or PCl.',
+        });
+      }
+      targetUnit = UNITS_ORDER.find((k) => !existingLockedSlots[k]?.isLocked) || 't07';
+    }
+
+    const activeShiftKey = (targetUnit && SLOT_SHIFT_MAP[targetUnit]) || 'shift1';
+
+    // Update lockedSlots based on transition
+    const updatedLockedSlots = JSON.parse(JSON.stringify(existingLockedSlots));
+    const nowIso = new Date().toISOString();
+
+    if (transition.targetUnit) {
+      const uKey = transition.targetUnit;
+      const targetIdx = UNITS_ORDER.indexOf(uKey);
+
+      if (!existingLockedSlots[uKey]?.isSaved) {
+        // First save of this slot
+        updatedLockedSlots[uKey] = {
+          isSaved: true,
+          correctionUsed: false,
+          editsCount: 0,
+          isLocked: false,
+          savedAt: nowIso,
+        };
+
+        // Permanently lock all predecessors
+        for (let p = 0; p < targetIdx; p++) {
+          const pKey = UNITS_ORDER[p];
+          if (updatedLockedSlots[pKey]) {
+            updatedLockedSlots[pKey].isLocked = true;
           }
-          return oVal !== nVal;
-        });
-      });
-    };
-
-    let lockedShifts = existingData.lockedShifts
-      ? hydrateLockState(existingData.lockedShifts, { type: 'shift', items: targetShifts })
-      : getInitialLockState({ type: 'shift', items: targetShifts });
-    let editedFields = existingData.editedFields || {};
-    let editAuditHistory = existingData.editAuditHistory || [];
-
-    const isShiftLocked = (key) => {
-      const check = validateSequentialSave({
-        lockState: lockedShifts,
-        targetItem: key,
-        itemsOrder: targetShifts,
-        isDiff: true,
-        type: 'shift',
-      });
-      return !check.allowed;
-    };
-
-    if (lockedShifts.allPermanentlyLocked) {
-      const hasSlotChanges = targetShifts.some(
-        (key) => hasShiftData(key, incomingTimeRows) && isShiftDiff(key, existingTimeRows, incomingTimeRows)
-      );
-      if (hasSlotChanges) {
-        return res.status(400).json({
-          success: false,
-          message: 'All shifts for this date are permanently locked. No further edits permitted.',
-        });
-      }
-    }
-
-    const willSave = {};
-
-    // Check lock violations for time slots
-    for (const key of targetShifts) {
-      if (hasShiftData(key, incomingTimeRows) && isShiftLocked(key)) {
-        if (isShiftDiff(key, existingTimeRows, incomingTimeRows)) {
-          const check = validateSequentialSave({
-            lockState: lockedShifts,
-            targetItem: key,
-            itemsOrder: targetShifts,
-            isDiff: true,
-            type: 'shift',
-          });
-          return res.status(400).json({
-            success: false,
-            message: check.message || `Cannot edit ${SHIFT_DISPLAY_NAMES[key] || key} because it is locked.`,
-          });
         }
-      }
-    }
-
-    // Determine which shift has changes and is unlocked
-    for (const key of targetShifts) {
-      if (hasShiftData(key, incomingTimeRows) && isShiftDiff(key, existingTimeRows, incomingTimeRows) && !isShiftLocked(key)) {
-        willSave[key] = true;
-      }
-    }
-
-    // Also check changes in global FNH3 / PCL rows
-    const isRowDiff = (oldR, newR) => {
-      const fields = [...STREAMS, 'avgTcl'];
-      return fields.some((f) => {
-        let oVal = oldR[f] ?? null;
-        let nVal = newR[f] ?? null;
-        if (nVal === '') nVal = null;
-        if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-          return Number(oVal) !== Number(nVal);
-        }
-        return oVal !== nVal;
-      });
-    };
-
-    const fnh3Changed = isRowDiff(existingFnh3Row, incomingFnh3Row);
-    const pclChanged = isRowDiff(existingPclRow, incomingPclRow);
-
-    // If only FNH3 or PCL changed, associate with current active unlocked shift
-    const shiftsToSave = targetShifts.filter((k) => willSave[k]);
-    if (shiftsToSave.length === 0 && (fnh3Changed || pclChanged)) {
-      if (areShiftsLocked) {
-        return res.status(400).json({
-          success: false,
-          message: 'All shifts for today are permanently locked. Cannot edit FNH₃ or PCl.',
-        });
-      }
-      // Find current open shift
-      if (!lockedShifts.shift1Saved || !lockedShifts.shift2Saved) {
-        if (!lockedShifts.shift1Saved) shiftsToSave.push('shift1');
-        else shiftsToSave.push('shift2');
-      } else if (!lockedShifts.shift3Saved || (lockedShifts.shift3Edits || 0) === 0) {
-        shiftsToSave.push('shift3');
       } else {
-        return res.status(400).json({
-          success: false,
-          message: 'All shifts for today are permanently locked. Cannot edit FNH₃ or PCl.',
-        });
+        // Single correction edit of this slot -> permanently locks immediately!
+        updatedLockedSlots[uKey] = {
+          ...updatedLockedSlots[uKey],
+          isSaved: true,
+          correctionUsed: true,
+          editsCount: (existingLockedSlots[uKey]?.editsCount || 0) + 1,
+          isLocked: true,
+          correctedAt: nowIso,
+        };
       }
     }
 
-    // Enforce Shift-Wise Locking: Only one shift can be saved at a time
-    if (shiftsToSave.length > 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'Shift-wise input locking enforced: Only one shift can be entered and saved at a time.',
-      });
-    }
-
-    const activeShiftKey = shiftsToSave[0];
-    if (!activeShiftKey) {
-      return res.status(400).json({
-        success: false,
-        message: 'No unlocked shifts with valid new or modified data were found to save.',
-      });
-    }
-
-    // Authoritative sequential save check
-    const saveValidation = validateSequentialSave({
-      lockState: lockedShifts,
-      targetItem: activeShiftKey,
-      itemsOrder: targetShifts,
-      isDiff: true,
-      type: 'shift',
-    });
-    if (!saveValidation.allowed) {
-      return res.status(saveValidation.statusCode || 400).json({
-        success: false,
-        message: saveValidation.message,
-      });
-    }
-
-    // Merge rows separately without overwriting untouched slots
+    // Merge rows: only targetUnit is merged into timeRows to ensure untouched slots are preserved
     const mergedTimeRows = { ...(existingTimeRows || {}) };
-    const slotKeysToUpdate = SHIFT_TIME_SLOTS[activeShiftKey] || [];
+    if (transition.targetUnit) {
+      mergedTimeRows[transition.targetUnit] = incomingTimeRows[transition.targetUnit] || {};
+    }
 
-    const isPriorSavedShift =
-      (activeShiftKey === 'shift1' && lockedShifts.shift1Saved) ||
-      (activeShiftKey === 'shift2' && lockedShifts.shift2Saved) ||
-      (activeShiftKey === 'shift3' && lockedShifts.shift3Saved);
+    // Record field edits ONLY on a correction save for targetUnit
+    if (transition.isCorrection && transition.targetUnit) {
+      const oldSlot = existingTimeRows[transition.targetUnit] || {};
+      const newSlot = incomingTimeRows[transition.targetUnit] || {};
 
-    slotKeysToUpdate.forEach((sKey) => {
-      const oldSlot = mergedTimeRows[sKey] || {};
-      const newSlot = incomingTimeRows[sKey] || {};
+      fieldsToCheck.forEach((fieldKey) => {
+        const oVal = oldSlot[fieldKey];
+        const nVal = newSlot[fieldKey];
 
-      if (isPriorSavedShift) {
-        [...STREAMS, 'avgTcl'].forEach((fieldKey) => {
-          const oVal = oldSlot[fieldKey] ?? null;
-          let nVal = newSlot[fieldKey] ?? null;
-          if (nVal === '') nVal = null;
+        if (isValueDifferent(oVal, nVal)) {
+          editedFields[`${transition.targetUnit}_${fieldKey}`] = true;
+          editAuditHistory.push({
+            shiftKey: activeShiftKey,
+            timeSlot: transition.targetUnit,
+            paramKey: fieldKey,
+            oldValue: oVal !== undefined && oVal !== null ? String(oVal) : '',
+            newValue: nVal !== undefined && nVal !== null ? String(nVal) : '',
+            editedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+            editedById: req.user?._id || null,
+            timestamp: nowIso,
+          });
+        }
+      });
+    }
 
-          let isParamChanged = false;
-          if (oVal !== null && nVal !== null && !isNaN(Number(oVal)) && !isNaN(Number(nVal))) {
-            isParamChanged = Number(oVal) !== Number(nVal);
-          } else {
-            isParamChanged = oVal !== nVal;
-          }
-
-          if (isParamChanged) {
-            editedFields[`${sKey}_${fieldKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: activeShiftKey,
-              timeSlot: sKey,
-              paramKey: fieldKey,
-              oldValue: oVal !== null ? Number(oVal) : null,
-              newValue: nVal !== null ? Number(nVal) : null,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              editedById: req.user?._id || null,
-              timestamp: new Date(),
-            });
-          }
-        });
-      }
-
-      mergedTimeRows[sKey] = newSlot;
-    });
-
-    // Check changes for FNH3 and PCL rows
+    // Merge FNH3 and PCL rows
     const mergedFnh3Row = { ...(existingFnh3Row || {}), ...(incomingFnh3Row || {}) };
     const mergedPclRow = { ...(existingPclRow || {}), ...(incomingPclRow || {}) };
 
-    if (isPriorSavedShift) {
-      if (fnh3Changed) {
-        [...STREAMS, 'avgTcl'].forEach((fieldKey) => {
-          const oVal = existingFnh3Row[fieldKey] ?? null;
-          let nVal = incomingFnh3Row[fieldKey] ?? null;
-          if (nVal === '') nVal = null;
-          if (oVal !== nVal) {
-            editedFields[`fnh3_${fieldKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: activeShiftKey,
-              timeSlot: 'fnh3',
-              paramKey: fieldKey,
-              oldValue: oVal,
-              newValue: nVal,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              timestamp: new Date(),
-            });
-          }
-        });
-      }
-      if (pclChanged) {
-        [...STREAMS, 'avgTcl'].forEach((fieldKey) => {
-          const oVal = existingPclRow[fieldKey] ?? null;
-          let nVal = incomingPclRow[fieldKey] ?? null;
-          if (nVal === '') nVal = null;
-          if (oVal !== nVal) {
-            editedFields[`pcl_${fieldKey}`] = true;
-            editAuditHistory.push({
-              shiftKey: activeShiftKey,
-              timeSlot: 'pcl',
-              paramKey: fieldKey,
-              oldValue: oVal,
-              newValue: nVal,
-              editedBy: req.user?.name || payload.submittedBy || 'Admin',
-              timestamp: new Date(),
-            });
-          }
-        });
-      }
+    if (fnh3Changed) {
+      fieldsToCheck.forEach((fieldKey) => {
+        const oVal = existingFnh3Row[fieldKey];
+        const nVal = incomingFnh3Row[fieldKey];
+        if (isValueDifferent(oVal, nVal)) {
+          editedFields[`fnh3_${fieldKey}`] = true;
+          editAuditHistory.push({
+            shiftKey: activeShiftKey,
+            timeSlot: 'fnh3',
+            paramKey: fieldKey,
+            oldValue: oVal !== undefined && oVal !== null ? String(oVal) : '',
+            newValue: nVal !== undefined && nVal !== null ? String(nVal) : '',
+            editedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+            editedById: req.user?._id || null,
+            timestamp: nowIso,
+          });
+        }
+      });
     }
 
-    newlySavedShifts.push(activeShiftKey);
+    if (pclChanged) {
+      fieldsToCheck.forEach((fieldKey) => {
+        const oVal = existingPclRow[fieldKey];
+        const nVal = incomingPclRow[fieldKey];
+        if (isValueDifferent(oVal, nVal)) {
+          editedFields[`pcl_${fieldKey}`] = true;
+          editAuditHistory.push({
+            shiftKey: activeShiftKey,
+            timeSlot: 'pcl',
+            paramKey: fieldKey,
+            oldValue: oVal !== undefined && oVal !== null ? String(oVal) : '',
+            newValue: nVal !== undefined && nVal !== null ? String(nVal) : '',
+            editedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
+            editedById: req.user?._id || null,
+            timestamp: nowIso,
+          });
+        }
+      });
+    }
 
-    // Update locked status via universal locking engine
-    lockedShifts = applySequentialSaveTransition({
-      lockState: lockedShifts,
-      targetItem: activeShiftKey,
-      itemsOrder: targetShifts,
-      isCorrection: saveValidation.isCorrection,
-      type: 'shift',
-    });
+    // Synchronize backward-compatible lockedShifts from updatedLockedSlots
+    const lockedShifts = syncLockedShifts(updatedLockedSlots, UNITS_ORDER);
 
     // Package complete data structure
     const updatedRecordData = {
@@ -398,12 +403,13 @@ router.post('/', async (req, res) => {
       timeRows: mergedTimeRows,
       fnh3Row: mergedFnh3Row,
       pclRow: mergedPclRow,
+      lockedSlots: updatedLockedSlots,
       lockedShifts,
       editedFields,
       editAuditHistory,
       submittedBy: req.user?.name || payload.submittedBy || 'Plant Operator',
       submittedById: req.user?._id || null,
-      submittedAt: new Date().toISOString(),
+      submittedAt: nowIso,
       company: req.user?.company?._id || req.user?.company || null,
     };
 
@@ -504,8 +510,11 @@ router.post('/', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Successfully saved ${SHIFT_DISPLAY_NAMES[activeShiftKey]} in MongoDB ✓`,
+      message: transition.targetUnit
+        ? `Successfully saved slot ${transition.targetUnit} in MongoDB ✓`
+        : `Successfully saved CR 203 data in MongoDB ✓`,
       data: updatedRecordData,
+      lockedSlots: updatedLockedSlots,
       lockedShifts,
       editedFields,
       editAuditHistory,
@@ -515,7 +524,7 @@ router.post('/', async (req, res) => {
       emailPending: false,
       emailStatus: 'disabled',
       emailRecipient: '',
-      newlySavedShifts,
+      targetUnit: transition.targetUnit,
     });
   } catch (error) {
     console.error('[CR203Analysis API] Error saving data:', error);
@@ -556,8 +565,14 @@ router.get('/', async (req, res) => {
         const resolvedLocks = doc.data.lockedShifts
           ? hydrateLockState(doc.data.lockedShifts, { type: 'shift', items: targetShifts })
           : getInitialLockState({ type: 'shift', items: targetShifts });
+        const existingRows = doc.data.timeRows || doc.data.shiftRows || {};
+        let resolvedSlots = doc.data.lockedSlots;
+        if (!resolvedSlots || Object.keys(resolvedSlots).length === 0) {
+          resolvedSlots = deriveLegacyLockedSlots(existingRows, doc.data.lockedShifts, UNITS_ORDER);
+        }
         const enrichedData = {
           ...doc.data,
+          lockedSlots: resolvedSlots,
           lockedShifts: resolvedLocks,
           _id: doc._id,
           id: doc._id,
@@ -566,6 +581,7 @@ router.get('/', async (req, res) => {
           success: true,
           data: [enrichedData],
           recordId: doc._id,
+          lockedSlots: resolvedSlots,
           lockedShifts: resolvedLocks,
           editedFields: doc.data?.editedFields || {},
           editAuditHistory: doc.data?.editAuditHistory || [],

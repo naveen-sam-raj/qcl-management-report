@@ -6,10 +6,9 @@ import {
   RecordStatusBadge,
   StatusSaveButton,
   SaveStatusBanner,
-  SaveConfirmationModal,
   EditedBadge,
 } from '../../utils/offsetAnalysisHelper';
-import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
+import { getOperatingDateIST, SaveConfirmationModal } from '../../utils/co2AnalysisHelper';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -19,7 +18,6 @@ import {
   AlertCircle,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -354,17 +352,6 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
             subLabel={isAllLocked ? 'all slots locked' : lockedSlots['t0630']?.isSaved ? 'in progress' : 'first slot ready'}
           />
 
-          {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving || isAllLocked}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
-          )}
-
           {!isViewOnly ? (
             <StatusSaveButton
               id="btn-distiller-save"
@@ -610,7 +597,41 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         analysisName="Distiller Waste Water Analysis"
         date={date}
         shiftOrTime="Hourly (06:30 - 11:30)"
-        summaryItems={summaryItems}
+        summarySections={(() => {
+          const targetReadings = confirmData?.readings || readings;
+          const targetSlotKey = confirmData?.targetSlot;
+          const slotsToDisplay = targetSlotKey
+            ? targetReadings.filter((r) => r.id === targetSlotKey)
+            : targetReadings.filter((r) => !lockedSlots[r.id]?.isLocked);
+
+          return slotsToDisplay
+            .filter((r) => NUMERIC_FIELDS.some((f) => r[f] !== '' && r[f] !== null && r[f] !== undefined))
+            .map((r) => ({
+              title: `Slot ${r.time}:`,
+              items: [
+                {
+                  label: 'Ex.CaO',
+                  value: r.exCao !== '' && r.exCao !== null && r.exCao !== undefined ? `${r.exCao} %` : '—',
+                },
+                {
+                  label: 'FNH₃',
+                  value: r.fnh3 !== '' && r.fnh3 !== null && r.fnh3 !== undefined ? `${r.fnh3} ppm` : '—',
+                },
+                {
+                  label: 'CNH₃',
+                  value: r.cnh3 !== '' && r.cnh3 !== null && r.cnh3 !== undefined ? `${r.cnh3} ppm` : '—',
+                },
+                {
+                  label: 'TNH₃',
+                  value: r.tnh3 !== '' && r.tnh3 !== null && r.tnh3 !== undefined ? `${r.tnh3} ppm` : '—',
+                },
+                {
+                  label: 'NaHCO₃',
+                  value: r.nahco3 !== '' && r.nahco3 !== null && r.nahco3 !== undefined ? `${r.nahco3} ppm` : '—',
+                },
+              ],
+            }));
+        })()}
       />
     </div>
   );

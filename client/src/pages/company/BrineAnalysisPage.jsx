@@ -11,7 +11,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -23,6 +22,8 @@ import {
   X,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -104,8 +105,8 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Date is strictly locked to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── States (Date is strictly locked to Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [data, setData]                             = useState(buildEmptyData());
   const [originalData, setOriginalData]             = useState(null);
   const [errors, setErrors]                         = useState({});
@@ -478,18 +479,6 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
             )}
 
             <div className="flex items-center gap-2 shrink-0">
-              {canEdit && (
-                <button
-                  id="btn-brine-reset"
-                  onClick={handleReset}
-                  disabled={saving || emailRetrying}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-                  title="Clear all fields"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset</span>
-                </button>
-              )}
 
               {!isViewOnly && (
                 <StatusSaveButton
@@ -697,108 +686,31 @@ const BrineAnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Confirmation Modal ────────────────────────────────────────────── */}
-      {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-scaleUp">
-            {/* Modal Header */}
-            <div className="px-5 py-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 bg-blue-600/30 rounded-lg border border-blue-400/30">
-                  <Droplets className="w-4 h-4 text-blue-300" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-100">
-                    Confirm Brine Analysis Save
-                  </h3>
-                  <p className="text-[11px] text-slate-300">
-                    ACL Plant — {formatDateDisplay(confirmData.date)}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-white transition p-1 cursor-pointer"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto text-xs">
-              {confirmData.isFinalEdit && (
-                <div className="bg-amber-50 border border-amber-300 text-amber-900 px-3.5 py-2.5 rounded-xl flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold">Final Edit Warning:</span> This is your 2nd and final permitted edit for today’s record. Once saved, this record will be permanently locked against further edits.
-                  </div>
-                </div>
-              )}
-
-              {/* Data Summary */}
-              {ROWS.map((row) => (
-                <div key={row.key}>
-                  <h4 className="font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-2 flex items-center gap-1.5">
-                    <Droplets className="w-3.5 h-3.5 text-blue-600" />
-                    <span>{row.label} ({row.tankType})</span>
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    {PARAMETERS.map((p) => {
-                      const val = confirmData.data[row.key][p.key];
-                      return (
-                        <div key={p.key} className="flex justify-between items-center py-1 border-b border-slate-200/60 last:border-0">
-                          <span className="font-semibold text-slate-600">{p.label}:</span>
-                          <span className="font-mono font-bold text-blue-900">
-                            {val !== '' ? `${val} g/L` : '—'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-
-              {/* Notification Notice */}
-              <div className="bg-blue-50 border border-blue-200 text-blue-900 px-3.5 py-2.5 rounded-xl flex items-start gap-2">
-                <Mail className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold">Email Notification:</span> Saving will automatically generate the official report Excel sheet and dispatch an email to the registered ACL Plant operator ({recipientEmail || 'assigned user'}).
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                disabled={saving}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm cursor-pointer disabled:opacity-60"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — Brine Analysis"
+        subtitle={`ACL Plant for ${formatDateDisplay(confirmData?.date)}`}
+        prompt={`Are you sure you want to save Brine Analysis measurements for ${formatDateDisplay(confirmData?.date)}?`}
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit
+            ? 'Final Edit Warning: This is your 2nd and final permitted edit for today’s record. Once saved, this record will be permanently locked against further edits.'
+            : null
+        }
+        sections={confirmData ? ROWS.map((row) => ({
+          title: `${row.label} (${row.tankType})`,
+          items: PARAMETERS.map((p) => ({
+            label: p.label,
+            value: confirmData.data[row.key]?.[p.key] !== '' && confirmData.data[row.key]?.[p.key] !== null && confirmData.data[row.key]?.[p.key] !== undefined
+              ? `${confirmData.data[row.key][p.key]} g/L`
+              : '—',
+          })),
+        })) : null}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

@@ -6,7 +6,6 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -26,6 +25,7 @@ import {
   StatusSaveButton,
   EditedBadge,
 } from '../../utils/offsetAnalysisHelper';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 
 // Centralized Limit Configs for Offset Plant -> DM Water (Frequency: Day)
 const PH_LIMIT = OFFSET_DM_WATER_LIMITS.ph;
@@ -111,6 +111,8 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
   const [editedFields, setEditedFields] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
 
   // Fetch existing data on mount
   useEffect(() => {
@@ -260,8 +262,8 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
     return !hasError;
   };
 
-  // Direct save handler
-  const handleSave = async () => {
+  // Direct save handler - opens confirmation modal
+  const handleSaveClick = () => {
     if (isViewOnly || saving) return;
 
     if (!validate()) {
@@ -313,6 +315,26 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
       return;
     }
 
+    const slotLock = lockedSlots[targetSlot] || {};
+    const slotName = targetCurrRow.unit || (targetSlot === 'dm_water' ? 'DM WATER' : 'A.UNIT');
+
+    setConfirmData({
+      targetSlot,
+      slotName,
+      targetCurrRow,
+      isFinalEdit: Boolean(slotLock.isSaved),
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
+    if (!confirmData) return;
+    const { targetSlot } = confirmData;
     setSaving(true);
     const payload = {
       date,
@@ -429,24 +451,13 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
               subLabel={isLocked ? 'permanently locked' : initialSaved ? 'saved record' : 'unsaved'}
             />
 
-            <button
-              id="btn-dm-reset"
-              onClick={handleReset}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-              title="Reset to initial unentered values"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
-
             {!isViewOnly ? (
               <StatusSaveButton
                 id="btn-dm-save"
                 saving={saving}
                 isLocked={isLocked}
                 alwaysShowSaveText={true}
-                onClick={handleSave}
+                onClick={handleSaveClick}
                 title="Save DM Water analysis"
               />
             ) : (
@@ -890,6 +901,34 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — DM Water (${confirmData?.slotName || ''})`}
+        subtitle={`Offset Plant for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save measurements for ${confirmData?.slotName || ''}?`}
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for this slot. After saving, this entry will be permanently locked.
+            </>
+          ) : null
+        }
+        sectionTitle={`Measurements to Persist (${confirmData?.slotName || ''}):`}
+        items={confirmData?.targetCurrRow ? [
+          { label: 'pH', value: confirmData.targetCurrRow.ph || '—' },
+          { label: 'Conductivity', value: confirmData.targetCurrRow.cond ? `${confirmData.targetCurrRow.cond} µS/cm` : '—' },
+          { label: 'Total Hardness (TH)', value: confirmData.targetCurrRow.th ? `${confirmData.targetCurrRow.th} ppm` : '—' },
+          { label: 'Total Alkalinity', value: confirmData.targetCurrRow.alk ? `${confirmData.targetCurrRow.alk} ppm` : '—' },
+          { label: 'Silica (SiO₂)', value: confirmData.targetCurrRow.sio2 ? `${confirmData.targetCurrRow.sio2} ppm` : '—' },
+        ] : []}
+        columns={2}
+      />
     </div>
   );
 };

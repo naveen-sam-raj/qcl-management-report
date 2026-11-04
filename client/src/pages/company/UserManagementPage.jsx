@@ -60,6 +60,7 @@ const UserManagementPage = () => {
 
   const [editFormData, setEditFormData] = useState({
     name: '',
+    username: '',
     email: '',
     mobile: '',
     plantId: '',
@@ -185,6 +186,7 @@ const UserManagementPage = () => {
       const updatePayload = {
         ...editFormData,
         name: editFormData.name?.trim(),
+        username: editFormData.username?.trim(),
         email: editFormData.email?.trim(),
         companyId: selectedPlant?.company?._id || selectedPlant?.company || activeUser.company?._id || activeUser.company,
       };
@@ -558,6 +560,7 @@ const UserManagementPage = () => {
                             setActiveUser(u);
                             setEditFormData({
                               name: u.name,
+                              username: u.username || '',
                               email: u.email,
                               mobile: u.mobile || '',
                               plantId: u.plant?._id || u.plant || '',
@@ -784,6 +787,19 @@ const UserManagementPage = () => {
               value={editFormData.name}
               onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+              Username
+            </label>
+            <input
+              type="text"
+              required
+              value={editFormData.username}
+              onChange={(e) => setEditFormData({ ...editFormData, username: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
             />
           </div>
 

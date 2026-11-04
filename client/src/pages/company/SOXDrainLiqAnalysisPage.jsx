@@ -9,7 +9,6 @@ import {
 } from '../../services/analysisValidation';
 import {
   ArrowLeft,
-  RotateCcw,
   AlertCircle,
   ChevronRight,
   Gauge,
@@ -466,16 +465,6 @@ const SOXDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
             <LockedDateDisplay date={date} id="sox-drain-liq-date-display" badgeText="Operating Day" />
 
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-sox-drain-liq-reset"
-                onClick={handleReset}
-                disabled={saving || isFormDisabled}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-                title="Reset modifications"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
 
               <StatusSaveButton
                 id="btn-sox-drain-liq-save"

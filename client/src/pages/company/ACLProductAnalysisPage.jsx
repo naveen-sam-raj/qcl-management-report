@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -20,6 +19,8 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 // ─── Chemical & Physical Parameters ──────────────────────────────────────────
 
@@ -95,8 +96,8 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Date is locked strictly to Today in Asia/Kolkata) ──
-  const [date]                                      = useState(() => getTodayAsiaKolkata());
+  // ── States (Date is locked strictly to Operating Date in Asia/Kolkata) ──
+  const [date]                                      = useState(() => getOperatingDateIST());
   const [chemicalData, setChemicalData]             = useState(buildEmptyChemicalData());
   const [bssData, setBssData]                       = useState(buildEmptyBssData());
   const [originalChemData, setOriginalChemData]     = useState(null);
@@ -528,18 +529,6 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0">
-              {canEdit && (
-                <button
-                  id="btn-aclproduct-reset"
-                  onClick={handleReset}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-                  title="Clear all fields"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset</span>
-                </button>
-              )}
 
               {!isViewOnly && (
                 <StatusSaveButton
@@ -793,115 +782,46 @@ const ACLProductAnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Save Confirmation Modal ── */}
-      {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-xl w-full overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <PackageCheck className="w-5 h-5 text-blue-400" />
-                <h3 className="font-extrabold text-sm tracking-wide">
-                  Confirm ACL Product Analysis Submission
-                </h3>
-              </div>
-              <span className="text-[10px] bg-blue-500/30 text-blue-200 border border-blue-400/30 px-2 py-0.5 rounded font-mono font-bold">
-                {formatDateDisplay(confirmData.date)}
-              </span>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 space-y-4 text-xs text-slate-600 max-h-[75vh] overflow-y-auto">
-              <p className="text-slate-700 font-medium leading-relaxed">
-                Are you sure you want to save measurements for{' '}
-                <strong className="text-blue-700">ACL Plant → ACL Product Analysis</strong> on{' '}
-                <strong className="text-slate-900">{formatDateDisplay(confirmData.date)}</strong>?
-              </p>
-
-              {confirmData.isFinalEdit && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <span className="font-medium text-[11px]">
-                    <strong>Final Edit Notice:</strong> This is the final permitted edit for today's ACL Product Analysis. After this save, all parameters for today ({formatDateDisplay(confirmData.date)}) will be permanently locked.
-                  </span>
-                </div>
-              )}
-
-              {/* Chemical Section Preview */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Chemical & Physical Characteristics (7):
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
-                  {CHEMICAL_PARAMETERS.map((p) => {
-                    const val = confirmData.chemicalData[p.key];
-                    return (
-                      <div key={p.key} className="bg-white p-1.5 rounded border border-slate-200">
-                        <span className="text-[9.5px] text-slate-400 block font-sans truncate">{p.label}</span>
-                        <strong className="text-xs text-slate-800">
-                          {val !== '' && val !== null && val !== undefined ? val : '—'}
-                        </strong>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* BSS Sieve Section Preview */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
-                  <span>BSS Sieve Analysis (9 Mesh Sizes):</span>
-                  <span className="text-emerald-700 font-mono font-bold">
-                    Recovery: {confirmData.bssTotal?.count > 0 ? `${confirmData.bssTotal.sum.toFixed(1)} %` : '—'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 font-mono text-[11px]">
-                  {BSS_PARAMETERS.map((p) => {
-                    const val = confirmData.bssData[p.key];
-                    return (
-                      <div key={p.key} className="bg-white p-1.5 rounded border border-slate-200">
-                        <span className="text-[9.5px] text-slate-400 block font-sans">{p.label}</span>
-                        <strong className="text-xs text-slate-800">
-                          {val !== '' && val !== null && val !== undefined ? val : '—'}
-                        </strong>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {recipientEmail && (
-                <div className="text-[11px] text-slate-500">
-                  📧 An email notification will be dispatched to registered plant operator:{' '}
-                  <strong className="text-slate-800">{recipientEmail}</strong>
-                </div>
-              )}
-            </div>
-
-            {/* Footer Buttons */}
-            <div className="bg-slate-50 px-6 py-3.5 border-t border-slate-100 flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                disabled={saving}
-                className="px-4 py-2 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-xs cursor-pointer flex items-center gap-1.5"
-              >
-                {saving && (
-                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
-                <span>Confirm & Save</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — ACL Product Analysis"
+        subtitle={`ACL Plant for ${formatDateDisplay(confirmData?.date)}`}
+        prompt={
+          <>
+            Are you sure you want to save measurements for{' '}
+            <strong className="text-blue-700">ACL Plant → ACL Product Analysis</strong> on{' '}
+            <strong className="text-slate-900">{formatDateDisplay(confirmData?.date)}</strong>?
+          </>
+        }
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for today's ACL Product Analysis. After this save, all parameters for today ({formatDateDisplay(confirmData?.date)}) will be permanently locked.
+            </>
+          ) : null
+        }
+        sections={confirmData ? [
+          {
+            title: 'Chemical & Physical Characteristics (7):',
+            items: CHEMICAL_PARAMETERS.map((p) => ({
+              label: p.label,
+              value: confirmData.chemicalData[p.key],
+            })),
+          },
+          {
+            title: `BSS Sieve Analysis (9 Mesh Sizes) — Recovery: ${confirmData.bssTotal?.count > 0 ? `${confirmData.bssTotal.sum.toFixed(1)} %` : '—'}`,
+            items: BSS_PARAMETERS.map((p) => ({
+              label: p.label,
+              value: confirmData.bssData[p.key],
+            })),
+          },
+        ] : null}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

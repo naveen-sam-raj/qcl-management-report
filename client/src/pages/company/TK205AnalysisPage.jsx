@@ -10,7 +10,6 @@ import {
 import {
   ArrowLeft,
   Calendar,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -19,6 +18,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 
 // ─── TK 205 Parameters & Limits Configuration (ACL Plant ONLY) ────────────────
 // Frequency: SHIFT TWICE (12 slots per operating day: 06:00 to 06:00 IST)
@@ -617,16 +617,6 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
             {/* Actions for Admin: Main button text always "Save" via alwaysShowSaveText */}
             {!isViewOnly ? (
               <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  id="btn-tk205-reset"
-                  onClick={handleReset}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 disabled:opacity-50 cursor-pointer"
-                  title="Reset modified fields"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset</span>
-                </button>
 
                 <StatusSaveButton
                   id="btn-tk205-save"
@@ -868,74 +858,28 @@ const TK205AnalysisPage = ({ plantId = 'acl' }) => {
       </div>
 
       {/* ── Confirmation Modal for Correction Save ── */}
-      {showConfirmModal && confirmData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-slideUp">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/50">
-              <div className="flex items-center gap-2 text-amber-900 font-bold">
-                <AlertCircle className="w-5 h-5 text-amber-600" />
-                <h3 className="text-base font-bold text-slate-800">
-                  Confirm Slot Correction
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-slate-600 transition text-2xl leading-none cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="p-6">
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 text-sm font-semibold mb-4 shadow-2xs flex items-start gap-3">
-                <Lock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-extrabold text-amber-900 text-sm">
-                    This is your only correction for this slot.
-                  </p>
-                  <p className="text-xs text-amber-800 mt-1">
-                    Once saved, slot <strong>{confirmData.slotObj?.time} ({confirmData.slotObj?.shift})</strong> will be permanently locked and cannot be modified again.
-                  </p>
-                </div>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-xs text-slate-700">
-                <div className="font-bold text-slate-900 mb-1">Proposed Values for {confirmData.slotObj?.time}:</div>
-                {PARAMETERS.map((p) => (
-                  <div key={p.key} className="flex justify-between border-b border-slate-200/50 pb-1 last:border-0">
-                    <span className="font-medium text-slate-600">{p.label}:</span>
-                    <span className="font-mono font-bold text-slate-900">{data[confirmData.slotKey]?.[p.key] || '—'} {p.unit}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer shadow-2xs"
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => executeSave(confirmData.slotKey)}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-75 cursor-pointer shadow-2xs"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
-                    Saving...
-                  </>
-                ) : (
-                  <>Confirm & Save Correction</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={() => executeSave(confirmData.slotKey)}
+        saving={saving}
+        title="Confirm Slot Correction"
+        subtitle={`TK 205 Slot ${confirmData?.slotObj?.time || ''} (${confirmData?.slotObj?.shift || ''}) for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save this correction for slot ${confirmData?.slotObj?.time || ''} (${confirmData?.slotObj?.shift || ''})?`}
+        warningNotice={
+          <>
+            <strong>This is your only correction for this slot.</strong> Once saved, slot <strong>{confirmData?.slotObj?.time} ({confirmData?.slotObj?.shift})</strong> will be permanently locked and cannot be modified again.
+          </>
+        }
+        sectionTitle={`Proposed Values for ${confirmData?.slotObj?.time || ''}:`}
+        items={confirmData?.slotKey ? PARAMETERS.map((p) => ({
+          label: p.label,
+          value: `${data[confirmData.slotKey]?.[p.key] || '—'} ${p.unit}`.trim(),
+        })) : []}
+        columns={2}
+        recipientEmail={recipientEmail}
+        confirmText="Confirm & Save Correction"
+      />
 
     </div>
   );

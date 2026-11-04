@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { ActivityLog, PlantAnalysisRecord } = require('../models');
+const { getOperatingDateIST } = require('../utils/operatingDate');
 
 // In-memory cache storage for TK 204 / TK 209 Analysis records
 const tk204Tk209Records = [];
@@ -22,6 +23,15 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Analysis Date is required to save TK 204 / TK 209 Analysis.',
+      });
+    }
+
+    // Strict Operating Date Restriction (06:00 IST)
+    const operatingDate = getOperatingDateIST(new Date());
+    if (payload.date !== operatingDate) {
+      return res.status(400).json({
+        success: false,
+        message: `Date restriction enforced: TK 204 / TK 209 Analysis records can only be created or modified for today's operating date (${operatingDate}). Historical or future modifications are not permitted.`,
       });
     }
 

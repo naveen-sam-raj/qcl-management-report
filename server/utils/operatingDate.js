@@ -9,6 +9,8 @@
  * using UTC calendar date arithmetic (Date.UTC(y, m - 1, d - 1)) to prevent any UTC/timezone drift.
  */
 
+const OPERATING_DAY_START_HOUR = 6;
+
 function getOperatingDateIST(now = new Date()) {
   const d = now instanceof Date ? now : new Date(now);
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -27,7 +29,7 @@ function getOperatingDateIST(now = new Date()) {
   const day = parseInt(getPart('day'), 10);
   const hour = parseInt(getPart('hour'), 10);
 
-  if (hour < 6) {
+  if (hour < OPERATING_DAY_START_HOUR) {
     const prevDate = new Date(Date.UTC(year, month - 1, day - 1));
     const py = prevDate.getUTCFullYear();
     const pm = String(prevDate.getUTCMonth() + 1).padStart(2, '0');
@@ -42,5 +44,6 @@ function getOperatingDateIST(now = new Date()) {
 }
 
 module.exports = {
+  OPERATING_DAY_START_HOUR,
   getOperatingDateIST,
 };

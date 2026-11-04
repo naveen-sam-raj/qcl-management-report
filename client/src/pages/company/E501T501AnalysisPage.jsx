@@ -8,7 +8,6 @@ import {
   AlertCircle,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Trash2,
@@ -20,6 +19,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 import {
   validateCellValue,
@@ -479,17 +479,6 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               Saved at {lastSaved}
             </span>
-          )}
-
-          {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
           )}
 
           {!isViewOnly && (
@@ -1172,78 +1161,37 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
       </div>
 
       {/* ── SAVE CONFIRMATION MODAL ── */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-indigo-50/50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
-                  <Save className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
-                  <p className="text-xs text-slate-500">SA Plant — E 501 / T 501 Analysis</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-3.5 text-xs text-slate-600">
-              <p>
-                You are about to persist readings for <strong>{confirmData?.readings?.length || 0}</strong> active shift entries for today:
-              </p>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Date:</span>
-                  <span className="font-bold text-slate-800">{date}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">E 501 Avg:</span>
-                  <span className="font-bold text-indigo-700">FNH₃: {stats.e501_fnh3_avg} | Na₂CO₃: {stats.e501_na2co3_avg}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">T 501 Avg:</span>
-                  <span className="font-bold text-indigo-700">FNH₃: {stats.t501_fnh3_avg} | Na₂CO₃: {stats.t501_na2co3_avg}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Recipient Operator:</span>
-                  <span className="font-bold text-slate-800">{recipientEmail || ''}</span>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Saving will securely store all rows to MongoDB and dispatch an official notification email with an Excel report.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — E 501 / T 501 Analysis"
+        subtitle={`Soda Ash Plant for ${date}`}
+        prompt={`You are about to persist readings for ${confirmData?.readings?.length || 0} active shift entries for today:`}
+        sections={confirmData?.readings?.map((r) => ({
+          title: `Shift ${r.shift}:`,
+          items: [
+            {
+              label: 'E 501 FNH₃',
+              value: r.e501_fnh3 !== '' && r.e501_fnh3 !== null && r.e501_fnh3 !== undefined ? r.e501_fnh3 : '—',
+            },
+            {
+              label: 'E 501 Na₂CO₃',
+              value: r.e501_na2co3 !== '' && r.e501_na2co3 !== null && r.e501_na2co3 !== undefined ? r.e501_na2co3 : '—',
+            },
+            {
+              label: 'T 501 FNH₃',
+              value: r.t501_fnh3 !== '' && r.t501_fnh3 !== null && r.t501_fnh3 !== undefined ? r.t501_fnh3 : '—',
+            },
+            {
+              label: 'T 501 Na₂CO₃',
+              value: r.t501_na2co3 !== '' && r.t501_na2co3 !== null && r.t501_na2co3 !== undefined ? r.t501_na2co3 : '—',
+            },
+          ],
+        })) || []}
+        columns={4}
+      />
     </div>
   );
 };

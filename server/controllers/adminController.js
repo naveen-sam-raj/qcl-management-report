@@ -249,6 +249,7 @@ const updateCompanyAdmin = async (req, res) => {
 
     const {
       name,
+      username,
       email,
       mobile,
       status,
@@ -261,6 +262,25 @@ const updateCompanyAdmin = async (req, res) => {
 
     const updates = {};
     if (name) updates.name = name.trim();
+    if (username !== undefined) {
+      const cleanUsername = String(username).trim().toLowerCase();
+      if (!cleanUsername) {
+        return res.status(400).json({
+          success: false,
+          message: 'Username cannot be empty.',
+        });
+      }
+      if (cleanUsername !== admin.username) {
+        const existingUsername = await User.findOne({ username: cleanUsername, _id: { $ne: id } });
+        if (existingUsername) {
+          return res.status(409).json({
+            success: false,
+            message: 'This username is already taken. Please choose another.',
+          });
+        }
+        updates.username = cleanUsername;
+      }
+    }
     if (email) updates.email = email.trim().toLowerCase();
     if (mobile !== undefined) updates.mobile = mobile;
     if (status) updates.status = status;
@@ -326,6 +346,12 @@ const updateCompanyAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating company admin:', error);
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email address or username is already in use by another user.',
+      });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
 import api from "../../services/api";
-import { ArrowLeft, Calendar, Save, RotateCcw, CheckCircle2, AlertCircle, ChevronRight, Flame, Database } from 'lucide-react';
+import { ArrowLeft, Calendar, Save, CheckCircle2, AlertCircle, ChevronRight, Flame, Database } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST, LockedDateDisplay } from '../../utils/co2AnalysisHelper';
 
 const SHIFTS = [
@@ -42,6 +43,8 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
   const [lockedShifts, setLockedShifts] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [savePhase, setSavePhase] = useState('idle');
   const [recipientEmail, setRecipientEmail] = useState('');
@@ -221,15 +224,35 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
     return isValid;
   }, [date, data, parameters]);
 
-  const handleSave = async () => {
+  const handleSaveClick = () => {
     if (!validateForm()) { showToast("Please correct highlighted errors before saving.", "error"); return; }
     const hasData = SHIFTS.some((s) => parameters.some((p) => data[s.key][p.key] !== ""));
     if (!hasData) { showToast("Please enter at least one measurement value.", "warning"); return; }
+
+    const shiftKey = getActiveShiftKey();
+    const shiftObj = SHIFTS.find((s) => s.key === shiftKey);
+    const isShiftSaved = Boolean(lockedShifts[shiftKey]?.isSaved || lockedShifts[shiftKey]);
+
+    setConfirmData({
+      shiftKey,
+      shiftTitle: shiftObj?.title || (shiftKey.toUpperCase() + " Shift"),
+      isFinalEdit: isShiftSaved,
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
+    if (!confirmData) return;
+    const { shiftKey } = confirmData;
     setSaving(true);
     setSaveSuccess(false);
     setSavePhase('saving');
     try {
-      const shiftKey = getActiveShiftKey();
       const payload = {
         date,
         shiftKey,
@@ -327,15 +350,12 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
             <LockedDateDisplay date={date} id={tankKey + "-date-display"} badgeText="Operating Day" />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button id={"btn-" + tankKey + "-reset"} onClick={handleReset} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200" title="Clear all fields">
-              <RotateCcw className="w-3.5 h-3.5" /><span>Reset</span>
-            </button>
             <StatusSaveButton
               id={"btn-" + tankKey + "-save"}
               saving={saving}
               savePhase={savePhase}
               saveSuccess={saveSuccess}
-              onClick={handleSave}
+              onClick={handleSaveClick}
               defaultLabel="Save / Submit"
               title={"Save " + tankName + " data"}
               alwaysShowSaveText={true}
@@ -408,6 +428,34 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — ${confirmData?.shiftTitle || ''} (${tankName})`}
+        subtitle={`SA Plant for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save measurements for ${confirmData?.shiftTitle || ''}?`}
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for this shift. After saving, this shift will be permanently locked.
+            </>
+          ) : null
+        }
+        sectionTitle={`Measurements to Persist (${confirmData?.shiftTitle || ''}):`}
+        items={confirmData?.shiftKey ? parameters.map((p) => ({
+          label: p.label,
+          value: data[confirmData.shiftKey]?.[p.key] !== '' && data[confirmData.shiftKey]?.[p.key] !== null && data[confirmData.shiftKey]?.[p.key] !== undefined
+            ? data[confirmData.shiftKey][p.key]
+            : '—',
+        })) : []}
+        columns={2}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

@@ -6,6 +6,7 @@ const {
   changePassword,
   getMe,
 } = require('../controllers/superAdminController');
+const { resetCompanyAdminPassword } = require('../controllers/adminController');
 const { superAdminAuth } = require('../middleware/authMiddleware');
 
 // Public route: Super Admin Login
@@ -16,5 +17,9 @@ router.get('/me', superAdminAuth, getMe);
 router.put('/change-username', superAdminAuth, changeUsername);
 router.post('/change-password', superAdminAuth, changePassword);
 router.put('/change-password', superAdminAuth, changePassword);
+
+// Reset Company Admin Password
+router.post('/admins/:id/reset-password', superAdminAuth, resetCompanyAdminPassword);
+router.put('/admins/:id/reset-password', superAdminAuth, resetCompanyAdminPassword);
 
 module.exports = router;

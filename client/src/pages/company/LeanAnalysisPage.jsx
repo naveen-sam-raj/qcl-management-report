@@ -9,7 +9,6 @@ import {
 } from '../../services/analysisValidation';
 import {
   ArrowLeft,
-  RotateCcw,
   AlertCircle,
   ChevronRight,
   Gauge,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   getTodayAsiaKolkata,
+  getOperatingDateIST,
   formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
@@ -168,8 +168,8 @@ const LeanAnalysisPage = ({ plantId = 'co2' }) => {
   const isViewOnly = user?.role === 'user';
   const basePath = isViewOnly ? '/portal' : '/admin/tfl';
 
-  // ── States (Locked Date in Asia/Kolkata) ──
-  const [date] = useState(() => getTodayAsiaKolkata());
+  // ── States (Locked Operating Date in Asia/Kolkata) ──
+  const [date] = useState(() => getOperatingDateIST());
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [errors, setErrors] = useState({});
@@ -667,16 +667,6 @@ const LeanAnalysisPage = ({ plantId = 'co2' }) => {
             <LockedDateDisplay date={date} id="lean-date-display" />
 
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                id="btn-lean-reset"
-                onClick={handleReset}
-                disabled={saving || isEntireFormLocked}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-50"
-                title="Reset modifications"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
 
               <StatusSaveButton
                 id="btn-lean-save"

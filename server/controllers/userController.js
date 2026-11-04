@@ -436,10 +436,29 @@ const updateUser = async (req, res) => {
       }
     }
 
-    const { name, email, mobile, plantId, role, status } = req.body;
+    const { name, username, email, mobile, plantId, role, status } = req.body;
 
     const updates = {};
     if (name) updates.name = name.trim();
+    if (username !== undefined) {
+      const cleanUsername = String(username).trim().toLowerCase();
+      if (!cleanUsername) {
+        return res.status(400).json({
+          success: false,
+          message: 'Username cannot be empty.',
+        });
+      }
+      if (cleanUsername !== userToUpdate.username) {
+        const existingUsername = await MongooseUser.findOne({ username: cleanUsername, _id: { $ne: req.params.id } });
+        if (existingUsername) {
+          return res.status(409).json({
+            success: false,
+            message: 'This username is already taken. Please choose another.',
+          });
+        }
+        updates.username = cleanUsername;
+      }
+    }
     if (email) {
       const cleanEmail = email.trim().toLowerCase();
       const existingEmail = await MongooseUser.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
@@ -475,7 +494,7 @@ const updateUser = async (req, res) => {
   } catch (error) {
     console.error('[User Controller] Update user error:', error);
     if (error.code === 11000) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
         message: 'Email address or username is already in use by another user.',
       });

@@ -7,13 +7,13 @@ import { getCellLimit } from '../../services/analysisValidation';
 import {
   ArrowLeft,
   Save,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Layers,
   RefreshCw,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST, LockedDateDisplay, RecordStatusBadge } from '../../utils/co2AnalysisHelper';
 
 const LSA500_SLOTS = [
@@ -426,17 +426,6 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
           />
 
           <div className="flex items-center gap-2 shrink-0">
-            {!isViewOnly && (
-              <button
-                onClick={handleReset}
-                id="btn-lsa500-reset"
-                disabled={saving}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 active:scale-95 transition shadow-xs disabled:opacity-50 cursor-pointer"
-                title="Reset fields to last saved state"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Reset
-              </button>
-            )}
 
             {!isViewOnly && (
               <StatusSaveButton
@@ -643,86 +632,24 @@ const LSA500AnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* ── SAVE CONFIRMATION MODAL ── */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200 animate-scaleUp">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
-                  <Save className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Confirm Analysis Save</h3>
-                  <p className="text-xs text-slate-500">Soda Ash Plant — LSA AT 500# Analysis</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-3.5 text-xs text-slate-600">
-              <p>
-                You are about to persist readings for slot <strong>{confirmData?.targetSlot}</strong> ({confirmData?.targetRow?.time || 'Scheduled Time'}):
-              </p>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Operating Date:</span>
-                  <span className="font-bold text-slate-800">{date}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Target Slot:</span>
-                  <span className="font-bold text-slate-800">{confirmData?.targetSlot} ({confirmData?.targetRow?.time})</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">NaCl %:</span>
-                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.nacl || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">BD:</span>
-                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.bd || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Turbidity:</span>
-                  <span className="font-bold text-slate-800">{confirmData?.targetRow?.turbidity || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Average NaCl:</span>
-                  <span className="font-bold text-emerald-700">{confirmData?.averageNaCl !== null ? `${confirmData?.averageNaCl}%` : '—'}</span>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Saving will securely store this slot in MongoDB.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                disabled={saving}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Confirm & Save</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — LSA AT 500# Analysis"
+        subtitle={`Soda Ash Plant for ${date}`}
+        prompt={`You are about to persist readings for slot ${confirmData?.targetSlot || ''} (${confirmData?.targetRow?.time || 'Scheduled Time'}):`}
+        items={[
+          { label: 'Operating Date', value: date },
+          { label: 'Target Slot', value: `${confirmData?.targetSlot || ''} (${confirmData?.targetRow?.time || ''})` },
+          { label: 'NaCl %', value: confirmData?.targetRow?.nacl || '—' },
+          { label: 'BD', value: confirmData?.targetRow?.bd || '—' },
+          { label: 'Turbidity', value: confirmData?.targetRow?.turbidity || '—' },
+          { label: 'Average NaCl', value: confirmData?.averageNaCl !== null && confirmData?.averageNaCl !== undefined ? `${confirmData?.averageNaCl}%` : '—' },
+        ]}
+        columns={2}
+      />
     </div>
   );
 };

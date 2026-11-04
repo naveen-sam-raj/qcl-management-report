@@ -1,7 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Factory, Flame, Globe, Gauge, Inbox, Layers, FileSpreadsheet, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Factory, Flame, Globe, Gauge, Inbox, Layers } from 'lucide-react';
 import PureSaltAnalysisPage from './PureSaltAnalysisPage';
 import BrineAnalysisPage from './BrineAnalysisPage';
 import PureSaltSieveAnalysisPage from './PureSaltSieveAnalysisPage';
@@ -961,7 +961,7 @@ const PlantAnalysisPage = () => {
         <div className="flex items-center gap-3">
           {user?.role !== 'user' && (
             <button
-              onClick={() => navigate(basePath)}
+              onClick={() => navigate(`${basePath}/plants`)}
               className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-xs"
               title="Back to Plants"
             >
@@ -971,11 +971,8 @@ const PlantAnalysisPage = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                Plant Analysis
-              </h1>
-              <span className="text-xs font-bold px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
                 {plant.title}
-              </span>
+              </h1>
               <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
                 {plant.badge}
               </span>
@@ -984,46 +981,6 @@ const PlantAnalysisPage = () => {
               Tuticorin Alkali Chemicals and Fertilizers Limited • {plant.subtitle}
             </p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
-          {/* Reports button for all plants */}
-          <button
-            id={`btn-${plantKey}-header-reports`}
-            onClick={() => {
-              if (plantKey.includes('acl')) {
-                handleOptionClick('Reports');
-              } else {
-                navigate(`${basePath}/reports`);
-              }
-            }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 rounded-lg transition shadow-xs cursor-pointer"
-            title={`${plant.title} Reports`}
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
-            <span>Reports</span>
-          </button>
-
-          {/* Graph button */}
-          <button
-            id={`btn-${plantKey}-header-graph`}
-            onClick={() => handleOptionClick('Graph')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-300 rounded-lg transition shadow-xs cursor-pointer"
-            title={`${plant.title} Quality Limit & Trend Graphs`}
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Graph</span>
-          </button>
-
-          {user?.role !== 'user' && (
-            <button
-              onClick={() => navigate(basePath)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Plants</span>
-            </button>
-          )}
         </div>
       </div>
 

@@ -55,7 +55,6 @@ const Sidebar = ({ isOpen, onClose }) => {
         { label: 'Plants', to: `/admin/${companySlug}/plants`, icon: Factory },
         { label: 'Users', to: `/admin/${companySlug}/users`, icon: Users2 },
         { label: 'Reports', to: `/admin/${companySlug}/reports`, icon: FileSpreadsheet },
-        { label: 'Settings', to: `/admin/${companySlug}/settings`, icon: Settings },
       ];
     }
 

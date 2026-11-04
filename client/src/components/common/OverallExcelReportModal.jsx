@@ -3,6 +3,7 @@ import { X, FileSpreadsheet, Calendar, CheckSquare, Square, Download, AlertCircl
 import api from '../../services/api';
 import { generateAndDownloadTFLOverallExcel } from '../../services/tflOverallExcel';
 import { useToast } from './Toast';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 const ALL_PLANTS = [
   { id: 'ACL', label: 'ACL Plant' },
@@ -14,7 +15,7 @@ const ALL_PLANTS = [
 const OverallExcelReportModal = ({ isOpen, onClose }) => {
   const { showToast } = useToast();
 
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const getTodayStr = () => getOperatingDateIST();
   const getNDaysAgoStr = (n) => {
     const d = new Date();
     d.setDate(d.getDate() - n);

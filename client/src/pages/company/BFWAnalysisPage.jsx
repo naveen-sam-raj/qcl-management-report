@@ -6,7 +6,6 @@ import api from '../../services/api';
 import {
   ArrowLeft,
   AlertCircle,
-  RotateCcw,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -19,11 +18,13 @@ import {
   OFFSET_SHS_LIMITS,
 } from '../../services/analysisValidation';
 import {
+  formatDateDisplay,
   LockedDateDisplay,
   RecordStatusBadge,
   StatusSaveButton,
   EditedBadge,
 } from '../../utils/offsetAnalysisHelper';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 const DEFAULT_BFW_READINGS = [
@@ -86,6 +87,7 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
   const [shsReadings, setShsReadings] = useState(() => DEFAULT_SHS_READINGS.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [recordId, setRecordId] = useState(null);
   const [editedFields, setEditedFields] = useState({});
   const [lockedSlots, setLockedSlots] = useState({
@@ -268,8 +270,8 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
     setErrors({});
   };
 
-  // Save active slot
-  const handleSave = async () => {
+  // Save active slot - opens confirmation modal
+  const handleSaveClick = () => {
     if (isViewOnly || saving || !isEditable) return;
 
     const currentErrors = {};
@@ -298,6 +300,18 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       showToast?.('Please check and fix highlighted cell errors.', 'error');
       return;
     }
+
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
+    const targetRow = isBfwSelected ? bfwReadings[0] : shsReadings[0];
+    if (!targetRow) return;
 
     setSaving(true);
     try {
@@ -389,21 +403,12 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
             subLabel={isSlotLocked ? 'permanently locked' : activeSlotLock.isSaved ? '1 correction available' : 'initial entry'}
           />
 
-          <button
-            onClick={handleReset}
-            disabled={saving || !isEditable}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            Reset
-          </button>
-
           {!isViewOnly ? (
             <StatusSaveButton
               id="btn-bfw-save"
               saving={saving}
               isLocked={!isEditable}
-              onClick={handleSave}
+              onClick={handleSaveClick}
               alwaysShowSaveText={true}
               title={`Save ${activeOptionLabel} analysis`}
             />
@@ -894,6 +899,39 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
       <div className="text-center text-xs text-slate-500 font-medium py-3">
         One correction allowed after first save; saving the next slot/shift locks the previous one.
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — ${activeOptionLabel}`}
+        subtitle={`Offset Plant for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save measurements for ${activeOptionLabel}?`}
+        isFinalEdit={Boolean(activeSlotLock.isSaved)}
+        warningNotice={
+          activeSlotLock.isSaved ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for this slot. After saving, this entry will be permanently locked.
+            </>
+          ) : null
+        }
+        sectionTitle="Values to be saved:"
+        items={(() => {
+          const targetRow = isBfwSelected ? bfwReadings[0] : shsReadings[0];
+          if (!targetRow) return [];
+          return [
+            { label: 'pH', value: targetRow.ph || '—' },
+            { label: 'Conductivity', value: targetRow.cond ? `${targetRow.cond} µS/cm` : '—' },
+            { label: 'Total Hardness (TH)', value: targetRow.th ? `${targetRow.th} ppm` : '—' },
+            { label: 'Total Alkalinity', value: (targetRow.alk || targetRow.tAlk) ? `${targetRow.alk || targetRow.tAlk} ppm` : '—' },
+            { label: 'Silica (SiO₂)', value: targetRow.sio2 ? `${targetRow.sio2} ppm` : '—' },
+            { label: 'Iron (Fe₂O₃)', value: targetRow.fe2o3 ? `${targetRow.fe2o3} ppm` : '—' },
+          ];
+        })()}
+        columns={2}
+      />
     </div>
   );
 };

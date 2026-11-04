@@ -11,7 +11,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -19,6 +18,8 @@ import {
   Database,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 // ─── SA Plant TK 419 Parameters & Validation Limits ──────────────────────────
 // Plant: SA Plant
@@ -137,10 +138,11 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   // ── State ──
-  const [date, setDate]               = useState('');
+  const [date, setDate]               = useState(() => getOperatingDateIST());
   const [data, setData]               = useState(buildEmptyData());
   const [errors, setErrors]           = useState({});
   const [saving, setSaving]           = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [savePhase, setSavePhase] = useState('idle');
   const [recipientEmail, setRecipientEmail] = useState('');
@@ -242,8 +244,8 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
     return isValid;
   }, [date, data]);
 
-  // ── Save / Submit ──
-  const handleSave = async () => {
+  // ── Save Handler - opens confirmation modal ──
+  const handleSaveClick = () => {
     if (!validateForm()) {
       showToast('Please correct highlighted errors before saving.', 'error');
       return;
@@ -258,6 +260,15 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
       return;
     }
 
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
     setSaving(true);
     setSaveSuccess(false);
 
@@ -335,6 +346,7 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
                   id="tk419-date-input"
                   type="date"
                   value={date}
+                  max={getOperatingDateIST()}
                   onChange={(e) => {
                     setDate(e.target.value);
                     if (typeof setDateError === 'function') setDateError(false);
@@ -360,22 +372,13 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
             </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              id="btn-tk419-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Clear all fields"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
 
             <StatusSaveButton
               id="btn-tk419-save"
               saving={saving}
               savePhase={savePhase}
               saveSuccess={saveSuccess}
-              onClick={handleSave}
+              onClick={handleSaveClick}
               defaultLabel="Save / Submit"
               title="Save TK 419 data"
             />
@@ -427,6 +430,7 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
                   id="tk419-date-input"
                   type="date"
                   value={date}
+                  max={getOperatingDateIST()}
                   onChange={(e) => {
                     setDate(e.target.value);
                     setDateError(false);
@@ -633,6 +637,30 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — TK 419 Analysis"
+        subtitle={`SA Plant for ${formatDateDisplay(date)}`}
+        prompt="Are you sure you want to save measurements for TK 419?"
+        sections={TIME_SLOTS.filter((row) =>
+          PARAMETERS.some((p) => data[row.key]?.[p.key] !== '' && data[row.key]?.[p.key] !== null && data[row.key]?.[p.key] !== undefined)
+        ).map((row) => ({
+          title: `Slot ${row.time}:`,
+          items: PARAMETERS.map((p) => ({
+            label: p.label,
+            value: data[row.key]?.[p.key] !== '' && data[row.key]?.[p.key] !== null && data[row.key]?.[p.key] !== undefined
+              ? `${data[row.key][p.key]} ${p.hasLimit ? 'Kgm/m³' : ''}`.trim()
+              : '—',
+          })),
+        }))}
+        columns={2}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

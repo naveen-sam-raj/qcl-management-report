@@ -9,6 +9,8 @@
  * If a plant has 0 records, writes a clear note: "No records available for the selected date range."
  */
 
+import { getOperatingDateIST } from '../utils/co2AnalysisHelper';
+
 export const generateAndDownloadTFLOverallExcel = async ({
   summaryData,
   plantComplianceList = [],
@@ -19,7 +21,7 @@ export const generateAndDownloadTFLOverallExcel = async ({
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getOperatingDateIST();
   const fromStr = dateRange.from || 'All dates';
   const toStr = dateRange.to || todayStr;
 

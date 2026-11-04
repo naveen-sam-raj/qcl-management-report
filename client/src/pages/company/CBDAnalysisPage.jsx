@@ -15,7 +15,6 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import {
   ArrowLeft,
-  RotateCcw,
   AlertCircle,
   ChevronRight,
   Droplets,
@@ -408,17 +407,6 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
             <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
               Saved at {lastSaved}
             </span>
-          )}
-
-          {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
           )}
 
           {!isViewOnly && (

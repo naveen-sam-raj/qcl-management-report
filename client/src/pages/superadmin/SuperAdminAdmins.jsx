@@ -441,6 +441,7 @@ const SuperAdminAdmins = () => {
     const toStr = admin.licenseTo ? toDateInputFormat(admin.licenseTo) : '';
     setEditFormData({
       name: admin.name || '',
+      username: admin.username || '',
       email: admin.email || '',
       mobile: admin.mobile || '',
       status: admin.status || 'active',
@@ -472,6 +473,7 @@ const SuperAdminAdmins = () => {
     setEditSubmitting(true);
     const payload = {
       name: editFormData.name,
+      username: editFormData.username?.trim(),
       email: editFormData.email,
       mobile: editFormData.mobile,
       status: editFormData.status,
@@ -840,7 +842,7 @@ const SuperAdminAdmins = () => {
                           </button>
                           <button
                             onClick={() => openResetModal(admin)}
-                            title="Reset password"
+                            title="Reset Password"
                             className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
                           >
                             <KeyRound className="w-3.5 h-3.5" />
@@ -1081,6 +1083,16 @@ const SuperAdminAdmins = () => {
             />
           </div>
           <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">Username</label>
+            <input
+              type="text"
+              required
+              value={editFormData.username}
+              onChange={(e) => setEditFormData({ ...editFormData, username: e.target.value })}
+              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none font-mono"
+            />
+          </div>
+          <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Email</label>
             <input
               type="email"
@@ -1164,10 +1176,10 @@ const SuperAdminAdmins = () => {
       </Modal>
 
       {/* ===================== RESET PASSWORD MODAL ===================== */}
-      <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)} title={`Reset Password — ${resetAdmin?.name}`}>
+      <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)} title={`Reset Password for ${resetAdmin?.name || resetAdmin?.username || 'Admin'}`}>
         <form onSubmit={handleResetPassword} className="space-y-4">
           <p className="text-xs text-slate-500 leading-relaxed">
-            Set a new login password for Company Admin <strong>{resetAdmin?.name}</strong> (Username: <span className="font-mono text-indigo-600 font-semibold">{resetAdmin?.username}</span>).
+            Set a new credentials password for Company Admin <strong>{resetAdmin?.name}</strong> (Username: <span className="font-mono text-indigo-600 font-semibold">{resetAdmin?.username}</span>).
           </p>
 
           {/* New Password */}
@@ -1236,12 +1248,12 @@ const SuperAdminAdmins = () => {
               {resetSubmitting ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Resetting Password...</span>
+                  <span>Resetting...</span>
                 </>
               ) : (
                 <>
                   <KeyRound className="w-3.5 h-3.5" />
-                  <span>Reset Password</span>
+                  <span>Confirm Reset</span>
                 </>
               )}
             </button>

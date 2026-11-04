@@ -11,7 +11,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -20,6 +19,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST, LockedDateDisplay } from '../../utils/co2AnalysisHelper';
 
 // ─── SA Plant P417 Parameters & Validation Limits ────────────────────────────
@@ -145,6 +145,8 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   const [lockedShifts, setLockedShifts] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [savePhase, setSavePhase] = useState('idle');
   const [recipientEmail, setRecipientEmail] = useState('');
@@ -347,8 +349,8 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
     return isValid;
   }, [date, data]);
 
-  // ── Save Handler ──
-  const handleSave = async () => {
+  // ── Save Handler - opens confirmation modal ──
+  const handleSaveClick = () => {
     if (!date) {
       showToast?.("Please select an analysis date.", "warning");
       return;
@@ -371,12 +373,31 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       return;
     }
 
+    const shiftKey = getActiveShiftKey();
+    const activeShift = SHIFTS.find((s) => s.key === shiftKey);
+    const isShiftSaved = Boolean(lockedShifts[shiftKey]?.isSaved || lockedShifts[shiftKey]);
+
+    setConfirmData({
+      shiftKey,
+      shiftLabel: activeShift?.name || (shiftKey === 's1' ? 'Shift I' : 'Shift II'),
+      isFinalEdit: isShiftSaved,
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
+    if (!confirmData) return;
+    const { shiftKey } = confirmData;
     setSaving(true);
     setSaveSuccess(false);
     setSavePhase('saving');
 
     try {
-      const shiftKey = getActiveShiftKey();
       const payload = {
         date,
         shiftKey,
@@ -494,22 +515,13 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              id="btn-p417-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer"
-              title="Reset input fields"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
 
             <StatusSaveButton
               id="btn-p417-save"
               saving={saving}
               savePhase={savePhase}
               saveSuccess={saveSuccess}
-              onClick={handleSave}
+              onClick={handleSaveClick}
               defaultLabel="Save Analysis"
               title="Save P417 Analysis"
               alwaysShowSaveText={true}
@@ -734,6 +746,34 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
           <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — ${confirmData?.shiftLabel || ''} (P417)`}
+        subtitle={`SA Plant for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save measurements for ${confirmData?.shiftLabel || ''}?`}
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for this shift. After saving, this shift will be permanently locked.
+            </>
+          ) : null
+        }
+        sectionTitle={`Measurements to Persist (${confirmData?.shiftLabel || ''}):`}
+        items={confirmData?.shiftKey ? PARAMETERS.map((p) => ({
+          label: p.label,
+          value: data[confirmData.shiftKey]?.[p.key] !== '' && data[confirmData.shiftKey]?.[p.key] !== null && data[confirmData.shiftKey]?.[p.key] !== undefined
+            ? `${data[confirmData.shiftKey][p.key]} ${p.hasLimit ? 'Kgm/m³' : ''}`.trim()
+            : '—',
+        })) : []}
+        columns={2}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

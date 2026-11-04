@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -25,6 +24,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import {
   validateCellValue,
   SA_GAS_CONC_LIMITS,
@@ -604,16 +604,6 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
             )}
 
             {/* Reset Button */}
-            <button
-              id="btn-gas-conc-reset"
-              onClick={handleReset}
-              disabled={loading || saving}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 cursor-pointer disabled:opacity-60"
-              title="Reload saved database record"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
 
             {/* Save / Submit Button */}
             <StatusSaveButton
@@ -1140,75 +1130,48 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
       </div>
 
       {/* ── SAVE CONFIRMATION MODAL ── */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2 font-extrabold text-sm tracking-wide uppercase">
-                <Save className="w-4 h-4 text-blue-400" />
-                <span>Confirm Gas Conc. Analysis Submission</span>
-              </div>
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="text-slate-400 hover:text-white transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4 text-xs text-slate-700">
-              <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Operating Date:</span>
-                  <span className="font-extrabold text-slate-900">{formatDateDisplay(selectedDate)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Target Shift:</span>
-                  <span className="font-extrabold text-blue-700">{SHIFT_INFO[pendingTargetShift]?.name || pendingTargetShift}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-500">Total Observations:</span>
-                  <span className="font-extrabold text-slate-900">{rows.length} rows</span>
-                </div>
-              </div>
-
-              {/* Sequential Locking Transition Alert */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 text-[11px] leading-relaxed">
-                <strong>Sequential Shift Locking Notice:</strong>
-                <ul className="list-disc list-inside mt-1 space-y-0.5">
-                  {pendingTargetShift === 'shift1' && !lockedShifts.shift1Saved && <li>Saving will mark <strong>SHIFT 1</strong> as saved and permit SHIFT 2 entries.</li>}
-                  {pendingTargetShift === 'shift1' && lockedShifts.shift1Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 1 and permanently lock it.</li>}
-                  {pendingTargetShift === 'shift2' && !lockedShifts.shift2Saved && <li>Saving will mark <strong>SHIFT 2</strong> as saved, permanently lock SHIFT 1, and permit SHIFT 3 entries.</li>}
-                  {pendingTargetShift === 'shift2' && lockedShifts.shift2Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 2 and permanently lock it.</li>}
-                  {pendingTargetShift === 'shift3' && !lockedShifts.shift3Saved && <li>Saving will mark <strong>SHIFT 3</strong> as saved and permanently lock SHIFT 2.</li>}
-                  {pendingTargetShift === 'shift3' && lockedShifts.shift3Saved && <li>This is the <strong>FINAL EDIT for SHIFT 3</strong>. Submitting will permanently lock all shifts.</li>}
-                </ul>
-              </div>
-
-              <div className="text-slate-500 text-[11px]">
-                Data will be atomically persisted to MongoDB with sequential slot locking.
-              </div>
-            </div>
-
-            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
-              <button
-                onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={executeSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Confirm & Save</span>
-              </button>
-            </div>
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={executeSave}
+        saving={saving}
+        title={`Confirm Save — ${SHIFT_INFO[pendingTargetShift]?.name || pendingTargetShift} (Gas Conc.)`}
+        subtitle={`Soda Ash Plant for ${formatDateDisplay(selectedDate)}`}
+        prompt="Please review the shift details before saving."
+        warningNotice={
+          <div>
+            <strong>Sequential Shift Locking Notice:</strong>
+            <ul className="list-disc list-inside mt-1 space-y-0.5">
+              {pendingTargetShift === 'shift1' && !lockedShifts.shift1Saved && <li>Saving will mark <strong>SHIFT 1</strong> as saved and permit SHIFT 2 entries.</li>}
+              {pendingTargetShift === 'shift1' && lockedShifts.shift1Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 1 and permanently lock it.</li>}
+              {pendingTargetShift === 'shift2' && !lockedShifts.shift2Saved && <li>Saving will mark <strong>SHIFT 2</strong> as saved, permanently lock SHIFT 1, and permit SHIFT 3 entries.</li>}
+              {pendingTargetShift === 'shift2' && lockedShifts.shift2Saved && <li>Saving will use the <strong>one allowed correction</strong> for SHIFT 2 and permanently lock it.</li>}
+              {pendingTargetShift === 'shift3' && !lockedShifts.shift3Saved && <li>Saving will mark <strong>SHIFT 3</strong> as saved and permanently lock SHIFT 2.</li>}
+              {pendingTargetShift === 'shift3' && lockedShifts.shift3Saved && <li>This is the <strong>FINAL EDIT for SHIFT 3</strong>. Submitting will permanently lock all shifts.</li>}
+            </ul>
           </div>
-        </div>
-      )}
+        }
+        sections={rows
+          .filter((r) => r.shiftKey === pendingTargetShift)
+          .map((r) => ({
+            title: `Slot ${r.time} (${r.seal !== '' && r.seal !== null && r.seal !== undefined ? r.seal : '—'}):`,
+            items: [
+              {
+                label: 'Recovery CO₂',
+                value: r.recoveryCo2Con !== '' && r.recoveryCo2Con !== null && r.recoveryCo2Con !== undefined ? `${r.recoveryCo2Con} %` : '—',
+              },
+              {
+                label: 'Cleaning Gas',
+                value: r.cleaningGas !== '' && r.cleaningGas !== null && r.cleaningGas !== undefined ? `${r.cleaningGas} %` : '—',
+              },
+              {
+                label: 'Bottom Gas',
+                value: r.bottomGas !== '' && r.bottomGas !== null && r.bottomGas !== undefined ? `${r.bottomGas} %` : '—',
+              },
+            ],
+          }))}
+        columns={3}
+      />
 
       {/* ── FIELD-LEVEL EDIT HISTORY MODAL ── */}
       {showAuditModal && (

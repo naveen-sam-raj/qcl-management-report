@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   Calendar,
   Save,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   ChevronRight,
@@ -17,6 +16,8 @@ import {
   Layers,
 } from 'lucide-react';
 import { StatusSaveButton, SaveStatusBanner } from '../../components/common/AnalysisStatusBanner';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
+import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 
 const getTodayAsiaKolkata = () => {
   return new Intl.DateTimeFormat('en-CA', {
@@ -66,10 +67,11 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
   const basePath = user?.role === 'user' ? '/portal' : '/admin/tfl';
 
   // ── States ──
-  const [date, setDate] = useState(() => getTodayAsiaKolkata());
+  const [date, setDate] = useState(() => getOperatingDateIST());
   const [parameters, setParameters] = useState(() => JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Fetch existing data when date changes
   useEffect(() => {
@@ -157,8 +159,8 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
     return !hasError;
   };
 
-  // ── Save ──
-  const handleSave = async () => {
+  // ── Save Handler - opens confirmation modal ──
+  const handleSaveClick = () => {
     if (!validate()) {
       showToast?.('Please correct invalid numeric entries.', 'error');
       return;
@@ -173,6 +175,15 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
       return;
     }
 
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
     setSaving(true);
 
     const payload = {
@@ -230,22 +241,13 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              id="btn-tk204-reset"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200"
-              title="Reset to default screenshot values"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
 
             <StatusSaveButton
               id="btn-tk204-save"
               saving={saving}
               savePhase={savePhase}
               saveSuccess={saveSuccess}
-              onClick={handleSave}
+              onClick={handleSaveClick}
               defaultLabel="Save Analysis"
               title="Save TK 204 / TK 209 analysis"
             />
@@ -296,6 +298,7 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
                   id="tk204-date-input"
                   type="date"
                   value={date}
+                  max={getOperatingDateIST()}
                   onChange={(e) => setDate(e.target.value)}
                   className="pl-2.5 pr-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700 bg-white shadow-2xs hover:border-slate-400 transition"
                   required
@@ -400,6 +403,39 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title="Confirm Save — TK 204 / TK 209 Analysis"
+        subtitle={`ACL Plant for ${formatDateDisplay(date)}`}
+        prompt="Are you sure you want to save measurements for TK 204 / TK 209?"
+        sections={[
+          {
+            title: 'TK 204 Measurements:',
+            items: PARAM_CONFIG.map((p) => ({
+              label: p.label,
+              value: parameters[p.key]?.tk204 !== '' && parameters[p.key]?.tk204 !== null && parameters[p.key]?.tk204 !== undefined
+                ? `${parameters[p.key]?.tk204} Kgm/m³`
+                : '—',
+            })),
+          },
+          {
+            title: 'TK 209 Measurements:',
+            items: PARAM_CONFIG.map((p) => ({
+              label: p.label,
+              value: parameters[p.key]?.tk209 !== '' && parameters[p.key]?.tk209 !== null && parameters[p.key]?.tk209 !== undefined
+                ? `${parameters[p.key]?.tk209} Kgm/m³`
+                : '—',
+            })),
+          },
+        ]}
+        columns={2}
+        recipientEmail={recipientEmail}
+      />
     </div>
   );
 };

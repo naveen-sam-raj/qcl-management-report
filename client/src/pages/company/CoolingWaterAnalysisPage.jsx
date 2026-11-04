@@ -5,15 +5,16 @@ import { useToast } from '../../components/common/Toast';
 import api from '../../services/api';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
+  formatDateDisplay,
   LockedDateDisplay,
   StatusSaveButton,
   RecordStatusBadge,
   EditedBadge,
 } from '../../utils/offsetAnalysisHelper';
+import ConfirmSaveModal from '../../components/common/ConfirmSaveModal';
 import { getOperatingDateIST } from '../../utils/co2AnalysisHelper';
 import {
   ArrowLeft,
-  RotateCcw,
   ChevronRight,
   Clock,
   ThermometerSnowflake,
@@ -67,6 +68,8 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   const [originalReadings, setOriginalReadings] = useState(() => defaultReadings.map((r) => ({ ...r })));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmData, setConfirmData] = useState(null);
   const [recordId, setRecordId] = useState(null);
   const [lockedSlots, setLockedSlots] = useState({});
   const [editedFields, setEditedFields] = useState({});
@@ -175,7 +178,7 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
   }, [isAllLocked, slots, lockedSlots]);
 
   // ── Save flow: single targetSlot submission ──
-  const handleSave = async () => {
+  const handleSaveClick = () => {
     const newErrors = {};
 
     readings.forEach((r) => {
@@ -220,6 +223,27 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
     }
 
     const targetSlot = modifiedSlots[0];
+    const targetRow = readings.find((r) => r.id === targetSlot) || {};
+    const slotObj = defaultReadings.find((r) => r.id === targetSlot);
+    const slotLock = lockedSlots[targetSlot] || {};
+
+    setConfirmData({
+      targetSlot,
+      time: slotObj?.time || targetSlot,
+      targetRow,
+      isFinalEdit: Boolean(slotLock.isSaved),
+    });
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowConfirmModal(false);
+    await executeSave();
+  };
+
+  const executeSave = async () => {
+    if (!confirmData) return;
+    const { targetSlot } = confirmData;
     setSaving(true);
 
     try {
@@ -312,22 +336,11 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           </div>
 
           {!isViewOnly && (
-            <button
-              onClick={handleReset}
-              disabled={saving || isAllLocked}
-              className="px-3.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition flex items-center gap-1.5 shadow-xs disabled:opacity-40 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              Reset
-            </button>
-          )}
-
-          {!isViewOnly && (
             <StatusSaveButton
               saving={saving}
               isLocked={isAllLocked}
               savePhase="idle"
-              onClick={handleSave}
+              onClick={handleSaveClick}
               alwaysShowSaveText={true}
               className="px-4 py-2 text-xs"
             />
@@ -558,6 +571,31 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Confirmation Modal ── */}
+      <ConfirmSaveModal
+        isOpen={Boolean(showConfirmModal && confirmData)}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSave}
+        saving={saving}
+        title={`Confirm Save — ${is200 ? 'Cooling Water 200#' : 'Cooling Water'} (${confirmData?.time || ''})`}
+        subtitle={`Offset Plant for ${formatDateDisplay(date)}`}
+        prompt={`Are you sure you want to save measurements for slot ${confirmData?.time || ''}?`}
+        isFinalEdit={confirmData?.isFinalEdit}
+        warningNotice={
+          confirmData?.isFinalEdit ? (
+            <>
+              <strong>Final Edit Notice:</strong> This is the final permitted edit for this slot. After saving, this slot will be permanently locked.
+            </>
+          ) : null
+        }
+        sectionTitle={`Measurements to Persist (${confirmData?.time || ''}):`}
+        items={confirmData?.targetRow ? fields.map((f) => ({
+          label: f.toUpperCase(),
+          value: confirmData.targetRow[f] !== '' && confirmData.targetRow[f] !== null && confirmData.targetRow[f] !== undefined ? confirmData.targetRow[f] : '—',
+        })) : []}
+        columns={4}
+      />
     </div>
   );
 };
