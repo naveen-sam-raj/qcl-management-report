@@ -744,6 +744,7 @@ function createCoolingWaterRouter({ getNow = () => new Date() } = {}) {
             analysisType: CANONICAL_ANALYSIS_TYPE,
             unit: unitConfig.normalizedUnit,
             date: payload.date,
+            shift: unitConfig.is200 ? '200#' : '',
             data: recordData,
             submittedBy: editorName,
             submittedById: editorId,
