@@ -948,8 +948,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
                             {/* Tiny Compact EDITED badge beside / below modified field */}
                             {Boolean(
-                              (editedFields && (editedFields[`${row.key}_${param.key}`] || (editedFields.get && editedFields.get(`${row.key}_${param.key}`)))) ||
-                              (row.key === 'shift3' && (lockedShifts.shift3Edits || 0) >= 1 && hasValue)
+                              editedFields && (editedFields[`${row.key}_${param.key}`] || (editedFields.get && editedFields.get(`${row.key}_${param.key}`)))
                             ) && (
                               <div
                                 id={`psa-edited-badge-${row.key}-${param.key}`}
