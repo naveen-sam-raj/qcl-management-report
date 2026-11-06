@@ -143,6 +143,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [lockedShifts, setLockedShifts] = useState({});
+  const [editedFields, setEditedFields] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -165,6 +166,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
           if (record?.lockedShifts) {
             setLockedShifts(record.lockedShifts);
           }
+          setEditedFields(record?.editedFields || response.data?.editedFields || {});
           if (!record) {
             setData(buildEmptyData());
             setOriginalData(buildEmptyData());
@@ -193,6 +195,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
         } else {
           setData(buildEmptyData());
           setOriginalData(buildEmptyData());
+          setEditedFields({});
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
@@ -425,6 +428,9 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       if (savedDoc?.lockedShifts) {
         setLockedShifts(savedDoc.lockedShifts);
       }
+      if (savedDoc?.editedFields || response.data?.editedFields) {
+        setEditedFields(savedDoc?.editedFields || response.data?.editedFields);
+      }
       if (savedDoc?.shifts || savedDoc?.rows) {
         const docRows = savedDoc.shifts || savedDoc.rows;
         const synced = buildEmptyData();
@@ -626,6 +632,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
                     const validation = validateCellValue(cellVal, limit);
                     const isOutOfLimit = validation.isOutOfLimit;
                     const isNormal = validation.isNormal;
+                    const isEdited = Boolean(editedFields && (editedFields[`${shift.key}_${param.key}`] || (editedFields.get && editedFields.get(`${shift.key}_${param.key}`))));
                     const isFormatError = !!errors[`${shift.key}_${param.key}`];
 
                     return (
@@ -675,6 +682,11 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
                               </span>
                             )}
                           </div>
+                          {isEdited && (
+                            <div id={`p417-edited-badge-${shift.key}-${param.key}`}
+                              className="mt-1 inline-flex items-center px-1.5 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
+                              title="This parameter was modified and saved">EDITED</div>
+                          )}
 
                           {/* Error Message */}
                           {isFormatError && (
