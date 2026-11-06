@@ -41,6 +41,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
   const [data, setData] = useState(() => buildEmptyData(parameters));
   const [originalData, setOriginalData] = useState(null);
   const [lockedShifts, setLockedShifts] = useState({});
+  const [editedFields, setEditedFields] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -64,6 +65,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           if (record?.lockedShifts) {
             setLockedShifts(record.lockedShifts);
           }
+          setEditedFields(record?.editedFields || response.data?.editedFields || {});
           if (!record) {
             setData(buildEmptyData(parameters));
             setOriginalData(buildEmptyData(parameters));
@@ -92,6 +94,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
         } else {
           setData(buildEmptyData(parameters));
           setOriginalData(buildEmptyData(parameters));
+          setEditedFields({});
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
@@ -278,6 +281,9 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
       if (savedDoc?.lockedShifts) {
         setLockedShifts(savedDoc.lockedShifts);
       }
+      if (savedDoc?.editedFields || response.data?.editedFields) {
+        setEditedFields(savedDoc?.editedFields || response.data?.editedFields);
+      }
       if (savedDoc?.shifts || savedDoc?.rows) {
         const docRows = savedDoc.shifts || savedDoc.rows;
         const synced = buildEmptyData(parameters);
@@ -408,12 +414,18 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
                     const fieldKey = shift.key + "_" + param.key;
                     const cellVal = data[shift.key][param.key];
                     const isInvalid = !!errors[fieldKey];
+                    const isEdited = Boolean(editedFields && (editedFields[fieldKey] || (editedFields.get && editedFields.get(fieldKey))));
                     return (
                       <td key={param.key} className="px-4 py-2.5 text-center align-middle">
                         <input id={tankKey + "-input-" + shift.key + "-" + param.key} type="text" inputMode="decimal" value={cellVal} placeholder={param.placeholder || "0.00"} onChange={(e) => handleChange(shift.key, param.key, e.target.value)}
                           disabled={isShiftDisabled(shift.key)}
                           className={"w-full max-w-[120px] mx-auto px-3 py-1.5 text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs " + (isShiftDisabled(shift.key) ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none" : isInvalid ? "border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200" : cellVal !== "" ? "border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200" : shift.inputFocus)}
                           aria-label={param.label + " for Shift " + shift.label} />
+                        {isEdited && (
+                          <div id={tankKey + "-edited-badge-" + shift.key + "-" + param.key}
+                            className="mt-1 inline-flex items-center px-1.5 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
+                            title="This parameter was modified and saved">EDITED</div>
+                        )}
                         {isInvalid && <p className="text-[10px] text-red-600 font-bold mt-1 text-center animate-fadeIn">{errors[fieldKey]}</p>}
                       </td>
                     );
