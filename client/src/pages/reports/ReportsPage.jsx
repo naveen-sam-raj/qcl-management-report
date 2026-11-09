@@ -6,7 +6,6 @@ import { resolvePlantCode } from '../../utils/plantCodeHelper';
 import {
   FileSpreadsheet,
   Download,
-  Calendar,
   Factory,
   AlertCircle,
 } from 'lucide-react';
@@ -37,13 +36,6 @@ const ReportsPage = () => {
   const [downloadingGeneric, setDownloadingGeneric] = useState(false);
   const [singlePlantError, setSinglePlantError] = useState('');
 
-  // ── Section 2: Overall Multi-Day Master Report State ──
-  const [overallFromDate, setOverallFromDate] = useState('');
-  const [overallToDate, setOverallToDate] = useState('');
-  const [downloadingOverall, setDownloadingOverall] = useState(false);
-  const [overallError, setOverallError] = useState('');
-
-  const canDownloadOverall = ['super_admin', 'company_admin', 'admin'].includes(user?.role);
 
   // Load plants metadata
   useEffect(() => {
@@ -207,87 +199,6 @@ const ReportsPage = () => {
     }
   };
 
-  // ── Section 2 Handler: Download Overall Master Report ──
-  const handleDownloadOverallReport = async () => {
-    setOverallError('');
-
-    if (!overallFromDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(overallFromDate).trim())) {
-      const msg = 'Valid "From Date" (YYYY-MM-DD) is required';
-      setOverallError(msg);
-      showToast(msg, 'error');
-      return;
-    }
-
-    if (!overallToDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(overallToDate).trim())) {
-      const msg = 'Valid "To Date" (YYYY-MM-DD) is required';
-      setOverallError(msg);
-      showToast(msg, 'error');
-      return;
-    }
-
-    const fromDateStr = String(overallFromDate).trim();
-    const toDateStr = String(overallToDate).trim();
-
-    if (fromDateStr > toDateStr) {
-      const msg = '"From Date" must be earlier than or equal to "To Date"';
-      setOverallError(msg);
-      showToast(msg, 'error');
-      return;
-    }
-
-    const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 31) {
-      const msg = 'Date range cannot exceed 31 days';
-      setOverallError(msg);
-      showToast(msg, 'error');
-      return;
-    }
-
-    try {
-      setDownloadingOverall(true);
-      showToast(`Generating Overall Master Report for ${fromDateStr} to ${toDateStr}...`, 'info');
-
-      const response = await api.get('/reports/generic-overall', {
-        params: { from: fromDateStr, to: toDateStr },
-        responseType: 'blob',
-      });
-
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `OVERALL_Report_${fromDateStr}_${toDateStr}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-
-      showToast('Overall Master Report downloaded successfully!', 'success');
-    } catch (err) {
-      let errorMessage = 'Failed to download overall report.';
-      if (err.response?.data instanceof Blob) {
-        try {
-          const text = await err.response.data.text();
-          const json = JSON.parse(text);
-          if (json.message) {
-            errorMessage = json.message;
-          }
-        } catch (parseErr) {
-          console.warn('Could not parse error blob as JSON:', parseErr);
-        }
-      } else if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      setOverallError(errorMessage);
-      showToast(errorMessage, 'error');
-    } finally {
-      setDownloadingOverall(false);
-    }
-  };
 
   return (
     <div className="space-y-6 animate-fadeIn pb-10">
@@ -434,81 +345,7 @@ const ReportsPage = () => {
         </div>
       </div>
 
-      {/* ── 3. Section 2: Overall Master Report (All Plants) ── */}
-      {canDownloadOverall && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-              <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
-              <span>Consolidated Overall Report (All Plants)</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Download one consolidated workbook for all plants across a date range: an OVERALL shift sheet, detail sheets for timed readings, and a NOTES sheet. Maximum 31 days.
-            </p>
-          </div>
 
-          {/* Form Fields: From Date, To Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
-            {/* From Date */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">From Date</label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={overallFromDate}
-                  onChange={(e) => {
-                    setOverallFromDate(e.target.value);
-                    if (overallError) setOverallError('');
-                  }}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium text-slate-800 cursor-pointer"
-                />
-              </div>
-            </div>
-
-            {/* To Date */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">To Date</label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={overallToDate}
-                  onChange={(e) => {
-                    setOverallToDate(e.target.value);
-                    if (overallError) setOverallError('');
-                  }}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium text-slate-800 cursor-pointer"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Inline Error Notice */}
-          {overallError && (
-            <div className="text-xs text-red-600 font-semibold flex items-center gap-1.5 pt-1">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{overallError}</span>
-            </div>
-          )}
-
-          {/* Action Button */}
-          <div className="pt-2">
-            <button
-              id="btn-download-overall-report"
-              onClick={handleDownloadOverallReport}
-              disabled={downloadingOverall}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-blue-600 hover:bg-blue-700 transition shadow-xs cursor-pointer disabled:opacity-50"
-              title="Download multi-day Overall Report for all plants"
-            >
-              {downloadingOverall ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              <span>{downloadingOverall ? 'Generating Overall Report...' : 'Download Overall Report'}</span>
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
