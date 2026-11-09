@@ -30,9 +30,6 @@ import {
   RefreshCw,
   FileSpreadsheet,
   Lock,
-  Pencil,
-  Clock,
-  Sliders,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -175,31 +172,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmData, setConfirmData] = useState(null);
 
-  // Shift-Wise Input Locking: null | 'shift1' | 'shift2' | 'shift3'
-  // Defaults to 'shift1' so Shift 1 is immediately open and editable on load
-  const [activeEditingShift, setActiveEditingShift] = useState('shift1');
-
-  // Helper to determine the active editable shift based on lock state
-  const resolveActiveShift = useCallback((lShifts = {}) => {
-    // If Shift 1 is not saved yet, Shift 1 is the active shift
-    if (!lShifts.shift1Saved && !lShifts.shift1 && !lShifts.shift1Locked) {
-      return 'shift1';
-    }
-    // Once Shift 1 is saved, Shift 2 becomes active if not saved yet and not locked
-    if (!lShifts.shift2Saved && !lShifts.shift2 && !lShifts.shift2Locked) {
-      return 'shift2';
-    }
-    // Once Shift 2 is saved, Shift 3 becomes active if not saved yet and not locked
-    if (!lShifts.shift3Saved && !lShifts.shift3 && !lShifts.shift3Locked) {
-      return 'shift3';
-    }
-    // If Shift 3 was saved, allow 1 correction on Shift 3 if not yet used
-    if (lShifts.shift3Saved && (lShifts.shift3Edits || 0) === 0 && !lShifts.shift3 && !lShifts.shift3Locked) {
-      return 'shift3';
-    }
-    return null;
-  }, []);
-
   const getRowStatus = useCallback(
     (key) => {
       if (key === 'rawSalt') {
@@ -248,7 +220,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     
     let active = true;
     setData(buildEmptyData()); // Clear stale data immediately while loading
-    setActiveEditingShift('shift1'); // Default to shift1 for fresh input
 
     const fetchExistingData = async () => {
       try {
@@ -264,32 +235,27 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
             setOriginalData(JSON.parse(JSON.stringify(record.rows)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
-            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else if (record && record.data && !Array.isArray(record.data)) {
             setData(record.data);
             setOriginalData(JSON.parse(JSON.stringify(record.data)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
-            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else if (record && Object.keys(record).length > 0 && !record.shifts && !record.readings && !record.rows && !record.data && !record.parameters) {
             setData(record);
             setOriginalData(JSON.parse(JSON.stringify(record)));
             setLockedShifts(record.lockedShifts || {});
             setEditedFields(record.editedFields || {});
-            setActiveEditingShift(resolveActiveShift(record.lockedShifts || {}));
           } else {
             setData(buildEmptyData());
             setOriginalData(null);
             setLockedShifts({});
             setEditedFields({});
-            setActiveEditingShift('shift1');
           }
         } else {
           setData(buildEmptyData());
           setOriginalData(null);
           setLockedShifts({});
           setEditedFields({});
-          setActiveEditingShift('shift1');
         }
       } catch (err) {
         if (!active) return;
@@ -298,7 +264,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         setOriginalData(null);
         setLockedShifts({});
         setEditedFields({});
-        setActiveEditingShift('shift1');
       }
     };
     fetchExistingData();
@@ -306,7 +271,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     return () => {
       active = false;
     };
-  }, [date, resolveActiveShift]);
+  }, [date]);
 
 
   // ── Real-time input change (Accepts exact values without limits/tolerances) ──
@@ -317,11 +282,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     if (rowKey === 'shift2' && (!lockedShifts.shift1Saved || lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1)) return;
     if (rowKey === 'shift3' && (!lockedShifts.shift2Saved || (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))) return;
 
-    // Shift-Wise Locking: shifts can only be edited when actively selected
-    if (['shift1', 'shift2', 'shift3'].includes(rowKey) && activeEditingShift !== rowKey) {
-      return;
-    }
-
     setData((prev) => ({
       ...prev,
       [rowKey]: { ...prev[rowKey], [paramKey]: value },
@@ -330,12 +290,11 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     // Clear global success on any edit
     setSaveSuccess(false);
     setSavePhase('idle');
-  }, [lockedShifts, activeEditingShift]);
+  }, [lockedShifts]);
 
   const handleReset = () => {
     setData(buildEmptyData());
     setDate(getOperatingDateIST());
-    setActiveEditingShift('shift1');
     setErrors({});
     setSaveSuccess(false);
     setDateError(false);
@@ -459,7 +418,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
         (key === 'shift2' && (!lockedShifts.shift1Saved || lockedShifts.shift3Saved || (lockedShifts.shift2Edits || 0) >= 1)) ||
         (key === 'shift3' && (!lockedShifts.shift2Saved || ((lockedShifts.shift3Edits || 0) >= 1 && lockedShifts.shift3Saved)))
       );
-      const canEdit = !lockedShifts[key] && !isShiftLocked && (!isShift || activeEditingShift === key);
+      const canEdit = !lockedShifts[key] && !isShiftLocked;
       if (hasData && canEdit) {
         const diff = isDiff(originalData ? originalData[key] : null, data[key]);
         if (diff) {
@@ -476,11 +435,12 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
     }
     
     if (toSave.length === 0) {
-      if (!activeEditingShift) {
-        showToast('Please select an available shift to edit first, or enter RAW SALT / COMPOSITION.', 'info');
-      } else {
-        showToast(`No modified changes found in ${shiftDisplayNames[activeEditingShift]} to save.`, 'info');
-      }
+      showToast('No new or modified data found to save.', 'info');
+      return;
+    }
+
+    if (toSave.length > 1) {
+      showToast('Only one section can be edited and saved at a time. Please revert changes in the other sections before saving.', 'error');
       return;
     }
     
@@ -555,7 +515,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       if (savedRecord?.rows) {
         setOriginalData(JSON.parse(JSON.stringify(savedRecord.rows)));
       }
-      setActiveEditingShift(resolveActiveShift(locks));
       setShowConfirmModal(false);
 
       // Check email status from server
@@ -670,158 +629,6 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
       {/* ── Analysis Table Card ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
 
-        {/* ── Shift-Wise Input Editing Control Bar ────────────────────────── */}
-        {!isViewOnly && (
-          <div className="px-5 py-3 bg-gradient-to-r from-slate-50 via-blue-50/30 to-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-700 tracking-tight flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-blue-600" />
-                <span>Shift Input Mode:</span>
-              </span>
-              {activeEditingShift ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-                  Editing {shiftDisplayNames[activeEditingShift] || activeEditingShift}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-slate-200 text-slate-700 shadow-2xs">
-                  <Lock className="w-3 h-3 text-slate-500" />
-                  All Shifts Read-Only (Select a shift to edit)
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {/* Read-Only Mode Button */}
-              <button
-                type="button"
-                onClick={() => setActiveEditingShift(null)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer ${
-                  activeEditingShift === null
-                    ? 'bg-slate-800 text-white shadow-xs'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                }`}
-                title="Lock all shifts in read-only mode"
-              >
-                Read-Only
-              </button>
-
-              {/* I SHIFT Button */}
-              {(() => {
-                const isLocked = Boolean(
-                  lockedShifts.shift1 ||
-                  lockedShifts.shift1Locked ||
-                  lockedShifts.shift2Saved ||
-                  (lockedShifts.shift1Edits || 0) >= 1
-                );
-                const isEligible = !isLocked;
-                const isActive = activeEditingShift === 'shift1';
-                return (
-                  <button
-                    type="button"
-                    id="btn-psa-select-bar-shift1"
-                    disabled={!isEligible}
-                    onClick={() => setActiveEditingShift(isActive ? null : 'shift1')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
-                        : isLocked
-                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
-                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
-                    }`}
-                  >
-                    {isLocked ? <Lock className="w-3 h-3 text-slate-400" /> : <Pencil className="w-3 h-3" />}
-                    <span>I SHIFT</span>
-                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
-                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
-                  </button>
-                );
-              })()}
-
-              {/* II SHIFT Button */}
-              {(() => {
-                const isLocked = Boolean(
-                  lockedShifts.shift2 ||
-                  lockedShifts.shift2Locked ||
-                  lockedShifts.shift3Saved ||
-                  (lockedShifts.shift2Edits || 0) >= 1
-                );
-                const isWaiting = !lockedShifts.shift1Saved;
-                const isEligible = !isLocked && !isWaiting;
-                const isActive = activeEditingShift === 'shift2';
-                return (
-                  <button
-                    type="button"
-                    id="btn-psa-select-bar-shift2"
-                    disabled={!isEligible}
-                    onClick={() => setActiveEditingShift(isActive ? null : 'shift2')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
-                        : isLocked
-                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
-                        : isWaiting
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
-                    }`}
-                  >
-                    {isLocked ? (
-                      <Lock className="w-3 h-3 text-slate-400" />
-                    ) : isWaiting ? (
-                      <Clock className="w-3 h-3 text-amber-500" />
-                    ) : (
-                      <Pencil className="w-3 h-3" />
-                    )}
-                    <span>II SHIFT</span>
-                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
-                    {isWaiting && <span className="text-[10px] text-amber-700 font-normal">(Waiting)</span>}
-                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
-                  </button>
-                );
-              })()}
-
-              {/* III SHIFT Button */}
-              {(() => {
-                const isFinalUsed = Boolean(lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1);
-                const isLocked = Boolean(lockedShifts.shift3 || lockedShifts.shift3Locked || isFinalUsed);
-                const isWaiting = !lockedShifts.shift2Saved;
-                const isEligible = !isLocked && !isWaiting && !isFinalUsed;
-                const isActive = activeEditingShift === 'shift3';
-                return (
-                  <button
-                    type="button"
-                    id="btn-psa-select-bar-shift3"
-                    disabled={!isEligible}
-                    onClick={() => setActiveEditingShift(isActive ? null : 'shift3')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
-                        : isLocked || isFinalUsed
-                        ? 'bg-slate-100 text-slate-400 border border-slate-200'
-                        : isWaiting
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                        : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
-                    }`}
-                  >
-                    {isLocked || isFinalUsed ? (
-                      <Lock className="w-3 h-3 text-slate-400" />
-                    ) : isWaiting ? (
-                      <Clock className="w-3 h-3 text-amber-500" />
-                    ) : (
-                      <Pencil className="w-3 h-3" />
-                    )}
-                    <span>III SHIFT</span>
-                    {isLocked && <span className="text-[10px] text-slate-400 font-normal">(Locked)</span>}
-                    {isWaiting && <span className="text-[10px] text-amber-700 font-normal">(Waiting)</span>}
-                    {isFinalUsed && <span className="text-[10px] text-slate-400 font-normal">(Final Used)</span>}
-                    {isActive && <span className="text-[10px] text-blue-100 font-normal">Active</span>}
-                  </button>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[840px] text-sm">
@@ -895,8 +702,7 @@ const PureSaltAnalysisPage = ({ plantId = 'acl' }) => {
                                     (row.key === 'shift3' && (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1))
                                   );
                                   const isWaiting = (row.key === 'shift2' && !lockedShifts.shift1Saved) || (row.key === 'shift3' && !lockedShifts.shift2Saved);
-                                  const isShiftActive = activeEditingShift === row.key;
-                                  isDisabled = isViewOnly || isLocked || isWaiting || !isShiftActive;
+                                  isDisabled = isViewOnly || isLocked || isWaiting;
                                 } else {
                                   // RAW SALT and COMPOSITION retain their independent rules
                                   const isLocked = Boolean(lockedShifts[row.key] || lockedShifts[`${row.key}Locked`]);
