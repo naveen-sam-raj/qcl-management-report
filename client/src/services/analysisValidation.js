@@ -1960,7 +1960,6 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'sa-lsa' ||
     cleanAnalysis === 'sa-lsa-shift' ||
     cleanAnalysis === 'sa-lsa-analysis';
-  const isLSA500 = cleanAnalysis === 'lsa-500' || cleanAnalysis === 'lsa-at-500#' || cleanAnalysis === 'lsa-at-500';
   const isLSABaggingSieve =
     cleanAnalysis === 'lsa-bagging-sieve' ||
     cleanAnalysis === 'lsa-bagging-sieve-analysis' ||
@@ -2082,7 +2081,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
     cleanAnalysis === 'acl-cacl2-analysis' ||
     cleanAnalysis.includes('cacl2');
 
-  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSA500 && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetSewerWater && !isOffsetVacuumSealWater && !isOffsetDistillerWaste && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetCoolingWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
+  if (!isPureSalt && !isAclProduct && !isAcl300 && !isRawSalt && !isBrine && !isPureSaltSieve && !isTK203 && !isTK204 && !isTK205 && !isTK207 && !isTK209 && !isCR202 && !isCR203 && !isPclTcl && !isSATK401 && !isSATK405 && !isSATK414 && !isSAP413 && !isSATK419 && !isSAP417 && !isSAT401 && !isSABicarbonateMoisture && !isSALSA && !isLSABagging && !isLSABaggingSieve && !isE501 && !isT501 && !isE501T501 && !isBL1204 && !isAbsorberInlet && !isOutlet && !isLean && !isRich && !isWashwater && !isP1256 && !isReflux && !isTK1251 && !isTK1252 && !isDccDrainLiq && !isSoxDrainLiq && !isAbsorberDrainLiq && !isSAGasConc && !isOffsetSewerWater && !isOffsetVacuumSealWater && !isOffsetDistillerWaste && !isOffsetFlyAsh && !isOffsetBottomAsh && !isOffsetCBD && !isOffsetRawWater && !isOffsetCoolingWater && !isOffsetDMWater && !isOffsetBFW && !isOffsetSHS && !isACLCaCl2) {
     return null;
   }
 
@@ -2137,7 +2136,7 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
   if ((isTK205 || isTK207 || isTK209 || isCR202 || isCR203 || isPclTcl || isACLCaCl2) && cleanPlant !== 'acl' && cleanPlant !== 'plant_acl' && cleanPlant !== 'tfl') {
     return null;
   }
-  if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSA500 || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
+  if ((isSATK401 || isSATK405 || isSATK414 || isSAP413 || isSATK419 || isSAP417 || isSAT401 || isSABicarbonateMoisture || isSALSA || isLSABagging || isLSABaggingSieve || isE501 || isT501 || isE501T501 || isSAGasConc) && cleanPlant !== 'sa' && cleanPlant !== 'plant_sa' && cleanPlant !== 'tfl') {
     return null;
   }
   if ((isOffsetSewerWater || isOffsetVacuumSealWater || isOffsetDistillerWaste || isOffsetFlyAsh || isOffsetBottomAsh || isOffsetCBD || isOffsetRawWater || isOffsetCoolingWater || isOffsetDMWater || isOffsetBFW || isOffsetSHS) && cleanPlant !== 'offset' && cleanPlant !== 'plant_offset' && cleanPlant !== 'tfl') {
@@ -2219,10 +2218,8 @@ export const getCellLimit = (plantKey = 'acl', analysisType = 'pure-salt', rowKe
                                                             ? 'lsa-bagging-sieve'
                                                             : isLSABagging
                                                               ? 'lsa-bagging'
-                                                              : isLSA500
-                                                                ? 'lsa-500'
-                                                                : isSALSA
-                                                                  ? 'lsa'
+                                                              : isSALSA
+                                                                ? 'lsa'
                                                                 : isE501
                                                                   ? 'e501'
                                                                   : isT501

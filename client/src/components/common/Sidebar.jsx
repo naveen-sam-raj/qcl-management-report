@@ -62,6 +62,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     const plantName = user?.plant?.name || 'ACL Plant';
     return [
       { label: `${plantName} Dashboard`, to: '/portal', icon: Factory, exact: true },
+      { label: 'Reports', to: '/portal/reports', icon: FileSpreadsheet },
     ];
   };
 

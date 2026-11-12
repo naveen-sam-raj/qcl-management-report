@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
+import AnalysisTableCard from '../../components/common/AnalysisTableCard';
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
@@ -41,7 +43,6 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
   const [data, setData] = useState(() => buildEmptyData(parameters));
   const [originalData, setOriginalData] = useState(null);
   const [lockedShifts, setLockedShifts] = useState({});
-  const [editedFields, setEditedFields] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -65,7 +66,6 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
           if (record?.lockedShifts) {
             setLockedShifts(record.lockedShifts);
           }
-          setEditedFields(record?.editedFields || response.data?.editedFields || {});
           if (!record) {
             setData(buildEmptyData(parameters));
             setOriginalData(buildEmptyData(parameters));
@@ -94,7 +94,6 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
         } else {
           setData(buildEmptyData(parameters));
           setOriginalData(buildEmptyData(parameters));
-          setEditedFields({});
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
@@ -281,9 +280,6 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
       if (savedDoc?.lockedShifts) {
         setLockedShifts(savedDoc.lockedShifts);
       }
-      if (savedDoc?.editedFields || response.data?.editedFields) {
-        setEditedFields(savedDoc?.editedFields || response.data?.editedFields);
-      }
       if (savedDoc?.shifts || savedDoc?.rows) {
         const docRows = savedDoc.shifts || savedDoc.rows;
         const synced = buildEmptyData(parameters);
@@ -338,37 +334,21 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <button onClick={() => navigate(basePath + "/plants/" + plantId)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer" title="Back">
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" /><span>Back</span>
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Flame className="w-3.5 h-3.5 text-slate-400" /><span>SA Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <Database className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">{tankName}</span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">{displayTitle}</h1>
-            </div>
-            <LockedDateDisplay date={date} id={tankKey + "-date-display"} badgeText="Operating Day" />
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusSaveButton
-              id={"btn-" + tankKey + "-save"}
-              saving={saving}
-              savePhase={savePhase}
-              saveSuccess={saveSuccess}
-              onClick={handleSaveClick}
-              defaultLabel="Save / Submit"
-              title={"Save " + tankName + " data"}
-              alwaysShowSaveText={true}
-            />
-          </div>
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="SA Plant"
+        analysisName={tankName}
+        title={displayTitle}
+        date={date}
+        dateId={`${tankKey}-date-display`}
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId={`btn-${tankKey}-save`}
+        saveButtonTitle={`Save ${tankName} data`}
+      />
       <SaveStatusBanner
         id={tankKey + "-success-banner"}
         saveSuccess={saveSuccess}
@@ -383,49 +363,61 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
         }}
         saving={saving}
       />
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden w-full">
-        <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-4 rounded-full bg-blue-600" />
-            <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">{tankName} - Data Entry</span>
-          </div>
-          <span className="text-[11px] font-bold text-slate-500">3 Shifts</span>
-        </div>
+      {/* ── Main Data Card ── */}
+      <AnalysisTableCard
+        title={tankName + " Shift Measurements"}
+        frequencyText="Frequency: Once in a Shift"
+        unitText="Unit: Kgm/m³"
+        footerTitle={tankName + " Shift Analysis"}
+        footerMeta={"Frequency: Once in a Shift • Parameters: " + paramSummary}
+        footerNote="One correction allowed after first save; saving the next shift locks the previous one."
+      >
         <div className="overflow-x-auto w-full table-responsive-container">
           <table className="w-full text-sm min-w-[700px] xl:min-w-full">
             <thead>
-              <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-24 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">SHIFT</th>
-                {parameters.map((p, idx) => (
-                  <th key={p.key} className={"px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 " + (idx % 2 === 0 ? "bg-slate-900/95" : "bg-slate-900/85")}>{p.label}</th>
+              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
+                <th className="py-3 px-5 text-left text-xs font-extrabold uppercase tracking-wider w-36 border-r border-slate-800 shrink-0">
+                  SHIFT
+                </th>
+                {parameters.map((p) => (
+                  <th key={p.key} className="py-3 px-4 text-center border-r border-slate-800 last:border-r-0 min-w-[120px]">
+                    <div className="font-extrabold text-indigo-300 text-xs">{p.label}</div>
+                    <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">Kgm/m³</div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {SHIFTS.map((shift) => (
                 <tr key={shift.key} className={"transition-colors duration-100 " + shift.rowClass}>
-                  <td className="px-5 py-3 align-middle">
-                    <div className="flex items-center gap-2">
-                      <span className={"font-mono font-extrabold px-2.5 py-1 rounded text-xs border shadow-2xs inline-block text-center min-w-[32px] " + shift.badgeClass} title={shift.title}>{shift.label}</span>
-                      {getShiftBadge(shift.key)}
+                  <td className="py-3 px-5 border-r border-slate-100 bg-slate-50/50 align-top">
+                    <div className="flex flex-col gap-1 mt-0.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                        <div>
+                          <span className="font-extrabold text-slate-900 text-xs tracking-wide">
+                            {shift.label}
+                          </span>
+                          <div className="text-[10px] text-slate-400 font-medium">
+                            {shift.title}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-1">
+                        {getShiftBadge(shift.key)}
+                      </div>
                     </div>
                   </td>
                   {parameters.map((param) => {
                     const fieldKey = shift.key + "_" + param.key;
                     const cellVal = data[shift.key][param.key];
                     const isInvalid = !!errors[fieldKey];
-                    const isEdited = Boolean(editedFields && (editedFields[fieldKey] || (editedFields.get && editedFields.get(fieldKey))));
                     return (
                       <td key={param.key} className="px-4 py-2.5 text-center align-middle">
                         <input id={tankKey + "-input-" + shift.key + "-" + param.key} type="text" inputMode="decimal" value={cellVal} placeholder={param.placeholder || "0.00"} onChange={(e) => handleChange(shift.key, param.key, e.target.value)}
                           disabled={isShiftDisabled(shift.key)}
                           className={"w-full max-w-[120px] mx-auto px-3 py-1.5 text-sm font-mono font-bold text-center rounded-lg transition-all focus:outline-none shadow-2xs " + (isShiftDisabled(shift.key) ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none" : isInvalid ? "border-2 border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200" : cellVal !== "" ? "border-2 border-blue-500 bg-blue-50/50 text-blue-900 font-extrabold focus:ring-2 focus:ring-blue-200" : shift.inputFocus)}
                           aria-label={param.label + " for Shift " + shift.label} />
-                        {isEdited && (
-                          <div id={tankKey + "-edited-badge-" + shift.key + "-" + param.key}
-                            className="mt-1 inline-flex items-center px-1.5 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
-                            title="This parameter was modified and saved">EDITED</div>
-                        )}
                         {isInvalid && <p className="text-[10px] text-red-600 font-bold mt-1 text-center animate-fadeIn">{errors[fieldKey]}</p>}
                       </td>
                     );
@@ -435,11 +427,7 @@ const SATankShiftAnalysisPage = ({ tankName = "Tank Analysis", tankKey = "sa-tan
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" /><span>Values for <strong>{tankName}</strong> ({paramSummary}). Numeric values only. Leave blank if not sampled.</span></div>
-          <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
-        </div>
-      </div>
+      </AnalysisTableCard>
 
       {/* ── Confirmation Modal ── */}
       <ConfirmSaveModal

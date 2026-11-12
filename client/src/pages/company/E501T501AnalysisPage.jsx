@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -437,63 +438,21 @@ const E501T501AnalysisPage = ({ plantId = 'sa', optionName = 'E 501 / T 501' }) 
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── TOP HEADER BAR ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                SA Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Soda Ash Production
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200/60">
-                E 501 / T 501
-              </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                Frequency: Once in a Shift
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Activity className="w-5 h-5 text-indigo-600" />
-              E 501 / T 501 ANALYSIS
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Controls & Buttons */}
-        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
-          )}
-
-          {!isViewOnly && (
-            <StatusSaveButton
-              id="btn-e501-save"
-              saving={saving}
-              savePhase={savePhase}
-              onClick={handleSaveClick}
-              defaultLabel="Save E 501 / T 501 Data"
-              title="Save E 501 / T 501 observations"
-              alwaysShowSaveText={true}
-            />
-          )}
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="SA Plant"
+        analysisName="E501T501"
+        title="E 501 / T 501 ANALYSIS"
+        date={date}
+        dateId="e501-t501-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveButtonId="btn-e501-save"
+        saveButtonTitle="Save E 501 / T 501 observations"
+      />
 
       {/* ── Status Banner (Email / Save Status) ── */}
       <SaveStatusBanner

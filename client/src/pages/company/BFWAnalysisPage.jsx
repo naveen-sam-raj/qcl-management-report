@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -358,118 +359,20 @@ const BFWAnalysisPage = ({ plantId = 'offset' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── TOP HEADER BAR ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back to Plant"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                OFFSET Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Utilities & Facilities
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
-                Boiler Feed Water / Super Heated Steam
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              {isBfwSelected ? (
-                <Droplets className="w-5 h-5 text-blue-600" />
-              ) : (
-                <Flame className="w-5 h-5 text-amber-600" />
-              )}
-              BOILER FEED WATER / SUPER HEATED STEAM
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Buttons: StatusBadge, Reset & StatusSaveButton */}
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          <LockedDateDisplay date={date} badgeText="Operating Day" id="bfw-locked-date" />
-
-          <RecordStatusBadge
-            status={badgeStatus}
-            subLabel={isSlotLocked ? 'permanently locked' : activeSlotLock.isSaved ? '1 correction available' : 'initial entry'}
-          />
-
-          {!isViewOnly ? (
-            <StatusSaveButton
-              id="btn-bfw-save"
-              saving={saving}
-              isLocked={!isEditable}
-              onClick={handleSaveClick}
-              alwaysShowSaveText={true}
-              title={`Save ${activeOptionLabel} analysis`}
-            />
-          ) : (
-            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
-              Read-Only
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ── SEPARATE SELECTABLE OPTIONS SWITCHER ── */}
-      <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1 shrink-0">
-            Select Analysis:
-          </span>
-
-          {/* Option 1: BFW */}
-          <button
-            type="button"
-            onClick={() => setSelectedOption('bfw')}
-            className={`flex-1 sm:flex-none flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition border cursor-pointer ${
-              isBfwSelected
-                ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/20'
-                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <Droplets className={`w-4 h-4 ${isBfwSelected ? 'text-white' : 'text-blue-600'}`} />
-            <span>Boiler Feed Water (BFW)</span>
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                isBfwSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-200 text-slate-600'
-              }`}
-            >
-              Slot 1
-            </span>
-          </button>
-
-          {/* Option 2: SHS */}
-          <button
-            type="button"
-            onClick={() => setSelectedOption('shs')}
-            className={`flex-1 sm:flex-none flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition border cursor-pointer ${
-              !isBfwSelected
-                ? 'bg-amber-600 text-white border-amber-600 shadow-sm shadow-amber-500/20'
-                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <Flame className={`w-4 h-4 ${!isBfwSelected ? 'text-white' : 'text-amber-600'}`} />
-            <span>Super Heated Steam (SHS)</span>
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                !isBfwSelected ? 'bg-amber-700 text-amber-100' : 'bg-slate-200 text-slate-600'
-              }`}
-            >
-              Slot 2
-            </span>
-          </button>
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="Super Heated Steam (SHS)"
+        analysisName="Boiler Feed Water / Super Heated Steam"
+        title="{isBfwSelected ? ( ) : ( )} BOILER FEED WATER / SUPER HEATED STEAM"
+        date={date}
+        dateId="bfw-locked-date"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        saveButtonId="btn-bfw-save"
+        saveButtonTitle="Save analysis data"
+      />
 
       {/* ── MEASUREMENTS TABLE ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

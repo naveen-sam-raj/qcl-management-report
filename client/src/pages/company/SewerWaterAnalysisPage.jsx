@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import { getOperatingDateIST, SaveConfirmationModal } from '../../utils/co2AnalysisHelper';
 import {
@@ -353,61 +354,22 @@ const SewerWaterAnalysisPage = ({ plantId = 'offset' }) => {
         saving={saving}
       />
 
-      {/* ── TOP HEADER BAR ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                OFFSET Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Sewer Water
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Waves className="w-5 h-5 text-blue-600" />
-              SEWER WATER ANALYSIS
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          <LockedDateDisplay date={date} badgeText="Operating Day" id="sewer-locked-date" />
-
-          <RecordStatusBadge
-            status={overallBadgeStatus}
-            subLabel={isAllLocked ? 'all slots locked' : lockedSlots['t11']?.isSaved ? 'in progress' : 'first slot ready'}
-          />
-
-          {!isViewOnly ? (
-            <StatusSaveButton
-              id="btn-sewer-save"
-              saving={saving}
-              isLocked={isAllLocked}
-              savePhase={savePhase}
-              onClick={initiateSave}
-              alwaysShowSaveText={true}
-              title="Save Sewer Water Analysis"
-            />
-          ) : (
-            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
-              <Lock className="w-3.5 h-3.5" />
-              Read-Only
-            </span>
-          )}
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="OFFSET Plant"
+        analysisName="SewerWater"
+        title="SEWER WATER ANALYSIS"
+        date={date}
+        dateId="sewer-locked-date"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={initiateSave}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId="btn-sewer-save"
+        saveButtonTitle="Save analysis data"
+      />
 
       {/* ── MAIN CONTENT: Sewer Water Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

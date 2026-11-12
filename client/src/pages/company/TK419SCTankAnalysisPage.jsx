@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
+import AnalysisTableCard from '../../components/common/AnalysisTableCard';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -579,64 +581,21 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
   return (
     <div className="space-y-4 animate-fadeIn">
       {/* ── Breadcrumb & Top Navigation ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back button + Breadcrumb + Title */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Flame className="w-3.5 h-3.5 text-orange-500" />
-                <span>SA Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <Database className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="text-indigo-600 font-semibold">TK 419 SC TANK</span>
-                <span className="ml-1.5 text-[10px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
-                  Once in a Shift
-                </span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
-                TK 419 SC TANK ANALYSIS
-              </h1>
-            </div>
-          </div>
-
-          {/* Right: Date Lock and Actions */}
-          <div className="flex items-center gap-3 shrink-0 flex-wrap">
-            {/* Read-only Operating Day Display via LockedDateDisplay */}
-            <LockedDateDisplay date={date} id="tk419sa-date-display" badgeText="Operating Day" />
-
-            {!isViewOnly ? (
-              <div className="flex items-center gap-2">
-
-                <StatusSaveButton
-                  id="btn-tk419-save"
-                  saving={saving}
-                  savePhase={savePhase}
-                  saveSuccess={saveSuccess}
-                  onClick={handleSaveClick}
-                  defaultLabel="Save / Submit"
-                  title="Save permitted shift data and notify registered user"
-                  alwaysShowSaveText={true}
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Read-Only View</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <AnalysisHeader
+        plantName="SA Plant"
+        analysisName="TK 419 SC TANK"
+        title="TK 419 SC TANK ANALYSIS"
+        date={date}
+        dateId="tk419sa-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId="btn-tk419-save"
+        saveButtonTitle="Save permitted shift data and notify registered user"
+      />
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       <SaveStatusBanner
@@ -656,24 +615,14 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
       />
 
       {/* ── Main Data Card ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table Header Bar with Integrated Details */}
-        <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <FlaskConical className="w-4 h-4 text-indigo-600" />
-            <h2 className="text-xs font-extrabold text-slate-800 tracking-tight uppercase">
-              TK 419 Shift Measurements
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
-            <span className="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
-            <span>Frequency: Once in a Shift</span>
-            <span>•</span>
-            <span>Unit: Kgm/m³</span>
-          </div>
-        </div>
-
+      <AnalysisTableCard
+        title="TK 419 Shift Measurements"
+        frequencyText="Frequency: Once in a Shift"
+        unitText="Unit: Kgm/m³"
+        footerTitle="TK 419 SC TANK Shift Analysis"
+        footerMeta="Frequency: Once in a Shift • Parameters: FNH₃, CNH₃"
+        footerNote="One correction allowed after first save; saving the next shift locks the previous one."
+      >
         {/* The Analysis Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -869,16 +818,7 @@ const TK419SCTankAnalysisPage = ({ plantId = 'sa' }) => {
             </tbody>
           </table>
         </div>
-
-        {/* Card Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-700">TK 419 SC TANK Shift Analysis:</span>
-            <span>Frequency: Once in a Shift • Parameters: FNH₃, CNH₃</span>
-          </div>
-          <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
-        </div>
-      </div>
+      </AnalysisTableCard>
 
       {/* ── Confirmation Modal ── */}
       <ConfirmSaveModal

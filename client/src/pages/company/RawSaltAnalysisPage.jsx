@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -322,11 +323,11 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
         if (emailSent || statusFromApi === 'sent') {
           setSavePhase('completed');
           setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
-          showToast?.('Saved — Email Sent ✓', 'success');
+          showToast?.('Saved', 'success');
         } else {
           setSavePhase('email_failed');
           setEmailStatusDetail(emailRes?.error || 'Email delivery failed');
-          showToast?.('Data saved to database. Email delivery failed: ' + (emailRes?.error || 'Server error'), 'warning');
+          showToast?.('Saved', 'success');
         }
       }
     } catch (err) {
@@ -376,94 +377,22 @@ const RawSaltAnalysisPage = ({ plantId = 'acl' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn font-sans">
-      {/* ── Top Header Bar with Locked Current Date ────────────────────────── */}
-      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back Button + Breadcrumb + Title */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Return to Plants Overview"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-
-            <div>
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Factory className="w-3.5 h-3.5 text-slate-400" />
-                <span>ACL Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <PackageCheck className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">Raw Salt</span>
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
-                  RAW SALT
-                </h1>
-                {isLocked ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-300">
-                    <Lock className="w-3 h-3 text-slate-500" /> Locked (Max Edits Reached)
-                  </span>
-                ) : editCount === 1 ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                    Edit Mode (1 Edit Remaining)
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                    Initial Entry
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Date Section + Actions */}
-          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-            {/* Integrated Locked Current-Date Section */}
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider leading-none">
-                  DATE (TODAY ONLY)
-                </span>
-                <span className="text-xs font-black text-slate-800 leading-tight">
-                  {formatDateDisplay(date)}
-                </span>
-              </div>
-              <span className="ml-1 text-[9px] bg-blue-100 text-blue-800 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 uppercase">
-                Asia/Kolkata
-              </span>
-            </div>
-
-            {lastSaved && (
-              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                Saved at {lastSaved}
-              </span>
-            )}
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 shrink-0">
-
-              {!isViewOnly && (
-                <StatusSaveButton
-                  id="btn-rawsalt-save"
-                  saving={saving || emailRetrying}
-                  isLocked={isLocked}
-                  savePhase={savePhase}
-                  saveSuccess={saveSuccess}
-                  onClick={handleSaveClick}
-                  disabled={!canEdit}
-                  defaultLabel={editCount === 0 ? 'Save / Submit' : 'Save Final Edit'}
-                  title="Save Raw Salt Data"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="ACL Plant"
+        analysisName="Raw Salt"
+        title="RAW SALT"
+        date={date}
+        dateId="analysis-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId="btn-rawsalt-save"
+        saveButtonTitle="Save Raw Salt Data"
+      />
 
       {/* ── Status Banner for Email Dispatch State ── */}
       <SaveStatusBanner

@@ -175,7 +175,6 @@ app.use('/api/sewer-water-analysis', sewerWaterAnalysisRoutes);
 app.use('/api/sewar-water-analysis', sewerWaterAnalysisRoutes);
 app.use('/api/cooling-water-analysis', coolingWaterAnalysisRoutes);
 app.use('/api/distiller-waste-analysis', distillerWasteAnalysisRoutes);
-app.use('/api/vacuum-seal-water-analysis', vacuumSealWaterRoutes);
 app.use('/api/vacuum-seal-water', vacuumSealWaterRoutes);
 app.use('/api/vaccum-seal-water', vacuumSealWaterRoutes);
 app.use('/api/bicarbonate-analysis', bicarbonateAnalysisRoutes);

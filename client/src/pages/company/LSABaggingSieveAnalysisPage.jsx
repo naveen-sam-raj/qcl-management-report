@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -356,58 +357,21 @@ const LSABaggingSieveAnalysisPage = ({ plantId = 'sa' }) => {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* ── TOP HEADER BAR ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Soda Ash Plant</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-blue-600">LSA Bagging Sieve</span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                Frequency: 1 Hour Once
-              </span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Layers className="w-6 h-6 text-blue-600 inline" />
-              LSA BAGGING SIEVE ANALYSIS
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Controls & Buttons */}
-        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-          {/* Locked Operating Date Display */}
-          <LockedDateDisplay
-            date={date}
-            id="lsa-bagging-sieve-date-display"
-            badgeText="Operating Day"
-          />
-
-          <div className="flex items-center gap-2 shrink-0">
-
-            {!isViewOnly && (
-              <StatusSaveButton
-                id="btn-sieve-save"
-                saving={saving}
-                savePhase={savePhase}
-                onClick={handleSaveClick}
-                defaultLabel="Save Analysis"
-                title="Save LSA Bagging Sieve data"
-                alwaysShowSaveText
-              />
-            )}
-          </div>
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="Soda Ash Plant"
+        analysisName="LSABaggingSieve"
+        title="LSA BAGGING SIEVE ANALYSIS"
+        date={date}
+        dateId="lsa-bagging-sieve-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveButtonId="btn-sieve-save"
+        saveButtonTitle="Save LSA Bagging Sieve data"
+      />
 
       {/* ── Status Banner ── */}
       <SaveStatusBanner

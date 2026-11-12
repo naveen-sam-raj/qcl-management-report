@@ -6,6 +6,7 @@ import { resolvePlantCode } from '../../utils/plantCodeHelper';
 import {
   FileSpreadsheet,
   Download,
+  Calendar,
   Factory,
   AlertCircle,
 } from 'lucide-react';
@@ -36,6 +37,13 @@ const ReportsPage = () => {
   const [downloadingGeneric, setDownloadingGeneric] = useState(false);
   const [singlePlantError, setSinglePlantError] = useState('');
 
+  // ── Section 2: Overall Multi-Day Master Report State ──
+  const [overallFromDate, setOverallFromDate] = useState('');
+  const [overallToDate, setOverallToDate] = useState('');
+  const [downloadingOverall, setDownloadingOverall] = useState(false);
+  const [overallError, setOverallError] = useState('');
+
+  const canDownloadOverall = ['super_admin', 'company_admin', 'admin'].includes(user?.role);
 
   // Load plants metadata
   useEffect(() => {
@@ -121,8 +129,8 @@ const ReportsPage = () => {
         return;
       }
       const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-      if (diffDays > 31) {
-        const msg = 'Date range cannot exceed 31 days';
+      if (diffDays > 366) {
+        const msg = 'Date range cannot exceed 366 days';
         setSinglePlantError(msg);
         showToast(msg, 'error');
         return;
@@ -199,6 +207,87 @@ const ReportsPage = () => {
     }
   };
 
+  // ── Section 2 Handler: Download Overall Master Report ──
+  const handleDownloadOverallReport = async () => {
+    setOverallError('');
+
+    if (!overallFromDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(overallFromDate).trim())) {
+      const msg = 'Valid "From Date" (YYYY-MM-DD) is required';
+      setOverallError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+
+    if (!overallToDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(overallToDate).trim())) {
+      const msg = 'Valid "To Date" (YYYY-MM-DD) is required';
+      setOverallError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+
+    const fromDateStr = String(overallFromDate).trim();
+    const toDateStr = String(overallToDate).trim();
+
+    if (fromDateStr > toDateStr) {
+      const msg = '"From Date" must be earlier than or equal to "To Date"';
+      setOverallError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+
+    const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 31) {
+      const msg = 'Date range cannot exceed 31 days';
+      setOverallError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+
+    try {
+      setDownloadingOverall(true);
+      showToast(`Generating Overall Master Report for ${fromDateStr} to ${toDateStr}...`, 'info');
+
+      const response = await api.get('/reports/generic-overall', {
+        params: { from: fromDateStr, to: toDateStr },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `OVERALL_Report_${fromDateStr}_${toDateStr}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast('Overall Master Report downloaded successfully!', 'success');
+    } catch (err) {
+      let errorMessage = 'Failed to download overall report.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) {
+            errorMessage = json.message;
+          }
+        } catch (parseErr) {
+          console.warn('Could not parse error blob as JSON:', parseErr);
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      setOverallError(errorMessage);
+      showToast(errorMessage, 'error');
+    } finally {
+      setDownloadingOverall(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fadeIn pb-10">
@@ -307,13 +396,13 @@ const ReportsPage = () => {
               min={startDate || undefined}
               max={(() => {
                 if (!startDate) return todayStr;
-                const maxRange = addDaysLocal(startDate, 30);
+                const maxRange = addDaysLocal(startDate, 365);
                 return maxRange && maxRange < todayStr ? maxRange : todayStr;
               })()}
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              Leave empty or same as Start Date for a single day. Max 31 days (one workbook, separate sheets per date).
+              Leave empty or same as Start Date for a single day. Max 366 days (one workbook, separate sheets per date).
             </p>
           </div>
         </div>

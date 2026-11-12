@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -525,70 +526,22 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
   return (
     <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb Header with Integrated Read-Only Date ────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-
-          {/* Left: Back + Title */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Factory className="w-3.5 h-3.5 text-slate-400" />
-                <span>ACL Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <Grid3X3 className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">Pure Salt Sieve Analysis</span>
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
-                  PURE SALT SIEVE ANALYSIS
-                </h1>
-                <span className="text-[11px] font-black px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-wide">
-                  II SHIFT SPEC
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Date Section + Action Buttons */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="ps-sieve-date-display" badgeText="Operating Day" />
-
-            {/* Actions */}
-            {!isViewOnly ? (
-              <div className="flex items-center gap-1.5 shrink-0">
-
-                <StatusSaveButton
-                  id="btn-sieve-save"
-                  saving={saving}
-                  savePhase={savePhase}
-                  saveSuccess={saveSuccess}
-                  onClick={handleSaveClick}
-                  alwaysShowSaveText={true}
-                  defaultLabel="Save / Submit"
-                  title="Save sieve analysis data and dispatch automated Excel report"
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 shadow-2xs">
-                  <Eye className="w-3.5 h-3.5 text-amber-600" />
-                  <span>View-Only Mode</span>
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="ACL Plant"
+        analysisName="Pure Salt Sieve Analysis"
+        title="PURE SALT SIEVE ANALYSIS"
+        date={date}
+        dateId="ps-sieve-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId="btn-sieve-save"
+        saveButtonTitle="Save sieve analysis data and dispatch automated Excel report"
+      />
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       <SaveStatusBanner
@@ -719,9 +672,10 @@ const PureSaltSieveAnalysisPage = ({ plantId = 'acl' }) => {
 
                             {/* Tiny Compact EDITED badge beside / below modified field */}
                             {Boolean(
-                              editedFields &&
+                              (editedFields &&
                                 (editedFields[`${row.key}_${param.key}`] ||
-                                  (editedFields.get && editedFields.get(`${row.key}_${param.key}`)))
+                                  (editedFields.get && editedFields.get(`${row.key}_${param.key}`)))) ||
+                                (row.key === 'shift3' && (lockedShifts.shift3Edits || 0) >= 1 && hasValue)
                             ) && (
                               <div
                                 id={`psa-sieve-edited-badge-${row.key}-${param.key}`}

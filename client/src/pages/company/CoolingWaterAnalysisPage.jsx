@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -292,61 +293,20 @@ const CoolingWaterAnalysisPage = ({ plantId = 'offset', is200 = false }) => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── TOP HEADER BAR ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                OFFSET Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Utilities & Facilities
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200/60">
-                {is200 ? 'Cooling Water / 200#' : 'Cooling Water (C.W Water)'}
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <ThermometerSnowflake className="w-5 h-5 text-cyan-600" />
-              {is200 ? 'COOLING WATER / 200# ANALYSIS' : 'COOLING WATER ANALYSIS (C.W WATER)'}
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <LockedDateDisplay date={date} badgeText="Operating Day" id="cw-locked-date" />
-
-          <div className="mr-2">
-            <RecordStatusBadge
-              status={overallStatus}
-              subLabel={isAllLocked ? 'all slots locked' : lockedSlots[slots[0]]?.isSaved ? 'in progress' : 'first slot ready'}
-            />
-          </div>
-
-          {!isViewOnly && (
-            <StatusSaveButton
-              saving={saving}
-              isLocked={isAllLocked}
-              savePhase="idle"
-              onClick={handleSaveClick}
-              alwaysShowSaveText={true}
-              className="px-4 py-2 text-xs"
-            />
-          )}
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="OFFSET Plant"
+        analysisName={is200 ? 'Cooling Water / 200#' : 'Cooling Water (C.W Water)'}
+        title={is200 ? 'COOLING WATER / 200# ANALYSIS' : 'COOLING WATER ANALYSIS (C.W WATER)'}
+        date={date}
+        dateId="cw-locked-date"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        saveButtonId="btn-save"
+        saveButtonTitle="Save analysis data"
+      />
 
       {/* ── MAIN CONTENT: Cooling Water Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -549,77 +550,45 @@ const GasConcAnalysisPage = ({ plantId = 'sa' }) => {
 
   return (
     <div className="space-y-6 animate-fadeIn font-sans">
-      {/* ── TOP HEADER BAR ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Left: Back Button + Breadcrumbs + Title */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 shrink-0 cursor-pointer"
-              title="Return to Plants Overview"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                <Factory className="w-3.5 h-3.5 text-slate-400" />
-                <span>SA Plant</span>
-                <ChevronRight className="w-3 h-3 text-slate-300" />
-                <span className="text-slate-500">Soda Ash Production</span>
-                <ChevronRight className="w-3 h-3 text-slate-300" />
-                <span className="text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
-                  Gas Conc.
-                </span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5 flex items-center gap-2">
-                <Gauge className="w-5 h-5 text-blue-600" />
-                GAS CONC. ANALYSIS
-              </h1>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="SA Plant"
+        analysisName="Gas Conc."
+        title="GAS CONC. ANALYSIS"
+        date={selectedDate}
+        dateId="gas-conc-locked-date"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        disabled={loading}
+        customActions={
+            <div className="flex items-center gap-2">
+              {editAuditHistory.length > 0 && (
+                <button
+                  id="btn-gas-conc-audit"
+                  onClick={() => setShowAuditModal(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg transition border border-amber-300 cursor-pointer"
+                  title="View Field-Level Edit History"
+                >
+                  <History className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Edits ({editAuditHistory.length})</span>
+                </button>
+              )}
+              <StatusSaveButton
+                id="btn-gas-conc-save"
+                saving={saving}
+                savePhase={savePhase}
+                saveSuccess={saveSuccess}
+                onClick={handleInitiateSave}
+                disabled={loading}
+                alwaysShowSaveText={true}
+                defaultLabel="Save / Submit"
+                title="Save Gas Conc. observations with sequential shift-locking"
+              />
             </div>
-          </div>
-
-          {/* Right: Date Picker + Audit History + Reset + Save */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Locked Operating Date Display */}
-            <LockedDateDisplay
-              date={selectedDate}
-              id="gas-conc-locked-date"
-              badgeText="Operating Day"
-            />
-
-            {/* Audit History Button */}
-            {editAuditHistory.length > 0 && (
-              <button
-                id="btn-gas-conc-audit"
-                onClick={() => setShowAuditModal(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg transition border border-amber-300 cursor-pointer"
-                title="View Field-Level Edit History"
-              >
-                <History className="w-3.5 h-3.5 text-amber-600" />
-                <span>Edits ({editAuditHistory.length})</span>
-              </button>
-            )}
-
-            {/* Reset Button */}
-
-            {/* Save / Submit Button */}
-            <StatusSaveButton
-              id="btn-gas-conc-save"
-              saving={saving}
-              savePhase={savePhase}
-              saveSuccess={saveSuccess}
-              onClick={handleInitiateSave}
-              disabled={loading}
-              alwaysShowSaveText={true}
-              defaultLabel="Save / Submit"
-              title="Save Gas Conc. observations with sequential shift-locking"
-            />
-          </div>
-        </div>
-      </div>
+          }
+      />
 
       {/* ── SEQUENTIAL SHIFT LOCKING STATUS BAR ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

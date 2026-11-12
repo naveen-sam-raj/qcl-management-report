@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -383,64 +384,21 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* TOP HEADER BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-            title="Back"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                SA Plant
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-500">
-                Soda Ash Production
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200/60">
-                Bicarbonate Moisture
-              </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                Frequency: Once in 4 Hours
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
-              <Droplets className="w-5 h-5 text-cyan-600" />
-              BICARBONATE MOISTURE ANALYSIS
-            </h1>
-          </div>
-        </div>
-
-        {/* Action Buttons: Reset & Save */}
-        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-          {lastSaved && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Saved at {lastSaved}
-            </span>
-          )}
-
-          {!isViewOnly && (
-            <StatusSaveButton
-              id="btn-bicarbonate-moisture-save"
-              saving={saving}
-              savePhase={savePhase}
-              saveSuccess={savePhase === 'completed'}
-              onClick={handleSaveClick}
-              alwaysShowSaveText
-              defaultLabel="Save / Submit"
-              title="Save Bicarbonate Moisture data"
-            />
-          )}
-        </div>
-      </div>
+      {/* ── Breadcrumb & Top Navigation ── */}
+      <AnalysisHeader
+        plantName="SA Plant"
+        analysisName="Bicarbonate Moisture"
+        title="BICARBONATE MOISTURE ANALYSIS"
+        date={date}
+        dateId="bicarbonate-moisture-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveButtonId="btn-bicarbonate-moisture-save"
+        saveButtonTitle="Save Bicarbonate Moisture data"
+      />
 
       <SaveStatusBanner
         id="bicarb-moisture-status-banner"
@@ -469,11 +427,7 @@ const BicarbonateMoistureAnalysisPage = ({ plantId = 'sa' }) => {
               </span>
             </div>
 
-            <LockedDateDisplay
-              date={date}
-              id="bicarbonate-moisture-date-display"
-              badgeText="Operating Day"
-            />
+            
           </div>
         </div>
 

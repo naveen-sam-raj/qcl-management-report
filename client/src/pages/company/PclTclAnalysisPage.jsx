@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import AnalysisHeader from '../../components/common/AnalysisHeader';
+import AnalysisTableCard from '../../components/common/AnalysisTableCard';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -719,61 +721,21 @@ const PclTclAnalysisPage = ({ plantId = 'acl' }) => {
   return (
     <div className="space-y-4 animate-fadeIn">
       {/* ── Breadcrumb & Top Navigation with Restricted Today Date ── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Left: Back button + Breadcrumb + Title */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            <button
-              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
-              <span>Back</span>
-            </button>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
-                <Factory className="w-3.5 h-3.5 text-slate-400" />
-                <span>ACL Plant</span>
-                <ChevronRight className="w-3 h-3" />
-                <Layers className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-blue-600 font-semibold">PCL/TCL</span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
-                PCL/TCL ANALYSIS
-              </h1>
-            </div>
-          </div>
-
-          {/* Right Section: Locked Date + Actions */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-            <LockedDateDisplay date={date} id="pcltcl-date-display" badgeText="Operating Day" />
-
-            {/* Actions: Save / Submit */}
-            {!isViewOnly ? (
-              <div className="flex items-center gap-2">
-
-                <StatusSaveButton
-                  id="btn-pcltcl-save"
-                  saving={saving}
-                  savePhase={savePhase}
-                  saveSuccess={saveSuccess}
-                  onClick={handleSaveClick}
-                  alwaysShowSaveText={true}
-                  defaultLabel="Save / Submit"
-                  title="Save permitted shift data and notify registered user"
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Read-Only View</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <AnalysisHeader
+        plantName="ACL Plant"
+        analysisName="PCL/TCL"
+        title="PCL/TCL ANALYSIS"
+        date={date}
+        dateId="pcltcl-date-display"
+        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
+        isViewOnly={isViewOnly}
+        onSave={handleSaveClick}
+        saving={saving}
+        savePhase={savePhase}
+        saveSuccess={saveSuccess}
+        saveButtonId="btn-pcltcl-save"
+        saveButtonTitle="Save permitted shift data and notify registered user"
+      />
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       <SaveStatusBanner
@@ -792,25 +754,38 @@ const PclTclAnalysisPage = ({ plantId = 'acl' }) => {
         saving={saving}
       />
 
-      {/* ── Analysis Table Card ────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* ── Main Data Card ── */}
+      <AnalysisTableCard
+        title="PCL/TCL Shift Measurements"
+        frequencyText="Frequency: Once in a Shift"
+        unitText="Unit: Kgm/m³"
+        footerTitle="PCL/TCL Shift Analysis"
+        footerMeta="Frequency: Once in a Shift • Parameters: Streams 1–4 (PCL/TCL)"
+        footerNote="One correction allowed after first save; saving the next shift locks the previous one."
+      >
         {/* Scrollable table wrapper */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             {/* Column headers */}
             <thead>
-              <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
-                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-44 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
+              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
+                <th className="py-3 px-5 text-left text-xs font-extrabold uppercase tracking-wider w-44 border-r border-slate-800">
                   Shift / Frequency
                 </th>
-                {STREAMS.map((s, idx) => (
+                {STREAMS.map((s) => (
                   <th
                     key={s.key}
-                    className={`px-3 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
-                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
-                    } ${s.colClass}`}
+                    className="py-3 px-3 text-center border-r border-slate-800 last:border-r-0"
                   >
-                    Stream {s.label}
+                    <div className="font-extrabold text-indigo-300 text-xs">
+                      Stream {s.label}
+                    </div>
+                    <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
+                      Kgm/m³
+                    </div>
+                    <div className="mt-1 inline-block text-[10px] bg-slate-800 text-indigo-200 px-2 py-0.5 rounded border border-slate-700 font-semibold">
+                      Target: 0.05–0.10 (+0.2/-0.02)
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -827,14 +802,19 @@ const PclTclAnalysisPage = ({ plantId = 'acl' }) => {
                     className={`transition-colors duration-100 ${shift.rowStyle}`}
                   >
                     {/* Shift label & time */}
-                    <td className="px-5 py-3 align-top border-r border-slate-200/80 bg-white/70">
+                    <td className="py-3 px-5 border-r border-slate-100 bg-slate-50/50 align-top">
                       <div className="flex flex-col gap-1 mt-0.5">
-                        <span className="text-xs font-bold text-slate-900 whitespace-nowrap">
-                          {shift.label}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500 whitespace-nowrap">
-                          {shift.time}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                          <div>
+                            <span className="font-extrabold text-slate-900 text-xs tracking-wide">
+                              {shift.label}
+                            </span>
+                            <div className="text-[10px] text-slate-400 font-medium">
+                              {shift.time}
+                            </div>
+                          </div>
+                        </div>
                         <div className="mt-1">
                           <RecordStatusBadge status={getShiftStatus(shift.key)} />
                         </div>
@@ -878,20 +858,7 @@ const PclTclAnalysisPage = ({ plantId = 'acl' }) => {
             </tbody>
           </table>
         </div>
-
-        {/* Table footer info */}
-        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            <span>
-              Parameter: <strong>PCL/TCL: 0.05–0.10 Kgm/m³ +0.2 / -0.02</strong> (Allowed range: <strong>0.03–0.30 Kgm/m³</strong>). Frequency: <strong>Once in a Shift</strong>.
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-500 font-medium">
-            One correction allowed after first save; saving the next shift locks the previous one.
-          </div>
-        </div>
-      </div>
+      </AnalysisTableCard>
 
       {/* ── Confirmation Modal ────────────────────────────────────────────── */}
       <ConfirmSaveModal

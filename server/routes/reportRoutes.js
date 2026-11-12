@@ -17,6 +17,7 @@ router.get('/export/excel', authorizeRoles('super_admin', 'company_admin'), expo
 
 /**
  * @desc    Generate and download Master ACL Plant Shift Report Excel (.xlsx) using SHIFT REPORT -2026.xlsx template
+ * 
  * @route   GET /api/reports/acl/download
  * @access  Private
  */
@@ -619,6 +620,8 @@ function consolidateMultiDateAnalysisSheets({
  * @route   GET /api/reports/generic-range?plant=<ACL|SA|OFFSITE|CO2>&from=YYYY-MM-DD&to=YYYY-MM-DD
  * @access  Private (auth required; filtered by user's company and plant)
  */
+const MAX_REPORT_DAYS = 366;
+
 router.get('/generic-range', async (req, res) => {
   try {
     const { plant, from, to } = req.query;
@@ -664,10 +667,10 @@ router.get('/generic-range', async (req, res) => {
     }
 
     const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 31) {
+    if (diffDays > MAX_REPORT_DAYS) {
       return res.status(400).json({
         success: false,
-        message: 'Date range cannot exceed 31 days.',
+        message: `Date range cannot exceed ${MAX_REPORT_DAYS} days.`,
       });
     }
 
