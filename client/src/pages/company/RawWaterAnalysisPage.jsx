@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
   getOperatingDateIST,
@@ -282,22 +281,74 @@ const RawWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="OFFSET Plant"
-        analysisName="RawWater"
-        title="RAW WATER ANALYSIS"
-        date={date}
-        dateId="rawwater-locked-date"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-rawwater-save"
-        saveButtonTitle="Save Raw Water analysis"
-      />
+      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">
+                OFFSET Plant
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-semibold text-slate-500">
+                Utilities & Facilities
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200/60">
+                Raw Water
+              </span>
+            </div>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <Droplets className="w-5 h-5 text-sky-600" />
+              RAW WATER ANALYSIS
+            </h1>
+          </div>
+        </div>
+
+        {/* Right: Date/Time + Action Buttons */}
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="rawwater-locked-date" />
+
+          {/* Time display (read-only 08:00 routine) */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
+            <span className="text-xs font-bold text-slate-600">Time:</span>
+            <span className="w-16 text-center font-mono font-bold text-xs bg-white text-slate-900 border border-slate-300 rounded-md py-0.5 px-1">
+              08:00
+            </span>
+          </div>
+
+          <RecordStatusBadge
+            status={isLocked ? 'LOCKED' : initialSaved ? 'EDITABLE' : 'NEW'}
+            subLabel={isLocked ? 'all edits exhausted' : initialSaved ? '1 edit remaining' : 'first entry'}
+          />
+
+          {/* Action Buttons: Reset & Save */}
+
+          {!isViewOnly ? (
+            <StatusSaveButton
+              id="btn-rawwater-save"
+              saving={saving}
+              isLocked={isLocked}
+              savePhase={savePhase}
+              onClick={handleSaveClick}
+              alwaysShowSaveText={true}
+              title="Save Raw Water analysis"
+            />
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
+              Read-Only
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ── */}
       <SaveStatusBanner

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -211,24 +210,50 @@ const TK204TK209AnalysisPage = ({ plantId = 'acl' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="ACL Plant"
-        analysisName="TK 204 / TK 209"
-        title="TK 204 / TK 209 ANALYSIS"
-        date={date}
-        dateId="tk204-date-input"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isDateLocked={false}
-        onDateChange={(e) => setDate(e.target.value)}
-        maxDate={getOperatingDateIST()}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-tk204-save"
-        saveButtonTitle="Save TK 204 / TK 209 analysis"
-      />
+      {/* ── Breadcrumb & Top Navigation matching TK 203 theme ── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Back button + Plant Navigation + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+
+            <div className="min-w-0">
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Factory className="w-3.5 h-3.5 text-purple-600" />
+                <span>ACL Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">TK 204 / TK 209</span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                TK 204 / TK 209 ANALYSIS
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+
+            <StatusSaveButton
+              id="btn-tk204-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
+              onClick={handleSaveClick}
+              defaultLabel="Save Analysis"
+              title="Save TK 204 / TK 209 analysis"
+            />
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner ── */}
       <SaveStatusBanner

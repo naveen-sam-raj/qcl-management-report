@@ -1,6 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
-import AnalysisTableCard from '../../components/common/AnalysisTableCard';
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
@@ -145,6 +143,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   const [data, setData] = useState(buildEmptyData());
   const [originalData, setOriginalData] = useState(null);
   const [lockedShifts, setLockedShifts] = useState({});
+  const [editedFields, setEditedFields] = useState({});
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -167,6 +166,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
           if (record?.lockedShifts) {
             setLockedShifts(record.lockedShifts);
           }
+          setEditedFields(record?.editedFields || response.data?.editedFields || {});
           if (!record) {
             setData(buildEmptyData());
             setOriginalData(buildEmptyData());
@@ -195,6 +195,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
         } else {
           setData(buildEmptyData());
           setOriginalData(buildEmptyData());
+          setEditedFields({});
         }
       } catch (err) {
         console.warn('Could not fetch existing data', err);
@@ -427,6 +428,9 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       if (savedDoc?.lockedShifts) {
         setLockedShifts(savedDoc.lockedShifts);
       }
+      if (savedDoc?.editedFields || response.data?.editedFields) {
+        setEditedFields(savedDoc?.editedFields || response.data?.editedFields);
+      }
       if (savedDoc?.shifts || savedDoc?.rows) {
         const docRows = savedDoc.shifts || savedDoc.rows;
         const synced = buildEmptyData();
@@ -485,20 +489,52 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
   return (
     <div className="space-y-4 animate-fadeIn">
       {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="SA Plant"
-        analysisName="P417"
-        title="P417 ANALYSIS"
-        date={date}
-        dateId="p4171-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-p417-save"
-        saveButtonTitle="Save P417 Analysis"
-      />
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Back button + Breadcrumb + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Flame className="w-3.5 h-3.5 text-orange-500" />
+                <span>SA Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-indigo-500" />
+                <span className="text-indigo-600 font-semibold">P417</span>
+                <span className="ml-1.5 text-[10px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
+                  Shift Twice
+                </span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                P417 ANALYSIS
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+
+            <StatusSaveButton
+              id="btn-p417-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
+              onClick={handleSaveClick}
+              defaultLabel="Save Analysis"
+              title="Save P417 Analysis"
+              alwaysShowSaveText={true}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner ── */}
       <SaveStatusBanner
@@ -517,14 +553,29 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
       />
 
       {/* ── Main Data Card ── */}
-      <AnalysisTableCard
-        title="P417 Shift Measurements"
-        frequencyText="Frequency: Shift Twice"
-        unitText="Unit: Kgm/m³"
-        footerTitle="P417 Shift Analysis"
-        footerMeta="Frequency: Shift Twice • Parameters: FNH₃ (Limit: 1.98–2.18 Kgm/m³), CNH₃, TCl, NaCl"
-        footerNote="One correction allowed after first save; saving the next shift locks the previous one."
-      >
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+        {/* Table Header Bar with Integrated Date Selector */}
+        <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="w-4 h-4 text-indigo-600" />
+              <h2 className="text-xs font-extrabold text-slate-800 tracking-tight uppercase">
+                P417 Shift Measurements
+              </h2>
+            </div>
+
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="p4171-date-display" badgeText="Operating Day" />
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
+            <span className="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
+            <span>Frequency: Shift Twice</span>
+            <span>•</span>
+            <span>FNH₃ Limit: 1.98 – 2.18 Kgm/m³</span>
+          </div>
+        </div>
+
         {/* The Analysis Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -581,6 +632,7 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
                     const validation = validateCellValue(cellVal, limit);
                     const isOutOfLimit = validation.isOutOfLimit;
                     const isNormal = validation.isNormal;
+                    const isEdited = Boolean(editedFields && (editedFields[`${shift.key}_${param.key}`] || (editedFields.get && editedFields.get(`${shift.key}_${param.key}`))));
                     const isFormatError = !!errors[`${shift.key}_${param.key}`];
 
                     return (
@@ -630,6 +682,11 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
                               </span>
                             )}
                           </div>
+                          {isEdited && (
+                            <div id={`p417-edited-badge-${shift.key}-${param.key}`}
+                              className="mt-1 inline-flex items-center px-1.5 py-[2px] rounded bg-amber-100/90 border border-amber-300/70 text-amber-900 text-[8.5px] font-extrabold uppercase tracking-wider leading-none shadow-2xs select-none"
+                              title="This parameter was modified and saved">EDITED</div>
+                          )}
 
                           {/* Error Message */}
                           {isFormatError && (
@@ -691,7 +748,16 @@ const P4171AnalysisPage = ({ plantId = "sa" }) => {
             </tbody>
           </table>
         </div>
-      </AnalysisTableCard>
+
+        {/* Card Footer */}
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-700">P417 Shift Analysis:</span>
+            <span>Frequency: Shift Twice • Parameters: FNH₃ (Limit: 1.98–2.18 Kgm/m³), CNH₃, TCl, NaCl</span>
+          </div>
+          <div className="text-[11px] text-slate-500 font-medium">One correction allowed after first save; saving the next shift locks the previous one.</div>
+        </div>
+      </div>
 
       {/* ── Confirmation Modal ── */}
       <ConfirmSaveModal

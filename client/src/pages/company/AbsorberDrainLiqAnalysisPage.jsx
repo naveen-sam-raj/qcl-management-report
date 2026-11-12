@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -17,7 +16,6 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import {
-
   getOperatingDateIST,
   formatDateDisplay,
   LockedDateDisplay,
@@ -393,7 +391,7 @@ const AbsorberDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
         showToast?.(
           'Data saved to database. Email delivery failed: ' +
-          (emailRes?.error || 'Server error'),
+            (emailRes?.error || 'Server error'),
           'warning'
         );
       }
@@ -434,22 +432,54 @@ const AbsorberDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="CO2 Plant"
-        analysisName="ABSORBER DRAIN LIQ"
-        title="ABSORBER DRAIN LIQ"
-        date={date}
-        dateId="absorber-drain-liq-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-absorber-drain-liq-save"
-        saveButtonTitle="Save Weekly Analysis"
-      />
+      {/* ── Breadcrumb Header ──────────────── */}
+      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Gauge className="w-3.5 h-3.5 text-slate-400" />
+                <span>CO2 Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">ABSORBER DRAIN LIQ</span>
+                <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                  Once in a Week
+                </span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                ABSORBER DRAIN LIQ
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            <LockedDateDisplay date={date} id="absorber-drain-liq-date-display" badgeText="Operating Day" />
+
+            <div className="flex items-center gap-2 shrink-0">
+
+              <StatusSaveButton
+                id="btn-absorber-drain-liq-save"
+                saving={saving}
+                isLocked={isFormDisabled}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                disabled={isFormDisabled}
+                title="Save Weekly Analysis"
+                alwaysShowSaveText={true}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner ─────────────────────────────────── */}
       <SaveStatusBanner
@@ -500,8 +530,9 @@ const AbsorberDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
                   return (
                     <th
                       key={p.key}
-                      className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
-                        } ${p.colClass}`}
+                      className={`px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 ${
+                        idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
+                      } ${p.colClass}`}
                     >
                       <div className="font-extrabold text-blue-300 text-xs">{p.label}</div>
                       <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
@@ -570,20 +601,21 @@ const AbsorberDrainLiqAnalysisPage = ({ plantId = 'co2' }) => {
                                   ? isOutOfLimit
                                     ? `OUT OF LIMIT: ${cellVal} ${limit.unit} (Allowed: ${limit.formattedRange})`
                                     : hasValue
-                                      ? `Normal: ${cellVal} ${limit.unit} (Allowed: ${limit.formattedRange})`
-                                      : `Allowed range: ${limit.formattedRange}`
+                                    ? `Normal: ${cellVal} ${limit.unit} (Allowed: ${limit.formattedRange})`
+                                    : `Allowed range: ${limit.formattedRange}`
                                   : ''
                               }
-                              className={`w-full text-center font-mono text-sm font-bold py-1.5 px-2.5 rounded-lg border transition shadow-2xs focus:outline-none ${isFormDisabled
+                              className={`w-full text-center font-mono text-sm font-bold py-1.5 px-2.5 rounded-lg border transition shadow-2xs focus:outline-none ${
+                                isFormDisabled
                                   ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed select-none'
                                   : isOutOfLimit
-                                    ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
-                                    : isFormatError
-                                      ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
-                                      : hasValue
-                                        ? 'border-blue-300 bg-blue-50/40 text-blue-950 font-black focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
-                                        : 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900 font-bold hover:border-slate-400'
-                                }`}
+                                  ? 'border-2 border-rose-500 bg-rose-50 text-rose-950 font-black focus:border-rose-600 focus:ring-2 focus:ring-rose-200'
+                                  : isFormatError
+                                  ? 'border-red-500 bg-red-50 text-red-950 ring-2 ring-red-300'
+                                  : hasValue
+                                  ? 'border-blue-300 bg-blue-50/40 text-blue-950 font-black focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+                                  : 'border-2 border-slate-300 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 text-slate-900 font-bold hover:border-slate-400'
+                              }`}
                               aria-label={`${param.label} for Weekly Analysis`}
                             />
 

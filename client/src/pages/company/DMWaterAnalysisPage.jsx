@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -415,20 +414,60 @@ const DMWaterAnalysisPage = ({ plantId = 'offset' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="OFFSET Plant"
-        analysisName="DM Water"
-        title="DM WATER ANALYSIS"
-        date={date}
-        dateId="dm-locked-date"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        saveButtonId="btn-dm-save"
-        saveButtonTitle="Save DM Water analysis"
-      />
+      {/* Breadcrumb & Top Navigation */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Plant Navigation + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                <span>OFFSET Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Droplets className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">DM Water</span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                DM WATER ANALYSIS
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+            <LockedDateDisplay date={date} badgeText="Operating Day" id="dm-locked-date" />
+
+            <RecordStatusBadge
+              status={isLocked ? 'LOCKED' : initialSaved ? 'SAVED' : 'NEW'}
+              subLabel={isLocked ? 'permanently locked' : initialSaved ? 'saved record' : 'unsaved'}
+            />
+
+            {!isViewOnly ? (
+              <StatusSaveButton
+                id="btn-dm-save"
+                saving={saving}
+                isLocked={isLocked}
+                alwaysShowSaveText={true}
+                onClick={handleSaveClick}
+                title="Save DM Water analysis"
+              />
+            ) : (
+              <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold">
+                Read-Only
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Table Container */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

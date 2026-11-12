@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -536,22 +535,65 @@ const TK209AnalysisPage = ({ plantId = 'acl' }) => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="{plantId?.toUpperCase() === 'TFL' ? 'TFL Plant' : 'ACL Plant'}"
-        analysisName="TK 209"
-        title="TK 209 ANALYSIS"
-        date={date}
-        dateId="tk209-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-tk209-save"
-        saveButtonTitle="Save permitted shift data and notify registered user"
-      />
+      {/* ── Breadcrumb & Top Navigation with Restricted Today Date ── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs px-5 py-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Back button + Breadcrumb + Title */}
+          <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Factory className="w-3.5 h-3.5 text-purple-600" />
+                <span>{plantId?.toUpperCase() === 'TFL' ? 'TFL Plant' : 'ACL Plant'}</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">TK 209</span>
+                <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                  Once in a shift
+                </span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                TK 209 ANALYSIS
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Date Section + Actions */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            <LockedDateDisplay date={date} id="tk209-date-display" badgeText="Operating Day" />
+
+            {/* Actions */}
+            {!isViewOnly ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+
+                <StatusSaveButton
+                  id="btn-tk209-save"
+                  saving={saving}
+                  savePhase={savePhase}
+                  saveSuccess={saveSuccess}
+                  onClick={handleSaveClick}
+                  alwaysShowSaveText={true}
+                  defaultLabel="Save / Submit"
+                  title="Save permitted shift data and notify registered user"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold">
+                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                <span>Read-Only View</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner (Success, Pending, or Email Failed) ──────────────── */}
       <SaveStatusBanner

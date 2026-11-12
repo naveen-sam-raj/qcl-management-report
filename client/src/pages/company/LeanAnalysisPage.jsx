@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -581,11 +580,15 @@ const LeanAnalysisPage = ({ plantId = 'co2' }) => {
       if (emailSent || statusFromApi === 'sent') {
         setSavePhase('completed');
         setEmailStatusDetail(emailRes?.response || 'Delivered to SMTP server ✓');
-        showToast?.('Saved', 'success');
+        showToast?.('Saved — Email Sent ✓', 'success');
       } else {
         setSavePhase('email_failed');
         setEmailStatusDetail(emailRes?.error || emailRes?.status || 'Email delivery failed');
-        showToast?.('Saved', 'success');
+        showToast?.(
+          'Data saved to database. Email delivery failed: ' +
+            (emailRes?.error || 'Server error'),
+          'warning'
+        );
       }
     } catch (err) {
       setSavePhase('save_failed');
@@ -631,22 +634,53 @@ const LeanAnalysisPage = ({ plantId = 'co2' }) => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="CO2 Plant"
-        analysisName="Lean"
-        title="Lean"
-        date={date}
-        dateId="lean-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-lean-save"
-        saveButtonTitle="Save Shift Data"
-      />
+      {/* ── Breadcrumb Header ──────────────── */}
+      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Gauge className="w-3.5 h-3.5 text-slate-400" />
+                <span>CO2 Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">Lean</span>
+                <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                  Once in a shift & Day
+                </span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                Lean
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            <LockedDateDisplay date={date} id="lean-date-display" />
+
+            <div className="flex items-center gap-2 shrink-0">
+
+              <StatusSaveButton
+                id="btn-lean-save"
+                saving={saving}
+                isLocked={isEntireFormLocked}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                disabled={isEntireFormLocked}
+                title="Save Shift Data"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner ─────────────────────────────────── */}
       <SaveStatusBanner

@@ -1,6 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
-import AnalysisTableCard from '../../components/common/AnalysisTableCard';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
   getOperatingDateIST,
@@ -375,21 +373,62 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="OFFSET Plant"
-        analysisName="Continuous Blowdown"
-        title="CBD ANALYSIS (CONTINUOUS BLOWDOWN)"
-        date={date}
-        dateId="cbd-locked-date"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveButtonId="btn-cbd-save"
-        saveButtonTitle="Save CBD Analysis"
-      />
+      {/* ── Top Header Navigation ── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition shadow-2xs cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+          >
+            <ArrowLeft className="w-4 h-4 text-slate-500" />
+            <span>Back</span>
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">OFFSET Plant</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                Continuous Blowdown
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: 3 Shifts (06:00, 14:00, 22:00)
+              </span>
+            </div>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <Droplets className="w-5 h-5 text-blue-600" />
+              CBD ANALYSIS (CONTINUOUS BLOWDOWN)
+            </h1>
+          </div>
+        </div>
+
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+          {lastSaved && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+              Saved at {lastSaved}
+            </span>
+          )}
+
+          {!isViewOnly && (
+            <StatusSaveButton
+              id="btn-cbd-save"
+              saving={saving}
+              isLocked={isAllLocked}
+              savePhase={savePhase}
+              onClick={handleSaveClick}
+              title="Save CBD Analysis"
+              alwaysShowSaveText={true}
+            />
+          )}
+
+          {isViewOnly && (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              Read-Only View
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* ── Status Banner (Save Status) ── */}
       <SaveStatusBanner
@@ -404,33 +443,67 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
         onDismiss={() => setSavePhase('idle')}
       />
 
-      
+      {/* ── Control Bar: Operating Day Display ── */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-4">
+        <LockedDateDisplay
+          date={date}
+          id="cbd-locked-date"
+          badgeText="Operating Day"
+        />
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500 font-medium">Sequential Shift Lock Active</span>
+          <div className="flex items-center gap-1.5">
+            {SHIFTS.map((s) => {
+              const status = getShiftBadgeStatus(s.key);
+              return (
+                <div key={s.key} className="flex items-center gap-1">
+                  <span className="text-[11px] font-bold text-slate-600">{s.label}:</span>
+                  <RecordStatusBadge status={status} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* ── Main Data Table ── */}
-      <AnalysisTableCard
-        title="CBD Shift Measurements"
-        frequencyText="Frequency: Once in a Shift"
-        unitText="Unit: mg/L / pH / TDS"
-        footerTitle="CBD Shift Analysis"
-        footerMeta="Frequency: Once in a Shift • Parameters: pH, PO₄, Na₂SO₃, T.Alk, T.Fe, SiO₂, SS, TDS"
-        footerNote="One correction allowed after first save; saving the next shift locks the previous one."
-      >
+      <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
+        {/* Table Header Bar */}
+        <div className="px-5 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-4 rounded-full bg-blue-600" />
+              <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                CBD Analysis (3-Shift Sequential Workflow)
+              </h2>
+            </div>
+          </div>
+
+          <span className="text-[11px] font-mono text-slate-400 font-bold hidden sm:inline">
+            pH · PO₄ · Na₂SO₃ · T.Alk · T.Fe · SiO₂ · SS · TDS
+          </span>
+        </div>
+
         {/* Scrollable table container */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse min-w-[760px]" id="cbd-table">
             <thead>
-              <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <th className="py-3 px-5 text-left text-xs font-extrabold uppercase tracking-wider w-40 border-r border-slate-800 shrink-0">
+              <tr className="border-b-2 border-blue-600 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xs">
+                <th className="px-5 py-3 text-left text-xs font-extrabold uppercase tracking-wider w-40 bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
                   SHIFT
                 </th>
 
-                {PARAMETERS.map((p) => (
+                {PARAMETERS.map((p, idx) => (
                   <th
                     key={p.key}
-                    className="py-3 px-3 text-center border-r border-slate-800 last:border-r-0 min-w-[120px]"
+                    className={`px-3 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-slate-100 border-r border-slate-800/50 ${
+                      idx % 2 === 0 ? 'bg-slate-900/95' : 'bg-slate-900/85'
+                    }`}
                   >
-                    <div className="font-extrabold text-indigo-300 text-xs">{p.label}</div>
+                    <div>{p.label}</div>
                     {p.unit && (
-                      <div className="text-[10px] text-slate-300 font-medium normal-case tracking-normal">
+                      <div className="text-[10px] font-normal text-slate-400 lowercase tracking-normal">
                         {p.unit}
                       </div>
                     )}
@@ -450,22 +523,17 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
                     className={`transition-colors duration-100 ${shift.rowStyle} ${disabled ? 'opacity-85' : ''}`}
                   >
                     {/* Shift Label Badge */}
-                    <td className="py-3 px-5 border-r border-slate-100 bg-slate-50/50 align-top">
-                      <div className="flex flex-col gap-1 mt-0.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
-                          <div>
-                            <span className="font-extrabold text-slate-900 text-xs tracking-wide">
-                              {shift.label}
-                            </span>
-                            <div className="text-[10px] text-slate-400 font-medium">
-                              {shift.desc}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-1">
+                    <td className="px-5 py-3 align-middle whitespace-nowrap border-r border-slate-200">
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-mono px-2.5 py-1 rounded shadow-2xs inline-block text-center ${shift.badgeStyle}`}>
+                            {shift.label}
+                          </span>
                           <RecordStatusBadge status={status} />
                         </div>
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          {shift.desc}
+                        </span>
                       </div>
                     </td>
 
@@ -535,7 +603,14 @@ const CBDAnalysisPage = ({ plantId = 'offset' }) => {
             </tbody>
           </table>
         </div>
-      </AnalysisTableCard>
+
+        {/* Bottom helper bar */}
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500 font-medium">
+            One correction allowed after first save; saving the next slot/shift locks the previous one.
+          </p>
+        </div>
+      </div>
 
       {/* ── Save Confirmation Modal ── */}
       <SaveConfirmationModal

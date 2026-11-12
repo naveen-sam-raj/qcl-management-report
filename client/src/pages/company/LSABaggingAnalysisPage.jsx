@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -720,16 +719,53 @@ const LSABaggingAnalysisPage = ({ plantId = 'sa' }) => {
 
   return (
     <div className="space-y-6 animate-fadeIn font-sans">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="SA Plant"
-        analysisName="LSA Bagging"
-        title="LSA BAGGING"
-        date={date}
-        dateId="lsa-bagging-locked-date"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-      />
+      {/* ── Top Header Bar ─────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Left: Back Button + Breadcrumb + Title */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-200 shrink-0 cursor-pointer"
+              title="Return to Plants Overview"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back</span>
+            </button>
+
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                <Factory className="w-3.5 h-3.5 text-slate-400" />
+                <span>SA Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <span className="text-blue-600 font-semibold">LSA Bagging</span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                LSA BAGGING
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Locked Date Section + Reset */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {lastSaved && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Saved at {lastSaved}
+              </span>
+            )}
+
+            {/* Locked Operating Date Display */}
+            <LockedDateDisplay
+              date={date}
+              id="lsa-bagging-locked-date"
+              badgeText="Operating Day"
+            />
+
+            
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner (Email / Save Status) ─────────────────────────────── */}
       <SaveStatusBanner

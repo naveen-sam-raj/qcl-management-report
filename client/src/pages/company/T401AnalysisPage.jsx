@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/common/Toast";
@@ -573,22 +572,57 @@ const T401AnalysisPage = ({ plantId = "sa" }) => {
 
   return (
     <div className="space-y-2 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="SA Plant"
-        analysisName="T 401"
-        title="T 401 ANALYSIS"
-        date={date}
-        dateId="t401-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-t401-save"
-        saveButtonTitle="Save T 401 data"
-      />
+      {/* ── Breadcrumb & Action Header ── */}
+      <div className="bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          {/* Left: Back, Breadcrumb & Title */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium leading-none">
+                <Factory className="w-3 h-3 text-slate-400" />
+                <span>SA Plant</span>
+                <ChevronRight className="w-2.5 h-2.5" />
+                <span className="text-blue-600 font-bold">T 401</span>
+              </div>
+              <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-none ml-1">
+                T 401 ANALYSIS
+              </h1>
+              <span className="text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-200 leading-none">
+                Once in a Shift
+              </span>
+            </div>
+
+            {/* Operating Day Display */}
+            <LockedDateDisplay date={date} id="t401-date-display" badgeText="Operating Day" />
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2 shrink-0">
+
+            {!isViewOnly && (
+              <StatusSaveButton
+                id="btn-t401-save"
+                saving={saving}
+                savePhase={savePhase}
+                saveSuccess={saveSuccess}
+                onClick={handleSaveClick}
+                defaultLabel="Save / Submit"
+                title="Save T 401 data"
+                alwaysShowSaveText={true}
+              />
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banners (Email Sent / Pending / Failed) ── */}
       <SaveStatusBanner

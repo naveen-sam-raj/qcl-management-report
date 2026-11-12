@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { getCellLimit, validateCellValue } from '../../services/analysisValidation';
 import {
   formatDateDisplay,
@@ -312,22 +311,65 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
         saving={saving}
       />
 
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="OFFSET Plant"
-        analysisName="DistillerWaste"
-        title="DISTILLER WASTE WATER ANALYSIS"
-        date={date}
-        dateId="distiller-locked-date"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={initiateSave}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-distiller-save"
-        saveButtonTitle="Save analysis data"
-      />
+      {/* ── TOP HEADER BAR (TK 203 Clean Theme) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Back</span>
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">
+                OFFSET Plant
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-semibold text-slate-500">
+                Utilities & Facilities
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-md border border-violet-200/60">
+                Distiller Waste Water
+              </span>
+            </div>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <FlaskRound className="w-5 h-5 text-violet-600" />
+              DISTILLER WASTE WATER ANALYSIS
+            </h1>
+          </div>
+        </div>
+
+        {/* Action Buttons: Reset & Save */}
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          <LockedDateDisplay date={date} badgeText="Operating Day" id="distiller-locked-date" />
+
+          <RecordStatusBadge
+            status={overallBadgeStatus}
+            subLabel={isAllLocked ? 'all slots locked' : lockedSlots['t0630']?.isSaved ? 'in progress' : 'first slot ready'}
+          />
+
+          {!isViewOnly ? (
+            <StatusSaveButton
+              id="btn-distiller-save"
+              saving={saving}
+              isLocked={isAllLocked}
+              savePhase={savePhase}
+              onClick={initiateSave}
+              alwaysShowSaveText={true}
+              title="Save Distiller Waste Analysis"
+            />
+          ) : (
+            <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 font-semibold flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              Read-Only
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* ── MAIN CONTENT: Distiller Waste Water Table ── */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -429,7 +471,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                                   : 'bg-white border-slate-300 text-slate-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-400'
                             }`}
                         />
-                        <EditedBadge isEdited={isExCaoEdited} />
+                        {isExCaoEdited && <EditedBadge />}
                       </div>
                     </td>
 
@@ -452,7 +494,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                                   : 'bg-white border-slate-300 text-slate-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-400'
                             }`}
                         />
-                        <EditedBadge isEdited={isFnh3Edited} />
+                        {isFnh3Edited && <EditedBadge />}
                       </div>
                     </td>
 
@@ -475,7 +517,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                                   : 'bg-white border-slate-300 text-slate-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-400'
                             }`}
                         />
-                        <EditedBadge isEdited={isCnh3Edited} />
+                        {isCnh3Edited && <EditedBadge />}
                       </div>
                     </td>
 
@@ -498,7 +540,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                                   : 'bg-white border-slate-300 text-slate-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-400'
                             }`}
                         />
-                        <EditedBadge isEdited={isTnh3Edited} />
+                        {isTnh3Edited && <EditedBadge />}
                       </div>
                     </td>
 
@@ -519,7 +561,7 @@ const DistillerWasteAnalysisPage = ({ plantId = 'offset' }) => {
                                 : 'bg-white border-slate-300 text-slate-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-400'
                             }`}
                         />
-                        <EditedBadge isEdited={isNahco3Edited} />
+                        {isNahco3Edited && <EditedBadge />}
                       </div>
                     </td>
 

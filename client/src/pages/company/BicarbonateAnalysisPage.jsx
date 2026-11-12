@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -363,21 +362,65 @@ const BicarbonateAnalysisPage = ({ plantId = 'sa' }) => {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="Soda Ash Plant"
-        analysisName="Bicarbonate"
-        title="BI CARBONATE ANALYSIS"
-        date={date}
-        dateId="bicarbonate-date-display"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isViewOnly={isViewOnly}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveButtonId="btn-bicarbonate-save"
-        saveButtonTitle="Save Bi Carbonate data"
-      />
+      {/* ── TOP HEADER BAR ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+            <span>Back</span>
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Soda Ash Plant</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs font-semibold text-emerald-600">Bi Carbonate</span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                Frequency: 2-Hourly
+              </span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 mt-0.5">
+              <FlaskConical className="w-6 h-6 text-emerald-600 inline" />
+              BI CARBONATE ANALYSIS
+            </h1>
+          </div>
+        </div>
+
+        {/* Action Controls & Buttons */}
+        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+          {lastSaved && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Saved at {lastSaved}
+            </span>
+          )}
+
+          {/* Locked Operating Date Display */}
+          <LockedDateDisplay
+            date={date}
+            id="bicarbonate-date-display"
+            badgeText="Operating Day"
+          />
+
+          <div className="flex items-center gap-2 shrink-0">
+
+            {!isViewOnly && (
+              <StatusSaveButton
+                id="btn-bicarbonate-save"
+                saving={saving}
+                savePhase={savePhase}
+                onClick={handleSaveClick}
+                defaultLabel="Save Analysis"
+                title="Save Bi Carbonate data"
+                alwaysShowSaveText
+              />
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Status Banner ── */}
       <SaveStatusBanner

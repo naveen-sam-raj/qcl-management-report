@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import AnalysisHeader from '../../components/common/AnalysisHeader';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
@@ -301,24 +300,92 @@ const TK419AnalysisPage = ({ plantId = 'sa' }) => {
   return (
     <div className="space-y-4 animate-fadeIn">
 
-      {/* ── Breadcrumb & Top Navigation ── */}
-      <AnalysisHeader
-        plantName="SA Plant"
-        analysisName="TK 419"
-        title="TK 419 ANALYSIS"
-        date={date}
-        dateId="tk419-date-input"
-        onBack={() => navigate(`${basePath}/plants/${plantId}`)}
-        isDateLocked={false}
-        onDateChange={(e) => setDate(e.target.value)}
-        maxDate={getOperatingDateIST()}
-        onSave={handleSaveClick}
-        saving={saving}
-        savePhase={savePhase}
-        saveSuccess={saveSuccess}
-        saveButtonId="btn-tk419-save"
-        saveButtonTitle="Save TK 419 data"
-      />
+      {/* ── Breadcrumb Header ──────────────────────────────────────────────── */}
+      <div className="bg-white px-5 py-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Titles */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`${basePath}/plants/${plantId}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 font-bold text-xs transition shadow-2xs shrink-0 cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Back</span>
+            </button>
+            <div className="min-w-0">
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium leading-tight">
+                <Factory className="w-3.5 h-3.5 text-slate-400" />
+                <span>SA Plant</span>
+                <ChevronRight className="w-3 h-3" />
+                <Database className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-blue-600 font-semibold">TK 419</span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+                TK 419 ANALYSIS
+              </h1>
+            </div>
+          </div>
+
+          {/* Right: Actions */}
+          {/* Right: Date Section + Action Buttons */}
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            {/* Integrated Date Section */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+              <label
+                htmlFor="tk419-date-input"
+                className="text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 flex items-center gap-1"
+              >
+                <span>Date:</span>
+                <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="tk419-date-input"
+                  type="date"
+                  value={date}
+                  max={getOperatingDateIST()}
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    if (typeof setDateError === 'function') setDateError(false);
+                    if (typeof setSaveSuccess === 'function') setSaveSuccess(false);
+                  }}
+                  className={`pl-7 pr-2 py-1 text-xs font-semibold border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-slate-800 bg-white ${
+                    typeof dateError !== 'undefined' && dateError
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                />
+              </div>
+              {date && (
+                <span className="text-xs font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 hidden sm:inline-block">
+                  {formatDateDisplay(date)}
+                </span>
+              )}
+              {typeof dateError !== 'undefined' && dateError && (
+                <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
+                  <AlertCircle className="w-3 h-3" /> Required
+                </span>
+              )}
+            </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+
+            <StatusSaveButton
+              id="btn-tk419-save"
+              saving={saving}
+              savePhase={savePhase}
+              saveSuccess={saveSuccess}
+              onClick={handleSaveClick}
+              defaultLabel="Save / Submit"
+              title="Save TK 419 data"
+            />
+          </div>
+          </div>
+        </div>
+      </div>
 
       {/* ── Success Banner ─────────────────────────────────────────────────── */}
       <SaveStatusBanner
