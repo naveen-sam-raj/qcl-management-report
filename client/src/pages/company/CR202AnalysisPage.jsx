@@ -126,12 +126,19 @@ const SHIFT_MAPPING = [
 const UNITS_ORDER = ['t07', 't11', 't15', 't19', 't23', 't03'];
 
 const isValueDifferent = (oldVal, newVal) => {
-  if (oldVal === undefined || oldVal === null || oldVal === '' || oldVal === '—' || oldVal === '-') oldVal = null;
-  if (newVal === undefined || newVal === null || newVal === '' || newVal === '—' || newVal === '-') newVal = null;
+  if (typeof oldVal === 'string') oldVal = oldVal.trim();
+  if (typeof newVal === 'string') newVal = newVal.trim();
+
+  if (oldVal === undefined || oldVal === null || oldVal === '' || oldVal === '—' || oldVal === '–' || oldVal === '-') oldVal = null;
+  if (newVal === undefined || newVal === null || newVal === '' || newVal === '—' || newVal === '–' || newVal === '-') newVal = null;
+
   if (oldVal === null && newVal === null) return false;
   if (oldVal === null || newVal === null) return true;
-  if (!isNaN(Number(oldVal)) && !isNaN(Number(newVal))) {
-    return Number(oldVal) !== Number(newVal);
+
+  const numOld = Number(oldVal);
+  const numNew = Number(newVal);
+  if (!isNaN(numOld) && !isNaN(numNew)) {
+    return numOld !== numNew;
   }
   return String(oldVal) !== String(newVal);
 };
@@ -227,6 +234,58 @@ const computeAvgAH = (rowObj) => {
   });
   if (count === 0) return '';
   return (sum / 8).toFixed(2);
+};
+
+// ─── Normalization Helpers (Shared by fetchExistingData & handleConfirmSave) ───
+const normalizeCR202TimeRows = (rawTimeRows) => {
+  const result = buildEmptyTimeRows();
+  if (!rawTimeRows || typeof rawTimeRows !== 'object') {
+    return result;
+  }
+  TIME_SLOTS.forEach((slot) => {
+    const rawSlot = rawTimeRows[slot.key];
+    if (rawSlot && typeof rawSlot === 'object') {
+      STREAMS.forEach((s) => {
+        const val = rawSlot[s.key];
+        result[slot.key][s.key] = val !== null && val !== undefined ? String(val) : '';
+      });
+      result[slot.key].avgTcl =
+        rawSlot.avgTcl !== null && rawSlot.avgTcl !== undefined ? String(rawSlot.avgTcl) : '';
+      result[slot.key].avgAH =
+        rawSlot.avgAH !== null && rawSlot.avgAH !== undefined && String(rawSlot.avgAH).trim() !== ''
+          ? String(rawSlot.avgAH)
+          : computeAvgAH(result[slot.key]);
+    }
+  });
+  return result;
+};
+
+const normalizeCR202Fnh3Row = (rawRow) => {
+  const popF = buildEmptyFnh3Row();
+  if (!rawRow || typeof rawRow !== 'object') return popF;
+  STREAMS.forEach((s) => {
+    const val = rawRow[s.key];
+    popF[s.key] = val !== null && val !== undefined ? String(val) : '';
+  });
+  popF.avgAH =
+    rawRow.avgAH !== null && rawRow.avgAH !== undefined && String(rawRow.avgAH).trim() !== ''
+      ? String(rawRow.avgAH)
+      : computeAvgAH(popF);
+  return popF;
+};
+
+const normalizeCR202PclRow = (rawRow) => {
+  const popP = buildEmptyPclRow();
+  if (!rawRow || typeof rawRow !== 'object') return popP;
+  STREAMS.forEach((s) => {
+    const val = rawRow[s.key];
+    popP[s.key] = val !== null && val !== undefined ? String(val) : '';
+  });
+  popP.avgAH =
+    rawRow.avgAH !== null && rawRow.avgAH !== undefined && String(rawRow.avgAH).trim() !== ''
+      ? String(rawRow.avgAH)
+      : computeAvgAH(popP);
+  return popP;
 };
 
 // ─── Individual Cell Component with Limit Badges & EDITED Indicator ─────────
@@ -480,17 +539,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
             const fetchedPRow = record.pclRow || record.data?.pclRow;
 
             if (fetchedTRows && typeof fetchedTRows === 'object') {
-              const populatedTRows = buildEmptyTimeRows();
-              TIME_SLOTS.forEach((slot) => {
-                if (fetchedTRows[slot.key]) {
-                  STREAMS.forEach((s) => {
-                    const val = fetchedTRows[slot.key][s.key];
-                    populatedTRows[slot.key][s.key] = val !== null && val !== undefined ? String(val) : '';
-                  });
-                  populatedTRows[slot.key].avgTcl = fetchedTRows[slot.key].avgTcl !== null && fetchedTRows[slot.key].avgTcl !== undefined ? String(fetchedTRows[slot.key].avgTcl) : '';
-                  populatedTRows[slot.key].avgAH = fetchedTRows[slot.key].avgAH !== null && fetchedTRows[slot.key].avgAH !== undefined ? String(fetchedTRows[slot.key].avgAH) : computeAvgAH(populatedTRows[slot.key]);
-                }
-              });
+              const populatedTRows = normalizeCR202TimeRows(fetchedTRows);
               setTimeRows(populatedTRows);
               setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
             } else {
@@ -499,12 +548,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
             }
 
             if (fetchedFRow && typeof fetchedFRow === 'object') {
-              const popF = buildEmptyFnh3Row();
-              STREAMS.forEach((s) => {
-                const val = fetchedFRow[s.key];
-                popF[s.key] = val !== null && val !== undefined ? String(val) : '';
-              });
-              popF.avgAH = fetchedFRow.avgAH !== null && fetchedFRow.avgAH !== undefined ? String(fetchedFRow.avgAH) : computeAvgAH(popF);
+              const popF = normalizeCR202Fnh3Row(fetchedFRow);
               setFnh3Row(popF);
               setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
             } else {
@@ -513,12 +557,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
             }
 
             if (fetchedPRow && typeof fetchedPRow === 'object') {
-              const popP = buildEmptyPclRow();
-              STREAMS.forEach((s) => {
-                const val = fetchedPRow[s.key];
-                popP[s.key] = val !== null && val !== undefined ? String(val) : '';
-              });
-              popP.avgAH = fetchedPRow.avgAH !== null && fetchedPRow.avgAH !== undefined ? String(fetchedPRow.avgAH) : computeAvgAH(popP);
+              const popP = normalizeCR202PclRow(fetchedPRow);
               setPclRow(popP);
               setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
             } else {
@@ -822,34 +861,20 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
       if (response.data?.editAuditHistory || savedDoc?.editAuditHistory) {
         setEditAuditHistory(response.data?.editAuditHistory || savedDoc?.editAuditHistory);
       }
-      if (savedDoc?.timeRows) {
-        const populatedTRows = buildEmptyTimeRows();
-        TIME_SLOTS.forEach((slot) => {
-          if (savedDoc.timeRows[slot.key]) {
-            populatedTRows[slot.key] = { ...populatedTRows[slot.key], ...savedDoc.timeRows[slot.key] };
-          }
-        });
-        setTimeRows(populatedTRows);
-        setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
-      }
-      if (savedDoc?.fnh3Row) {
-        const popF = buildEmptyFnh3Row();
-        STREAMS.forEach((s) => {
-          if (savedDoc.fnh3Row[s.key] !== undefined) popF[s.key] = String(savedDoc.fnh3Row[s.key] ?? '');
-        });
-        popF.avgAH = savedDoc.fnh3Row.avgAH !== null && savedDoc.fnh3Row.avgAH !== undefined ? String(savedDoc.fnh3Row.avgAH) : '';
-        setFnh3Row(popF);
-        setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
-      }
-      if (savedDoc?.pclRow) {
-        const popP = buildEmptyPclRow();
-        STREAMS.forEach((s) => {
-          if (savedDoc.pclRow[s.key] !== undefined) popP[s.key] = String(savedDoc.pclRow[s.key] ?? '');
-        });
-        popP.avgAH = savedDoc.pclRow.avgAH !== null && savedDoc.pclRow.avgAH !== undefined ? String(savedDoc.pclRow.avgAH) : '';
-        setPclRow(popP);
-        setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
-      }
+      const effectiveTimeRows = savedDoc?.timeRows || timeRows;
+      const populatedTRows = normalizeCR202TimeRows(effectiveTimeRows);
+      setTimeRows(populatedTRows);
+      setOriginalTimeRows(JSON.parse(JSON.stringify(populatedTRows)));
+
+      const effectiveFRow = savedDoc?.fnh3Row || fnh3Row;
+      const popF = normalizeCR202Fnh3Row(effectiveFRow);
+      setFnh3Row(popF);
+      setOriginalFnh3Row(JSON.parse(JSON.stringify(popF)));
+
+      const effectivePRow = savedDoc?.pclRow || pclRow;
+      const popP = normalizeCR202PclRow(effectivePRow);
+      setPclRow(popP);
+      setOriginalPclRow(JSON.parse(JSON.stringify(popP)));
     } catch (err) {
       showToast(err.response?.data?.message || err.message || 'Unable to save CR 202 data.', 'error');
       setSavePhase('idle');
