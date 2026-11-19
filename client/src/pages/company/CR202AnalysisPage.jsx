@@ -444,6 +444,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
   const [lockedSlots, setLockedSlots]               = useState({});
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
+  const [editAuditHistory, setEditAuditHistory]     = useState([]);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
