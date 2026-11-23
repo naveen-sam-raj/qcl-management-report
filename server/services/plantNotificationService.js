@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { Plant, User, ActivityLog, PlantAnalysisRecord, Company } = require('../models');
-const { createNodemailerTransporter } = require('./emailService');
+const { createNodemailerTransporter, sendPlantAnalysisNotification } = require('./emailService');
 const { getOperatingDateIST } = require('../utils/operatingDate');
 
 // Map of analysis types / keywords to plant codes for intelligent inference
@@ -4069,6 +4069,27 @@ const executeSaveAndEmailWorkflow = async ({
   // 4. Capture Server-Generated Timestamp
   const serverTimestamp = savedRecord.createdAt || savedRecord.savedAt || new Date();
   const { dateFormatted, timeFormatted, filenameDate } = formatISTDateTime(serverTimestamp);
+
+  // ── Trigger Microsoft Graph Email Notification (Asynchronous / Fire-and-Forget) ──
+  // Hooked strictly after confirmed MongoDB persistence; will never fire if save threw or failed.
+  try {
+    sendPlantAnalysisNotification({
+      plantDoc,
+      plantCode,
+      plantName,
+      analysisType: resolvedAnalysisType,
+      date: targetDate,
+      savedBy: submittedBy || 'Plant Administrator',
+      savedAt: serverTimestamp,
+      recordId: savedRecord._id,
+      userPlant: plantCode,
+      company: company || plantDoc?.company,
+    }).catch((emailErr) => {
+      console.error(`[Microsoft Graph Email] Background dispatch error: ${emailErr.message}`);
+    });
+  } catch (initErr) {
+    console.error(`[Microsoft Graph Email] Trigger error: ${initErr.message}`);
+  }
 
   const isOffsite =
     plantCode === 'OFFSITE' ||
