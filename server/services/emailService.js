@@ -138,28 +138,11 @@ const sendPlantAnalysisNotification = async ({
       (plantDoc && plantDoc.name) ||
       `${normalizedCode} Plant`;
 
-    // 2. Validate Microsoft 365 / Azure Environment Configuration
-    const tenantId = process.env.AZURE_TENANT_ID || process.env.MICROSOFT_TENANT_ID;
-    const clientId = process.env.AZURE_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.AZURE_CLIENT_SECRET || process.env.MICROSOFT_CLIENT_SECRET;
-
-    if (!tenantId || !clientId || !clientSecret) {
-      console.warn(
-        '[Microsoft Graph Email] ⚠️ Missing Azure credentials (AZURE_TENANT_ID, AZURE_CLIENT_ID, or AZURE_CLIENT_SECRET). Skipping email notification.'
-      );
-      return {
-        success: true,
-        emailSent: false,
-        emailStatus: 'skipped',
-        message: 'Azure credentials not configured. Email notification skipped safely.',
-      };
-    }
-
-    // 3. Resolve Plant-Wise Sender Mailbox
+    // 2. Resolve Plant-Wise Sender Mailbox
     const senderMailbox = resolveSenderMailbox(normalizedCode);
     if (!senderMailbox) {
       console.warn(
-        `[Microsoft Graph Email] ⚠️ Sender mailbox not configured for plant "${normalizedCode}" (MAIL_SENDER_${normalizedCode}). Skipping email notification.`
+        `[Microsoft Graph Email] ⚠️ Sender mailbox not configured for plant "${normalizedCode}" (MAIL_SENDER_${normalizedCode}). Stopping.`
       );
       return {
         success: true,
@@ -169,7 +152,7 @@ const sendPlantAnalysisNotification = async ({
       };
     }
 
-    // 4. In-Memory Duplicate Prevention Check
+    // 3. In-Memory Duplicate Prevention Check
     const duplicateKey = getDuplicateKey(normalizedCode, recordId, date, analysisType);
     if (isDuplicateSave(duplicateKey)) {
       console.log(`[Microsoft Graph Email] ℹ️ Duplicate notification suppressed for key: ${duplicateKey}`);
@@ -181,39 +164,101 @@ const sendPlantAnalysisNotification = async ({
       };
     }
 
-    // 5. Query Recipients from MongoDB (Active Users assigned to this plant)
+    // 4. Query Recipients (via injected recipientResolver or MongoDB)
     let recipientEmails = Array.isArray(options.recipientEmails) ? [...options.recipientEmails] : [];
     if (recipientEmails.length === 0) {
-      try {
-        const User = mongoose.models.User || require('../models/User');
-        const Plant = mongoose.models.Plant || require('../models/Plant');
-
-        let plantIdFilter = plantDoc?._id || plantDoc?.id;
-        if (!plantIdFilter && Plant) {
-          const foundPlant = await Plant.findOne({
-            $or: [
-              { code: normalizedCode },
-              { name: new RegExp(`^${normalizedCode}`, 'i') },
-            ],
-          }).select('_id');
-          if (foundPlant) plantIdFilter = foundPlant._id;
+      if (typeof options.recipientResolver === 'function') {
+        const rawUsers = await options.recipientResolver({
+          plantCode: normalizedCode,
+          plantDoc,
+          plantName: resolvedPlantName,
+        });
+        if (Array.isArray(rawUsers)) {
+          recipientEmails = rawUsers
+            .filter((u) => {
+              if (typeof u === 'string') return true;
+              if (!u || typeof u !== 'object') return false;
+              // Filter status: active only if status is specified
+              if (u.status && u.status !== 'active') return false;
+              // Filter plant: match plantCode / normalizedCode if plant is specified
+              if (u.plant) {
+                const uPlant = String(u.plant._id || u.plant.code || u.plant).trim().toUpperCase();
+                const targetCode = String(normalizedCode).trim().toUpperCase();
+                const targetId = plantDoc?._id ? String(plantDoc._id).trim().toUpperCase() : '';
+                if (uPlant !== targetCode && (!targetId || uPlant !== targetId)) {
+                  return false;
+                }
+              }
+              return true;
+            })
+            .map((u) => {
+              const em = typeof u === 'string' ? u : u.email;
+              return typeof em === 'string' ? em.trim().toLowerCase() : null;
+            })
+            .filter((em) => Boolean(em && em.includes('@') && !em.includes(' ') && em.indexOf('@') > 0 && em.indexOf('@') < em.length - 1));
         }
+      } else {
+        try {
+          const User = mongoose.models.User || require('../models/User');
+          const Plant = mongoose.models.Plant || require('../models/Plant');
 
-        if (plantIdFilter) {
-          const userDocs = await User.find({
-            plant: plantIdFilter,
-            status: 'active',
-          }).select('email');
+          let plantIdFilter = plantDoc?._id || plantDoc?.id;
+          if (!plantIdFilter && Plant) {
+            const foundPlant = await Plant.findOne({
+              $or: [
+                { code: normalizedCode },
+                { name: new RegExp(`^${normalizedCode}`, 'i') },
+              ],
+            }).select('_id');
+            if (foundPlant) plantIdFilter = foundPlant._id;
+          }
 
-          recipientEmails = userDocs
-            .map((u) => (typeof u.email === 'string' ? u.email.trim().toLowerCase() : null))
-            .filter((em) => Boolean(em && em.includes('@')));
+          if (plantIdFilter) {
+            const userDocs = await User.find({
+              plant: plantIdFilter,
+              status: 'active',
+            }).select('email');
+
+            recipientEmails = userDocs
+              .map((u) => (typeof u.email === 'string' ? u.email.trim().toLowerCase() : null))
+              .filter((em) => Boolean(em && em.includes('@')));
+          }
+        } catch (dbErr) {
+          console.warn(`[Microsoft Graph Email] ⚠️ Failed querying plant user recipients from MongoDB: ${dbErr.message}`);
         }
-      } catch (dbErr) {
-        console.warn(`[Microsoft Graph Email] ⚠️ Failed querying plant user recipients from MongoDB: ${dbErr.message}`);
       }
     }
 
+    // Deduplicate recipient emails
+    recipientEmails = Array.from(new Set(recipientEmails));
+
+    // Construct Email Subject
+    const subject = `New ${resolvedPlantName} Analysis Report Saved - QCL Management System`;
+
+    // 5. Validate Microsoft 365 / Azure Environment Configuration
+    const tenantId = process.env.AZURE_TENANT_ID || process.env.MICROSOFT_TENANT_ID;
+    const clientId = process.env.AZURE_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID;
+    const clientSecret = process.env.AZURE_CLIENT_SECRET || process.env.MICROSOFT_CLIENT_SECRET;
+
+    const hasAzureCreds = Boolean((tenantId && clientId && clientSecret) || options.fakeCredential);
+
+    // Dry-run mode when Azure credentials are not configured
+    if (!hasAzureCreds) {
+      console.log(
+        `[Microsoft Graph Email] DRY RUN (no Azure creds): would send from [${senderMailbox}] to [${recipientEmails.join(', ')}] | Subject: ${subject}`
+      );
+      return {
+        success: true,
+        emailSent: false,
+        emailStatus: 'skipped',
+        isDryRun: true,
+        senderMailbox,
+        recipients: recipientEmails,
+        message: 'Azure credentials not configured. Executed dry run logging.',
+      };
+    }
+
+    // 6. Check Recipients for Live Graph API Send
     if (!recipientEmails || recipientEmails.length === 0) {
       console.warn(
         `[Microsoft Graph Email] ⚠️ No active users with valid email assigned to plant "${resolvedPlantName}". Skipping notification.`
@@ -226,10 +271,7 @@ const sendPlantAnalysisNotification = async ({
       };
     }
 
-    // Deduplicate recipient emails
-    recipientEmails = Array.from(new Set(recipientEmails));
-
-    // 6. Format Email Timestamp in Asia/Kolkata
+    // 7. Format Email Timestamp in Asia/Kolkata
     const dateObj = savedAt instanceof Date ? savedAt : new Date(savedAt || Date.now());
     const validDate = isNaN(dateObj.getTime()) ? new Date() : dateObj;
     const formattedSavedAt = validDate.toLocaleString('en-GB', {
@@ -242,8 +284,7 @@ const sendPlantAnalysisNotification = async ({
       hour12: true,
     }) + ' IST';
 
-    // 7. Construct Email Content (Escaped, Clean, No Credentials or Values)
-    const subject = `New ${resolvedPlantName} Analysis Report Saved - QCL Management System`;
+    // 8. Construct Email Content (Escaped, Clean, No Credentials or Values)
 
     const htmlBody =
 `<!DOCTYPE html>
