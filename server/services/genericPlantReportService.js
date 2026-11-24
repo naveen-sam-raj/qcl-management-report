@@ -981,13 +981,43 @@ function getCellAuditEntries(editAuditHistory, rowKey, colKey, dataObj = null) {
   }
 }
 
+const warnedIdTypeKeys = new Set();
+
+/**
+ * Safely converts an identifier to string for case-insensitive matching.
+ * Handles strings, numbers, ObjectIds, null, undefined.
+ */
+function safeId(val, context = null) {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (context && warnedIdTypeKeys.size < 20) {
+    const analysisType = context.analysisType || 'Unknown Analysis';
+    const date = context.date || 'Unknown Date';
+    const plant = context.plant || context.plantCode || context.plantName || 'Unknown Plant';
+    const key = `${analysisType}|${date}`;
+    if (!warnedIdTypeKeys.has(key)) {
+      warnedIdTypeKeys.add(key);
+      console.warn(
+        `[Report Diagnostic] Non-string dataObj.id detected in ${plant} — ${analysisType} (${date}): typeof=${typeof val}, id=${String(val).slice(0, 30)}`
+      );
+    }
+  }
+  return typeof val.toString === 'function' ? val.toString() : String(val);
+}
+
 /**
  * Determines whether a cell is edited and builds its multi-entry audit note
  */
-function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
+function getCellEditInfo(data, rowKey, colKey, dataObj = null, context = null) {
   if (!data || typeof data !== 'object') {
     return { isEdited: false, note: null };
   }
+
+  const ctx = context || {
+    plant: data?.plantCode || data?.plant || data?.plantName || null,
+    analysisType: data?.analysisType || null,
+    date: data?.date || null,
+  };
 
   const rStr = String(rowKey || '').trim();
   const cStr = String(colKey || '').trim();
@@ -1002,24 +1032,26 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
   ];
   if (dataObj && typeof dataObj === 'object') {
     if (dataObj.time) {
+      const timeLower = String(dataObj.time).toLowerCase();
       candidateKeys.push(`${dataObj.time}_${cStr}`);
-      candidateKeys.push(`${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`${timeLower}_${cStr.toLowerCase()}`);
       candidateKeys.push(`${dataObj.time}.${cStr}`);
-      candidateKeys.push(`${dataObj.time.toLowerCase()}.${cStr.toLowerCase()}`);
+      candidateKeys.push(`${timeLower}.${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.time}_${cStr}`);
-      candidateKeys.push(`hourly.${dataObj.time.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${timeLower}_${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.time}.${cStr}`);
-      candidateKeys.push(`hourly.${dataObj.time.toLowerCase()}.${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${timeLower}.${cStr.toLowerCase()}`);
     }
     if (dataObj.id) {
+      const idLower = safeId(dataObj.id, ctx).toLowerCase();
       candidateKeys.push(`${dataObj.id}_${cStr}`);
-      candidateKeys.push(`${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`${idLower}_${cStr.toLowerCase()}`);
       candidateKeys.push(`${dataObj.id}.${cStr}`);
-      candidateKeys.push(`${dataObj.id.toLowerCase()}.${cStr.toLowerCase()}`);
+      candidateKeys.push(`${idLower}.${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.id}_${cStr}`);
-      candidateKeys.push(`hourly.${dataObj.id.toLowerCase()}_${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${idLower}_${cStr.toLowerCase()}`);
       candidateKeys.push(`hourly.${dataObj.id}.${cStr}`);
-      candidateKeys.push(`hourly.${dataObj.id.toLowerCase()}.${cStr.toLowerCase()}`);
+      candidateKeys.push(`hourly.${idLower}.${cStr.toLowerCase()}`);
     }
     if (dataObj.unitKey) {
       const uStr = String(dataObj.unitKey).trim();
@@ -1045,16 +1077,18 @@ function getCellEditInfo(data, rowKey, colKey, dataObj = null) {
     candidateKeys.push(`${rStr.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
     if (dataObj && typeof dataObj === 'object') {
       if (dataObj.time) {
+        const timeLower = String(dataObj.time).toLowerCase();
         candidateKeys.push(`${dataObj.time}_${grp}_${pKey}`);
-        candidateKeys.push(`${dataObj.time.toLowerCase()}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+        candidateKeys.push(`${timeLower}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
         candidateKeys.push(`${dataObj.time}.${grp}.${pKey}`);
-        candidateKeys.push(`${dataObj.time.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+        candidateKeys.push(`${timeLower}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
       }
       if (dataObj.id) {
+        const idLower = safeId(dataObj.id, ctx).toLowerCase();
         candidateKeys.push(`${dataObj.id}_${grp}_${pKey}`);
-        candidateKeys.push(`${dataObj.id.toLowerCase()}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
+        candidateKeys.push(`${idLower}_${grp.toLowerCase()}_${pKey.toLowerCase()}`);
         candidateKeys.push(`${dataObj.id}.${grp}.${pKey}`);
-        candidateKeys.push(`${dataObj.id.toLowerCase()}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
+        candidateKeys.push(`${idLower}.${grp.toLowerCase()}.${pKey.toLowerCase()}`);
       }
     }
   }
@@ -1149,7 +1183,7 @@ function resolveColumns(columnKeys, labelConfig = null) {
 /**
  * Analyzes all cells in a table block to detect out-of-limit and edited cells
  */
-function analyzeTableMarkedCells(data, rowEntries, columns) {
+function analyzeTableMarkedCells(data, rowEntries, columns, context = null) {
   let hasMarkedCells = false;
   let oolCount = 0;
   let edCount = 0;
@@ -1162,7 +1196,7 @@ function analyzeTableMarkedCells(data, rowEntries, columns) {
       const val = row.dataObj ? row.dataObj[col.key] : null;
       const limit = parseColumnRange(col.range);
       const isOutOfLimit = checkOutOfLimit(val, limit);
-      const editInfo = getCellEditInfo(data, row.rowKey, col.key, row.dataObj);
+      const editInfo = getCellEditInfo(data, row.rowKey, col.key, row.dataObj, context);
       const isEdited = editInfo.isEdited;
 
       if (isOutOfLimit) oolCount++;
@@ -1484,6 +1518,7 @@ function renderAnalysisSheet({
 
   let nextRow = 3;
   const data = rec.data || {};
+  const tableCtx = { plant: normPlant, analysisType, date };
   let isDualBlock = false;
   let sheetMaxCols = 1;
   let totalOol = 0;
@@ -1517,8 +1552,8 @@ function renderAnalysisSheet({
     const chemRows = [{ rowKey: 'chemical', label: 'Product Specifications', dataObj: data.chemical }];
     const bssRows = [{ rowKey: 'bss', label: 'Mesh Analysis', dataObj: data.bss }];
 
-    const resChem = analyzeTableMarkedCells(data, chemRows, chemColumns);
-    const resBss = analyzeTableMarkedCells(data, bssRows, bssColumns);
+    const resChem = analyzeTableMarkedCells(data, chemRows, chemColumns, tableCtx);
+    const resBss = analyzeTableMarkedCells(data, bssRows, bssColumns, tableCtx);
     totalOol += resChem.oolCount + resBss.oolCount;
     totalEd += resChem.edCount + resBss.edCount;
     const hasMarkedCells = resChem.hasMarkedCells || resBss.hasMarkedCells;
@@ -1613,8 +1648,8 @@ function renderAnalysisSheet({
       dataObj: item,
     }));
 
-    const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns);
-    const resHourly = analyzeTableMarkedCells(data, hourlyRows, hourlyColumns);
+    const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns, tableCtx);
+    const resHourly = analyzeTableMarkedCells(data, hourlyRows, hourlyColumns, tableCtx);
     totalOol += resShift.oolCount + resHourly.oolCount;
     totalEd += resShift.edCount + resHourly.edCount;
     const hasMarkedCells = resShift.hasMarkedCells || resHourly.hasMarkedCells;
@@ -1706,7 +1741,7 @@ function renderAnalysisSheet({
         dataObj: { ...(uObj[sk] || {}), unitKey: uk },
       }));
 
-      const resUnit = analyzeTableMarkedCells(data, unitRowEntries, unitColumns);
+      const resUnit = analyzeTableMarkedCells(data, unitRowEntries, unitColumns, tableCtx);
       totalOol += resUnit.oolCount;
       totalEd += resUnit.edCount;
       if (resUnit.hasMarkedCells) {
@@ -1837,7 +1872,7 @@ function renderAnalysisSheet({
     }
 
     checkColsRanges(columns);
-    const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+    const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns, tableCtx);
     totalOol += analysisRes.oolCount;
     totalEd += analysisRes.edCount;
     if (analysisRes.hasMarkedCells) hasMarked = true;
@@ -1877,7 +1912,7 @@ function renderAnalysisSheet({
     checkColsRanges(columns);
     const rowEntries = [{ rowKey: 'daily', label: 'Daily Parameters', dataObj: data.parameters }];
 
-    const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+    const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns, tableCtx);
     totalOol += analysisRes.oolCount;
     totalEd += analysisRes.edCount;
     if (analysisRes.hasMarkedCells) hasMarked = true;
@@ -1967,8 +2002,8 @@ function renderAnalysisSheet({
           dataObj: rowContainer[dk],
         }));
 
-        const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns);
-        const resDay = analyzeTableMarkedCells(data, dayRows, dayColumns);
+        const resShift = analyzeTableMarkedCells(data, shiftRows, shiftColumns, tableCtx);
+        const resDay = analyzeTableMarkedCells(data, dayRows, dayColumns, tableCtx);
         totalOol += resShift.oolCount + resDay.oolCount;
         totalEd += resShift.edCount + resDay.edCount;
         let hasMarkedCells = resShift.hasMarkedCells || resDay.hasMarkedCells;
@@ -2027,7 +2062,7 @@ function renderAnalysisSheet({
             label: formatRowLabel(ok, rowContainer[ok], labelConfig),
             dataObj: rowContainer[ok],
           }];
-          const resOther = analyzeTableMarkedCells(data, oRows, oColumns);
+          const resOther = analyzeTableMarkedCells(data, oRows, oColumns, tableCtx);
           totalOol += resOther.oolCount;
           totalEd += resOther.edCount;
           if (resOther.hasMarkedCells) {
@@ -2074,7 +2109,7 @@ function renderAnalysisSheet({
           dataObj: rowContainer[rk],
         }));
 
-        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns, tableCtx);
         totalOol += analysisRes.oolCount;
         totalEd += analysisRes.edCount;
         if (analysisRes.hasMarkedCells) hasMarked = true;
@@ -2116,7 +2151,7 @@ function renderAnalysisSheet({
         checkColsRanges(columns);
         const rowEntries = [{ rowKey: 'recorded', label: 'Recorded Data', dataObj: data }];
 
-        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns);
+        const analysisRes = analyzeTableMarkedCells(data, rowEntries, columns, tableCtx);
         totalOol += analysisRes.oolCount;
         totalEd += analysisRes.edCount;
         if (analysisRes.hasMarkedCells) hasMarked = true;
