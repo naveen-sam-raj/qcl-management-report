@@ -196,12 +196,18 @@ function getRow1MergeWidth(sheet) {
 }
 
 function findDataEndRow(sheet, firstDataRow) {
+  const lastCol = Math.max(sheet.columnCount || 0, 1);
   let scanRow = firstDataRow;
   while (scanRow <= sheet.rowCount) {
-    const val = sheet.getCell(scanRow, 1).value;
-    if (val === null || val === undefined || String(val).trim() === '') {
-      break;
+    let hasContent = false;
+    for (let c = 1; c <= lastCol; c++) {
+      const v = sheet.getCell(scanRow, c).value;
+      if (v !== null && v !== undefined && String(v).trim() !== '') {
+        hasContent = true;
+        break;
+      }
     }
+    if (!hasContent) break;
     scanRow++;
   }
   return scanRow - 1;
@@ -664,10 +670,10 @@ router.get('/generic-range', async (req, res) => {
     }
 
     const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 31) {
+    if (diffDays > 366) {
       return res.status(400).json({
         success: false,
-        message: 'Date range cannot exceed 31 days.',
+        message: 'Date range cannot exceed 1 year.',
       });
     }
 
@@ -869,10 +875,10 @@ router.get('/generic-overall', async (req, res) => {
     }
 
     const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 31) {
+    if (diffDays > 366) {
       return res.status(400).json({
         success: false,
-        message: 'Date range cannot exceed 31 days.',
+        message: 'Date range cannot exceed 1 year.',
       });
     }
 

@@ -385,6 +385,7 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
   const [lockedSlots, setLockedSlots]               = useState({});
   const [lockedShifts, setLockedShifts]             = useState({});
   const [editedFields, setEditedFields]             = useState({});
+  const [editAuditHistory, setEditAuditHistory]     = useState([]);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal]     = useState(false);
@@ -885,55 +886,6 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
     }
   };
 
-  // Helper for Shift Status Badges
-  const getShiftBadge = (shiftId) => {
-    let status = 'NEW';
-    let bg = 'bg-indigo-100 text-indigo-700';
-
-    if (lockedShifts[shiftId]) {
-      status = 'Locked';
-      bg = 'bg-slate-200 text-slate-700';
-    } else {
-      if (shiftId === 'shift1') {
-        if (lockedShifts.shift2Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift1Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift2') {
-        if (!lockedShifts.shift1Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift2Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      } else if (shiftId === 'shift3') {
-        if (!lockedShifts.shift2Saved) {
-          status = 'Waiting';
-          bg = 'bg-amber-100 text-amber-700';
-        } else if (lockedShifts.shift3Saved && (lockedShifts.shift3Edits || 0) >= 1) {
-          status = 'Locked';
-          bg = 'bg-slate-200 text-slate-700';
-        } else if (lockedShifts.shift3Saved) {
-          status = 'Editable';
-          bg = 'bg-blue-100 text-blue-700';
-        }
-      }
-    }
-
-    return (
-      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-300 shadow-2xs ${bg}`}>
-        {status.toUpperCase()}
-      </span>
-    );
-  };
-
   return (
     <div className="space-y-4 animate-fadeIn">
 
@@ -1000,7 +952,6 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-2">
-
               {!isViewOnly && (
                 <StatusSaveButton
                   id="btn-cr202-save"
@@ -1008,8 +959,8 @@ const CR202AnalysisPage = ({ plantId = 'acl' }) => {
                   savePhase={savePhase}
                   saveSuccess={saveSuccess}
                   onClick={handleSaveClick}
-                  defaultLabel="Save Shift"
-                  title="Save active shift data and notify assigned user"
+                  defaultLabel="Save Analysis"
+                  title="Save active slot data and notify assigned user"
                 />
               )}
             </div>

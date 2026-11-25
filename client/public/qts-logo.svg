@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 10 500 172" fill="none">
+  <defs>
+    <linearGradient id="qts-blue-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0066CC" />
+      <stop offset="60%" stop-color="#0047AB" />
+      <stop offset="100%" stop-color="#002D72" />
+    </linearGradient>
+    <linearGradient id="qts-green-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4CAF50" />
+      <stop offset="100%" stop-color="#2E7D32" />
+    </linearGradient>
+    <linearGradient id="liquid-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0099FF" />
+      <stop offset="100%" stop-color="#0055B3" />
+    </linearGradient>
+  </defs>
+
+  <!-- Q-SYMBOL & FLASK EMBLEM -->
+  <g id="q-symbol" transform="translate(10, 0)">
+    <!-- 1. Top Green Arc -->
+    <path
+      d="M 68 28 A 66 66 0 0 1 180 62 C 182 66 177 69 173 66 C 145 42 100 30 68 40 C 63 41 63 29 68 28 Z"
+      fill="#43A047"
+    />
+
+    <!-- 2. Outer Blue Crescent Swoosh (Left & Top) -->
+    <path
+      d="M 125 15 C 60 17 18 62 18 112 C 18 142 34 165 60 174 C 55 163 53 148 55 132 C 38 126 31 106 33 86 C 36 60 62 30 110 26 C 117 25 125 25 133 26 C 137 27 139 20 134 18 C 131 16 128 15 125 15 Z"
+      fill="url(#qts-blue-grad)"
+    />
+
+    <!-- 3. Bottom Green Arc -->
+    <path
+      d="M 52 142 C 60 162 78 174 100 177 C 112 179 126 176 138 170 C 142 168 145 174 141 177 C 122 189 95 190 72 180 C 58 174 48 162 44 148 C 43 144 50 140 52 142 Z"
+      fill="#43A047"
+    />
+
+    <!-- 4. Q Tail -->
+    <path
+      d="M 112 135 C 135 135 156 145 170 156 L 195 172 C 199 175 195 181 190 180 L 152 171 C 145 173 138 174 130 174 C 95 174 72 154 68 135 C 80 135 96 135 112 135 Z"
+      fill="#002D72"
+    />
+
+    <!-- 5. Blue Inner Sweep -->
+    <path
+      d="M 33 88 C 30 112 40 134 62 146 C 75 153 92 155 110 154 C 130 153 150 144 162 130 C 172 118 177 102 176 86 C 175 74 170 63 162 55 C 160 53 163 49 166 51 C 178 63 186 79 187 97 C 188 122 176 145 155 158 C 138 168 116 171 96 168 C 66 163 40 143 27 116 C 20 102 18 86 22 70 C 23 66 28 67 28 71 C 26 77 26 83 27 88 Z"
+      fill="#0047AB"
+    />
+
+    <!-- 6. Erlenmeyer Chemistry Flask -->
+    <g id="flask" transform="translate(48, 38)">
+      <rect x="36" y="2" width="28" height="7" rx="3.5" fill="#0A2540" />
+      <path d="M 41 8 L 41 24 L 16 85 C 13 92 18 99 26 99 L 74 99 C 82 99 87 92 84 85 L 59 24 L 59 8 Z" fill="#0A2540" />
+      <path d="M 45 10 L 45 25 L 22 83 C 20 88 24 93 30 93 L 70 93 C 76 93 80 88 78 83 L 55 25 L 55 10 Z" fill="#FFFFFF" />
+      <path
+        d="M 32 60 C 40 64 48 57 60 62 C 64 64 68 63 70 61 L 76 82 C 78 87 74 92 68 92 L 32 92 C 26 92 22 87 24 82 Z"
+        fill="url(#liquid-grad)"
+      />
+      <path
+        d="M 38 75 L 45 82 L 62 65"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="5.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle cx="48" cy="46" r="3.5" fill="#0099FF" />
+      <circle cx="56" cy="38" r="2.5" fill="#00A3FF" />
+      <circle cx="53" cy="24" r="1.8" fill="#38BDF8" />
+    </g>
+  </g>
+
+  <!-- RIGHT: "Quality Tracking System" + CHARTS & CHECKMARK -->
+  <g id="brand-text" transform="translate(205, 0)">
+    <text
+      x="0"
+      y="92"
+      font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Inter', Helvetica, sans-serif"
+      font-weight="900"
+      font-size="64"
+      letter-spacing="-1.5"
+      fill="#0A2540"
+    >Quality</text>
+
+    <!-- 3-Bar Rising Column Chart at end of "Quality" -->
+    <g id="bar-chart" transform="translate(242, 42)">
+      <rect x="0" y="24" width="13" height="26" rx="2" fill="#38BDF8" />
+      <rect x="17" y="12" width="13" height="38" rx="2" fill="#0284C7" />
+      <rect x="34" y="0" width="13" height="50" rx="2" fill="#0369A1" />
+      <path
+        d="M -5 32 C 5 35 15 42 22 46 C 30 38 48 18 64 12"
+        fill="none"
+        stroke="#22C55E"
+        stroke-width="7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+
+    <text
+      x="4"
+      y="136"
+      font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Inter', Helvetica, sans-serif"
+      font-weight="700"
+      font-size="34"
+      letter-spacing="-0.5"
+      fill="#374151"
+    >Tracking System</text>
+
+    <path
+      d="M 32 153 Q 150 148 275 145 Q 160 156 32 153 Z"
+      fill="#22C55E"
+    />
+  </g>
+</svg>

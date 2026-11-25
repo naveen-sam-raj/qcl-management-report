@@ -135,15 +135,15 @@ const LandingPage = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
       </div>
 
-      {/* Top Corporate Navigation — Ultra-Minimal & Clean */}
-      <header className="shrink-0 bg-white/75 backdrop-blur-md border-b border-slate-200/60 shadow-2xs">
-        <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 sm:h-18 flex items-center justify-between">
-          {/* Official Fertilizer Group Brand Logo — Enlarged */}
+      {/* Top Corporate Navigation — Prominent Brand Header */}
+      <header className="shrink-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-xs py-2">
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 flex items-center justify-between">
+          {/* Quality Tracking System Brand Logo */}
           <div className="flex items-center">
             <img
-              src="/fertilizer-group-logo.svg"
-              alt="Fertilizer Group Logo"
-              className="h-10 sm:h-13 w-auto object-contain cursor-pointer transition-transform hover:scale-102"
+              src="/qts-logo.svg"
+              alt="Quality Tracking System"
+              className="h-16 sm:h-20 lg:h-22 w-auto object-contain cursor-pointer transition-transform hover:scale-105"
               onClick={() => navigate('/')}
             />
           </div>
@@ -161,10 +161,10 @@ const LandingPage = () => {
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900 leading-tight">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700">
-              QCL
+              QUALITY
             </span>{' '}
             <span className="text-slate-900">
-              ANALYSIS REPORTS
+              TRACKING SYSTEM
             </span>
           </h1>
 
