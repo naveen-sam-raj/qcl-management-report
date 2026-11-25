@@ -135,15 +135,15 @@ const LandingPage = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
       </div>
 
-      {/* Top Corporate Navigation — Prominent Brand Header */}
-      <header className="shrink-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-xs py-2">
-        <div className="max-w-7xl mx-auto px-6 sm:px-10 flex items-center justify-between">
+      {/* Top Corporate Navigation — Compact Brand Header */}
+      <header className="shrink-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-xs py-1.5 sm:py-2">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 flex items-center justify-between">
           {/* Quality Tracking System Brand Logo */}
           <div className="flex items-center">
             <img
               src="/qts-logo.svg"
               alt="Quality Tracking System"
-              className="h-16 sm:h-20 lg:h-22 w-auto object-contain cursor-pointer transition-transform hover:scale-105"
+              className="h-10 sm:h-12 md:h-14 w-auto object-contain cursor-pointer transition-transform hover:scale-105"
               onClick={() => navigate('/')}
             />
           </div>
@@ -151,15 +151,15 @@ const LandingPage = () => {
       </header>
 
       {/* Main Content Area — Fills exactly remaining space, perfectly centered */}
-      <main className="flex-1 min-h-0 flex flex-col justify-center items-center max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-2 overflow-hidden">
-        {/* Hero Section — Enlarged Impactful Typography */}
-        <section className="text-center mb-5 sm:mb-8 shrink-0">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-white/85 backdrop-blur-md border border-slate-200/90 shadow-2xs text-xs font-semibold text-slate-600 mb-2.5">
-            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+      <main className="flex-1 min-h-0 flex flex-col justify-center items-center max-w-6xl mx-auto w-full px-4 sm:px-6 py-2 overflow-y-auto sm:overflow-hidden">
+        {/* Hero Section — Balanced Typography */}
+        <section className="text-center mb-4 sm:mb-6 shrink-0">
+          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-white/85 backdrop-blur-md border border-slate-200/90 shadow-2xs text-[11px] sm:text-xs font-semibold text-slate-600 mb-2">
+            <Sparkles className="w-3 h-3 text-blue-600" />
             <span>Industrial Quality Analytics Platform</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900 leading-tight">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700">
               QUALITY
             </span>{' '}
@@ -169,19 +169,19 @@ const LandingPage = () => {
           </h1>
 
           {/* Accent underline */}
-          <div className="flex items-center justify-center gap-1.5 mt-2.5">
-            <span className="h-0.5 w-4 rounded-full bg-blue-400" />
-            <span className="h-1.5 w-20 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-400" />
-            <span className="h-0.5 w-4 rounded-full bg-indigo-400" />
+          <div className="flex items-center justify-center gap-1.5 mt-1.5">
+            <span className="h-0.5 w-3 rounded-full bg-blue-400" />
+            <span className="h-1 w-14 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-400" />
+            <span className="h-0.5 w-3 rounded-full bg-indigo-400" />
           </div>
 
-          <p className="mt-2.5 text-sm sm:text-base text-slate-600 max-w-xl mx-auto font-medium">
+          <p className="mt-2 text-xs sm:text-sm text-slate-600 max-w-lg mx-auto font-medium">
             Select a subsidiary division below to access automated plant telemetry, chemical analysis, and lab logs.
           </p>
         </section>
 
-        {/* 3 Subsidiary Logo Cards - Clean & Direct (Restored to previous large size) */}
-        <div className="max-w-5xl mx-auto w-full grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+        {/* Subsidiary Logo Cards - Compact & Balanced for Laptops */}
+        <div className="max-w-4xl mx-auto w-full grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
           {companies.map((c) => {
             const isTFL = c.id === 'tfl';
             return (
@@ -192,7 +192,7 @@ const LandingPage = () => {
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleCompanyClick(c)}
-                className={`group relative bg-white/95 backdrop-blur-xl rounded-2xl sm:rounded-3xl border transition-all duration-300 cursor-pointer overflow-hidden flex items-center justify-center p-8 sm:p-10 h-36 sm:h-44 shadow-[0_6px_24px_rgba(0,0,0,0.05)] hover:shadow-[0_16px_36px_rgba(37,99,235,0.15)] hover:-translate-y-1.5 hover:scale-[1.02] ${
+                className={`group relative bg-white/95 backdrop-blur-xl rounded-xl sm:rounded-2xl border transition-all duration-300 cursor-pointer overflow-hidden flex items-center justify-center p-4 sm:p-5 h-24 sm:h-28 md:h-32 shadow-[0_4px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_28px_rgba(37,99,235,0.12)] hover:-translate-y-1 hover:scale-[1.02] ${
                   isTFL
                     ? 'border-blue-400 ring-2 ring-blue-500/20 shadow-blue-500/10'
                     : 'border-slate-200/90 hover:border-slate-300'
@@ -206,7 +206,7 @@ const LandingPage = () => {
                 <img
                   src={c.logo}
                   alt={c.logoAlt}
-                  className="max-h-16 sm:max-h-20 max-w-[200px] sm:max-w-[240px] w-auto object-contain filter drop-shadow-2xs transition-transform duration-300 group-hover:scale-110"
+                  className="max-h-10 sm:max-h-12 md:max-h-14 max-w-[130px] sm:max-w-[160px] w-auto object-contain filter drop-shadow-2xs transition-transform duration-300 group-hover:scale-105"
                 />
               </div>
             );
