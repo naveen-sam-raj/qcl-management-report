@@ -92,7 +92,7 @@ function extractRowsFromData(data) {
   // 2. Standard shifts (shift1, shift2, shift3)
   const shiftKeys = ['shift1', 'shift2', 'shift3'];
   const shiftLabels = { shift1: 'I Shift', shift2: 'II Shift', shift3: 'III Shift' };
-  const container = data.shifts || data.shiftRows || data.rows || data;
+  const container = data.timeRows || data.shifts || data.shiftRows || data.rows || data;
 
   let hasShift = false;
   for (const sk of shiftKeys) {
