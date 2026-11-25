@@ -66,15 +66,15 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }) => {
 
         {/* Brand / Context Title */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <img
-              src="/fg-badge.svg"
-              alt="FG Emblem"
-              className="w-8 h-8 rounded-lg shrink-0 object-contain shadow-2xs border border-slate-200"
+              src="/qts-badge.svg"
+              alt="Quality Tracking System"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl shrink-0 object-contain shadow-2xs border border-slate-200"
             />
             <div className="hidden sm:block">
               <span className="font-bold text-slate-900 tracking-tight text-sm">
-                {user?.company?.name || 'Fertilizer Group'}
+                {user?.company?.name || 'Quality Tracking System'}
               </span>
               <span className="text-slate-400 mx-1.5 text-xs">/</span>
               <span className="text-xs font-medium text-slate-500">

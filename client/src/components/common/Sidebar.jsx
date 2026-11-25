@@ -83,20 +83,20 @@ const Sidebar = ({ isOpen, onClose }) => {
         }`}
       >
         {/* Brand Header */}
-        <div className="flex items-center justify-between h-16 px-5 bg-slate-950/60 border-b border-slate-800/80">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {/* FG Monogram Badge */}
+        <div className="flex items-center justify-between h-18 px-5 bg-slate-950/60 border-b border-slate-800/80">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* QTS Monogram Badge */}
             <img
-              src="/fg-badge.svg"
-              alt="FG Emblem"
-              className="w-8 h-8 rounded-lg shrink-0 object-contain shadow-xs"
+              src="/qts-badge.svg"
+              alt="Quality Tracking System"
+              className="w-10 h-10 rounded-xl shrink-0 object-contain shadow-xs"
             />
             <div className="min-w-0">
               <div className="font-extrabold text-white text-xs sm:text-sm tracking-wide truncate">
-                FERTILIZER GROUP
+                QUALITY TRACKING
               </div>
               <div className="text-[10px] text-emerald-400 font-medium tracking-wider uppercase truncate">
-                Enterprise Analytics
+                System Analytics
               </div>
             </div>
           </div>

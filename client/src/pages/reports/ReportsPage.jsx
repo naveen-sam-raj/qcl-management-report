@@ -121,8 +121,8 @@ const ReportsPage = () => {
         return;
       }
       const diffDays = Math.ceil((new Date(toDateStr) - new Date(fromDateStr)) / (1000 * 60 * 60 * 24)) + 1;
-      if (diffDays > 31) {
-        const msg = 'Date range cannot exceed 31 days';
+      if (diffDays > 366) {
+        const msg = 'Date range cannot exceed 1 year';
         setSinglePlantError(msg);
         showToast(msg, 'error');
         return;
@@ -138,6 +138,7 @@ const ReportsPage = () => {
         const response = await api.get('/reports/generic-range', {
           params: { plant: plantCode, from: fromDateStr, to: toDateStr },
           responseType: 'blob',
+          timeout: 300000,
         });
 
         const blob = new Blob([response.data], {
@@ -307,13 +308,13 @@ const ReportsPage = () => {
               min={startDate || undefined}
               max={(() => {
                 if (!startDate) return todayStr;
-                const maxRange = addDaysLocal(startDate, 30);
+                const maxRange = addDaysLocal(startDate, 365);
                 return maxRange && maxRange < todayStr ? maxRange : todayStr;
               })()}
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              Leave empty or same as Start Date for a single day. Max 31 days (one workbook, separate sheets per date).
+              Leave empty or same as Start Date for a single day. Max 1 year (one workbook, separate sheets per date).
             </p>
           </div>
         </div>
