@@ -51,7 +51,7 @@
     <g id="flask" transform="translate(48, 38)">
       <rect x="36" y="2" width="28" height="7" rx="3.5" fill="#0A2540" />
       <path d="M 41 8 L 41 24 L 16 85 C 13 92 18 99 26 99 L 74 99 C 82 99 87 92 84 85 L 59 24 L 59 8 Z" fill="#0A2540" />
-      <path d="M 45 10 L 45 25 L 22 83 C 20 88 24 93 30 93 L 70 93 C 76 93 80 88 78 83 L 55 25 L 55 10 Z" fill="#FFFFFF" />
+      <path d="M 45 10 L 45 25 L 22 83 C 20 88 24 93 30 93 L 70 93 C 76 93 80 88 78 83 L 55 25 L 55 10 Z" fill="none" />
       <path
         d="M 32 60 C 40 64 48 57 60 62 C 64 64 68 63 70 61 L 76 82 C 78 87 74 92 68 92 L 32 92 C 26 92 22 87 24 82 Z"
         fill="url(#liquid-grad)"
