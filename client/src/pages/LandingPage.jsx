@@ -135,15 +135,15 @@ const LandingPage = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
       </div>
 
-      {/* Top Corporate Navigation — Well-proportioned Brand Header */}
-      <header className="shrink-0 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-xs py-2 sm:py-2.5">
+      {/* Top Corporate Navigation — Fully Transparent Glass Header */}
+      <header className="shrink-0 bg-transparent py-2.5 sm:py-3">
         <div className="max-w-7xl mx-auto px-6 sm:px-10 flex items-center justify-between">
           {/* Quality Tracking System Brand Logo */}
           <div className="flex items-center">
             <img
               src="/qts-logo.svg"
               alt="Quality Tracking System"
-              className="h-14 sm:h-16 md:h-18 w-auto object-contain cursor-pointer transition-transform hover:scale-105"
+              className="h-14 sm:h-16 md:h-18 w-auto object-contain cursor-pointer transition-transform hover:scale-105 drop-shadow-xs"
               onClick={() => navigate('/')}
             />
           </div>
