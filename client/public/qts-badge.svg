@@ -50,7 +50,7 @@
     <path d="M 23 5 L 23 15 L 8 48 C 6 52 9 56 14 56 L 42 56 C 47 56 50 52 48 48 L 33 15 L 33 5 Z" fill="#0A2540" />
 
     <!-- Flask Inner Transparent Chamber -->
-    <path d="M 25 6 L 25 15 L 12 47 C 11 49 13 52 17 52 L 39 52 C 43 52 45 49 44 47 L 31 15 L 31 6 Z" fill="#FFFFFF" />
+    <path d="M 25 6 L 25 15 L 12 47 C 11 49 13 52 17 52 L 39 52 C 43 52 45 49 44 47 L 31 15 L 31 6 Z" fill="none" />
 
     <!-- Flask Liquid in Bottom -->
     <path
