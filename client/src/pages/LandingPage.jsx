@@ -135,9 +135,9 @@ const LandingPage = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-slate-50/50 to-white/70" />
       </div>
 
-      {/* Top Corporate Navigation — Fully Transparent Glass Header */}
-      <header className="shrink-0 bg-transparent py-2.5 sm:py-3">
-        <div className="max-w-7xl mx-auto px-6 sm:px-10 flex items-center justify-between">
+      {/* Top Corporate Navigation — Fully Transparent Header (Corner Positioned) */}
+      <header className="shrink-0 bg-transparent py-2.5 sm:py-3 px-4 sm:px-6 md:px-8">
+        <div className="w-full flex items-center justify-between">
           {/* Quality Tracking System Brand Logo */}
           <div className="flex items-center">
             <img
